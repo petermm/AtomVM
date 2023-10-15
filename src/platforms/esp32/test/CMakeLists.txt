@@ -49,6 +49,7 @@ set(HAVE_SOCKET 1 CACHE INTERNAL "Have symbol socket" FORCE)
 if (${IDF_TARGET} MATCHES "esp32s2|esp32c3|esp32h2")
     message("Disabling SMP as selected target only has one core")
     set(AVM_DISABLE_SMP YES FORCE)
+    set(HAVE_PLATFORM_ATOMIC_H ON)
 endif()
 
 project(atomvm-esp32-test)

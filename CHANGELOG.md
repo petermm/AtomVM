@@ -9,11 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `BOOTLOADER_OFFSET` for all current Esp32 models.
+- Added API to send messages from FreeRTOS tasks or pthreads, typically to
+easily support integration with Esp32 callbacks
 
 ### Fixed
 
 - `BOOTLOADER_OFFSET` was incorrect for Esp32-C6 and Esp32-S2.
 - Fixed a bug that would fail to set DHCP hostname in STA+AP mode on all ESP32 platforms.
+- Fixed Esp32 network driver
 
 ### Changed
 

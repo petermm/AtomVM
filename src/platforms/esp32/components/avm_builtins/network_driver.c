@@ -126,7 +126,7 @@ static void send_term(Heap *heap, struct ClientData *data, term t)
     term_put_tuple_element(msg, 1, t);
 
     // Pid ! {Ref, T}
-    port_send_message(data->global, term_from_local_process_id(data->owner_process_id), msg);
+    port_send_message_from_task(data->global, term_from_local_process_id(data->owner_process_id), msg);
 }
 
 static void send_got_ip(struct ClientData *data, esp_netif_ip_info_t *info)

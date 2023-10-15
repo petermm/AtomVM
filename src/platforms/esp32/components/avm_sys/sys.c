@@ -68,14 +68,6 @@
 
 #define TAG "sys"
 
-#ifndef AVM_NO_SMP
-#define SMP_MUTEX_LOCK(mtx) smp_mutex_lock(mtx)
-#define SMP_MUTEX_UNLOCK(mtx) smp_mutex_unlock(mtx)
-#else
-#define SMP_MUTEX_LOCK(mtx)
-#define SMP_MUTEX_UNLOCK(mtx)
-#endif
-
 static Context *port_driver_create_port(const char *port_name, GlobalContext *global, term opts);
 
 static void *select_thread_loop(void *);
@@ -140,7 +132,7 @@ static void receive_events(GlobalContext *glb, TickType_t wait_ticks)
             sender = event_source;
         }
 
-#ifndef AVM_NO_SMP
+#if !defined(AVM_NO_SMP) || defined(AVM_TASK_DRIVER_ENABLED)
         if (sender == CAST_FUNC_TO_VOID_PTR(sys_signal)) {
             // We've been signaled
             return;
@@ -167,13 +159,11 @@ void sys_poll_events(GlobalContext *glb, int timeout_ms)
     receive_events(glb, wait_ticks);
 }
 
-#ifndef AVM_NO_SMP
 void sys_signal(GlobalContext *glb)
 {
     void *queue_item = CAST_FUNC_TO_VOID_PTR(sys_signal);
     xQueueSendToBack(event_queue, &queue_item, 0);
 }
-#endif
 
 void sys_time(struct timespec *t)
 {
