@@ -237,7 +237,7 @@ static const AtomStringIntPair otp_socket_shutdown_direction_table[] = {
     SELECT_INT_DEFAULT(OtpSocketInvalidShutdownDirection)
 };
 
-#define DEFAULT_BUFFER_SIZE 512
+#define DEFAULT_BUFFER_SIZE 1024
 
 #ifndef MIN
 #define MIN(A, B) (((A) < (B)) ? (A) : (B))
