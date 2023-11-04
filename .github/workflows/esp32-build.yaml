@@ -71,10 +71,10 @@ jobs:
       if: matrix.idf-version != '5.1.1'
       run: |
         set -eu
-        QEMU_VER=esp-develop-20220919
-        QEMU_DIST=qemu-${QEMU_VER}.tar.bz2
-        QEMU_SHA256=f6565d3f0d1e463a63a7f81aec94cce62df662bd42fc7606de4b4418ed55f870
-        wget --no-verbose https://github.com/espressif/qemu/releases/download/${QEMU_VER}/${QEMU_DIST}
+        QEMU_VER=develop-8.1.2-20231017
+        QEMU_DIST=esp-qemu-xtensa-softmmu-${QEMU_VER}-x86_64-linux-gnu.tar.bz2
+        QEMU_SHA256=3f5a60b92ac10950c424d5494e91ae43e65dd2ba48b590050712adc9f40f6625
+        wget --no-verbose https://github.com/espressif/qemu/releases/download/esp-${QEMU_VER}/${QEMU_DIST}
         echo "${QEMU_SHA256} *${QEMU_DIST}" | sha256sum --check --strict -
         tar -xf ${QEMU_DIST} -C /opt
 
