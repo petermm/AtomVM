@@ -103,4 +103,4 @@ jobs:
         set -e
         . $IDF_PATH/export.sh
         export PATH=/opt/qemu/bin:${PATH}
-        pytest --flash_size 4MB --embedded-services=idf,qemu -s
+        pytest --flash_size=4MB --embedded-services=idf,qemu -s
