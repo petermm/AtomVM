@@ -65,7 +65,7 @@ jobs:
         DEBIAN_FRONTEND=noninteractive apt install -y -q \
             doxygen erlang-base erlang-dialyzer \
             libglib2.0-0 libpixman-1-0 \
-            gcc g++ zlib1g-dev libslirp
+            gcc g++ zlib1g-dev libslirp0
 
     - name: Install qemu binary from espressif/qemu
       if: matrix.idf-version != '5.1.1'
