@@ -25,7 +25,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../CMakeModules
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 # Options that make sense for this platform
-option(AVM_USE_32BIT_FLOAT "Use 32 bit floats." OFF)
+option(AVM_USE_32BIT_FLOAT "Use 32 bit floats." ON)
 option(AVM_VERBOSE_ABORT "Print module and line number on VM abort" OFF)
 option(AVM_CREATE_STACKTRACES "Create stacktraces" ON)
 option(AVM_NEWLIB_NANO "Use 'nano' newlib. Saves 46kB, no `long long` support" OFF)
@@ -79,6 +79,7 @@ if (NOT CMAKE_TOOLCHAIN_FILE)
     message(FATAL_ERROR "Cross compiling only. Please use -DCMAKE_TOOLCHAIN_FILE=cmake/arm-toolchain.cmake or use\
     your own toolchain file")
 endif ()
+mark_as_advanced(CMAKE_TOOLCHAIN_FILE)
 
 if ((NOT ${CMAKE_C_COMPILER_ID} STREQUAL "GNU") OR
     (NOT ${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU") OR
@@ -92,6 +93,9 @@ endif()
 if (NOT DEVICE)
     set(DEVICE stm32f407vgt6)
 endif ()
+
+# Include auto-device configuration
+include(cmake/atomvm_dev_config.cmake)
 
 # Include libopencm3
 include(cmake/libopencm3.cmake)

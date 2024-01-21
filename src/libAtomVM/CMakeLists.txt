@@ -24,6 +24,7 @@ project (libAtomVM)
 set(HEADER_FILES
     atom.h
     atomshashtable.h
+    atom_table.h
     avmpack.h
     bif.h
     bitstring.h
@@ -63,12 +64,13 @@ set(HEADER_FILES
     trace.h
     utils.h
     valueshashtable.h
-    ${CMAKE_CURRENT_BINARY_DIR}/version.h
+    ${CMAKE_CURRENT_BINARY_DIR}/avm_version.h
 )
 
 set(SOURCE_FILES
     atom.c
     atomshashtable.c
+    atom_table.c
     avmpack.c
     bif.c
     bitstring.c
@@ -95,13 +97,23 @@ set(SOURCE_FILES
     valueshashtable.c
 )
 
+option(AVM_PEDANTIC_WARNINGS "Pedantic compiler warnings" ON)
+if (AVM_PEDANTIC_WARNINGS)
+    set(MAYBE_PEDANTIC_FLAG "-pedantic")
+endif()
+
+option(AVM_WARNINGS_ARE_ERRORS "Error on warning" OFF)
+if (AVM_WARNINGS_ARE_ERRORS)
+    set(MAYBE_WERROR_FLAG "-Werror")
+endif()
+
 add_library(libAtomVM ${SOURCE_FILES} ${HEADER_FILES})
 target_include_directories(libAtomVM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(libAtomVM PUBLIC c_std_11)
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(libAtomVM PUBLIC -Wall -pedantic -Wextra -ggdb -Werror=incompatible-pointer-types)
+    target_compile_options(libAtomVM PUBLIC -Wall ${MAYBE_PEDANTIC_FLAG} ${MAYBE_WERROR_FLAG} -Wextra -ggdb -Werror=incompatible-pointer-types)
 elseif (CMAKE_C_COMPILER_ID MATCHES "Clang")
-    target_compile_options(libAtomVM PUBLIC -Wall --extra-warnings -Werror=incompatible-pointer-types)
+    target_compile_options(libAtomVM PUBLIC -Wall --extra-warnings -Werror=incompatible-pointer-types ${MAYBE_WERROR_FLAG})
 endif()
 
 # AtomVM options used in libAtomVM
@@ -226,10 +238,10 @@ else()
     set(ATOMVM_VERSION ${ATOMVM_BASE_VERSION})
 endif()
 
-# Add include to directory where version.h is generated so targets linking
+# Add include to directory where avm_version.h is generated so targets linking
 # libAtomVM can access it
 target_include_directories(libAtomVM PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/version.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/avm_version.h)
 
 if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Generic")
     target_link_libraries(libAtomVM PUBLIC libAtomVM${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR})

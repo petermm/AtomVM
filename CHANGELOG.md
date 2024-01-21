@@ -4,7 +4,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0-alpha.2] - Unreleased
+## [0.6.0-beta.0] - Unreleased
+
+### Added
+- Added `esp:get_default_mac/0` for retrieving the default MAC address on ESP32.
+- Added support for `pico` and `poci` as an alternative to `mosi` and `miso` for SPI
+- ESP32: Added support to SPI peripherals other than hspi and vspi
+- Added `gpio:set_int/4`, with the 4th parameter being the pid() or registered name of the process to receive interrupt messages
+
+### Changed
+
+- Shorten SPI config options, such as `sclk_io_num` -> `sclk`
+- Shorten I2C config options, such as `scl_io_num` -> `scl`
+- Shorten UART config options, such as `tx_pin` -> `tx`
+- Introduced support to non-integer peripheral names, `"i2c0"`, `"uart1"` (instead of just `0` and
+- `1`, which now they are deprecated)
+- New atom table, which uses less memory, has improved performances and better code.
+
+### Fixed
+
+- Fix several missing memory allocation checks in libAtomVM.
+- Fixed a possible memory leak in libAtomVM/module.c `module_destroy`.
+
+## [0.6.0-alpha.2] - 2023-12-10
 
 ### Fixed
 
@@ -12,6 +34,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed support for big endian CPUs (such as some MIPS CPUs).
 - Fixed STM32 not aborting when `AVM_ABORT()` is used
 - Fixed a bug that would leave the STM32 trapped in a loop on hard faults, rather than aborting
+- Fixed a bug that would make the VM to loop and failing to process selected fds on Linux
+- Fixed classes of exceptions in estdlib.
+- Fixed STM32 code that was hard coded to the default target device, now configured based on the `cmake -DDEVICE=` parameter
+- Fixed hard fault on STM32 durung malloc on boards with more than one bank of sram
+- Fixed invalid src_clk error on ESP-IDF >= 5.0
+- Fixed changed default to `AVM_USE_32BIT_FLOAT=on` for STM32 platform to enable use of single precision hardware FPU on F4/F7 devices.
+- Fixed a bug where emscripten `register_*_callback/1` functions would use x[1] as second argument
+- Fixed precision of integers used with timers which could yield to halts and wait times smaller than expected
+- Add support for ESP32-C6
+
+### Changed
+
+- Crypto functions on generic_unix platform now rely on MbedTLS instead of OpenSSL
+- Platform function providing time used by timers was changed from `sys_monotonic_millis` to `sys_monotonic_time_u64`, `sys_monotonic_time_u64_to_ms` and `sys_monotonic_time_ms_to_u64`.
+- Implement `atomvm:random/0` and `atomvm:rand_bytes/1` on top of `crypto:strong_rand_bytes/1` on
+  generic_unix, ESP32 and RP2040 platforms.
+- Performance improvements
 
 ### Added
 
@@ -21,6 +60,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New gpio driver for STM32 with nif and port support for read and write functions.
 - Added support for interrupts to STM32 GPIO port driver.
 - Added suppoprt for PicoW extra gpio pins (led) to the gpio driver.
+- Added support for `net:getaddrinfo/1,2`
+- Added minimal support for the OTP `ssl` interface.
+- Added support for `crypto:one_time/4,5` on Unix and Pico as well as for `crypto:hash/2` on Pico
+- Added ability to configure STM32 Nucleo boards onboard UART->USB-COM using the `-DBOARD=nucleo` cmake option
+- Added STM32 cmake option `-DAVM_CFG_CONSOLE=` to select a different uart peripheral for the system console
+- Added `crypto:strong_rand_bytes/1` using Mbed-TLS (only on generic_unix, ESP32 and RP2040
+  platforms)
+- Added support for setting the default receive buffer size for sockets via `socket:setopt/3`
+- Added support for pattern matching binaries containing 32 and 64 bit floating point values, but
+  only when aligned to byte boundaries (e.g. `<<0:4, F:32/float>> = Bin` is not supported).
+- Added experimental backend to `get_tcp` and `get_udp` based on the new `socket` interface
+- Added API for managing ESP32 watchdog (only on `esp-idf` >= v5.x)
+
+### Removed
+
+- OpenSSL support, Mbed-TLS is required instead.
 
 ## [0.6.0-alpha.1] - 2023-10-09
 

@@ -641,10 +641,10 @@ Use `atomvm:random/0` to generate a random unsigned 32-bit integer in the range 
     %% erlang
     RandomInteger = atomvm:random().
 
-Use `atomvm:random_bytes/1` to return a randomly populated binary of a specified size:
+Use `crypto:strong_rand_bytes/1` to return a randomly populated binary of a specified size:
 
     %% erlang
-    RandomBinary = erlang:random_bytes(32).
+    RandomBinary = crypto:strong_rand_bytes(32).
 
 Use `base64:encode/1` and `base64:decode/1` to encode to and decode from Base64 format.  The input value to these functions may be a binary or string.  The output value from these functions is an Erlang binary.
 
@@ -1159,16 +1159,16 @@ The AtomVM I2C implementation uses the AtomVM Port mechanism and must be initial
 
 | Key | Value Type | Required | Description |
 |-----|------------|----------|---|
-| `scl_io_num` | `integer()` | yes | I2C clock pin (SCL) |
-| `sda_io_num` | `integer()` | yes | I2C data pin (SDA) |
-| `i2c_clock_hz` | `integer()` | yes | I2C clock frequency (in hertz) |
-| `i2c_num` | `0 .. I2C_NUM_MAX - 1` | no (default: `0`) | I2C port number.  `I2C_NUM_MAX` is defined by the device SDK.  On ESP32, this value is 1. |
+| `scl` | `integer()` | yes | I2C clock pin (SCL) |
+| `sda` | `integer()` | yes | I2C data pin (SDA) |
+| `clock_speed_hz` | `integer()` | yes | I2C clock frequency (in hertz) |
+| `peripheral` | `string() | binary()` | no (platform dependent default) | I2C peripheral, such as `"i2c0"` |
 
 For example,
 
     %% erlang
     I2C = i2c:open([
-        {scl_io_num, 21}, {sda_io_num, 22}, {i2c_clock_hz, 40000}
+        {scl, 21}, {sda, 22}, {clock_speed_hz, 40000}
     ])
 
 Once the port is opened, you can use the returned `I2C` instance to read and write bytes to the attached device.
@@ -1220,11 +1220,11 @@ The AtomVM SPI implementation uses the AtomVM Port mechanism and must be initial
 
 The `bus_config` properties list contains the following entries:
 
-| Key | Value Type | Required | Description |
-|-----|------------|----------|---|
-| `miso_io_num` | `integer()` | yes | SPI leader-in, follower-out pin (MOSI) |
-| `mosi_io_num` | `integer()` | yes | SPI leader-out, follower-in pin (MISO) |
-| `sclk_io_num` | `integer()` | yes | SPI clock pin (SCLK) |
+| Key              | Value Type  | Required    | Description                                  |
+|------------------|-------------|-------------|----------------------------------------------|
+| `poci` (`miso`)  | `integer()` | yes         | SPI peripheral-out, controller-in pin (MOSI) |
+| `pico` (`mosi`)  | `integer()` | yes         | SPI peripheral-in, controller-out pin (MISO) |
+| `sclk`           | `integer()` | yes         | SPI clock pin (SCLK)                         |
 
 The `device_config` entry is a properties list containing entries for each device attached to the SPI Bus.  Each entry in this list contains the user-selected name (as an atom) of the device, followed by configuration for the named device.
 
@@ -1232,9 +1232,9 @@ Each device configuration is a properties list containing the following entries:
 
 | Key | Value Type | Required | Description |
 |-----|------------|----------|---|
-| `spi_clock_hz` | `integer()` | yes | SPI clock frequency (in hertz) |
+| `clock_speed_hz` | `integer()` | yes | SPI clock frequency (in hertz) |
 | `mode` | `0..3` | yes | SPI mode, indicating clock polarity (`CPOL`) and clock phase (`CPHA`).  Consult the SPI specification and data sheet for your device, for more information about how to control the behavior of the SPI clock. |
-| `spi_cs_io_num` | `integer()` | yes | SPI chip select pin (CS) |
+| `cs` | `integer()` | yes | SPI chip select pin (CS) |
 | `address_len_bits` | `0..64` | yes | number of bits in the address field of a read/write operation (for example, 8, if the transaction address field is a single byte) |
 | `command_len_bits` | `0..16` | default: 0 | number of bits in the command field of a read/write operation (for example, 8, if the transaction command field is a single byte) |
 
@@ -1243,21 +1243,21 @@ For example,
     %% erlang
     SPIConfig = [
         {bus_config, [
-            {miso_io_num, 19},
-            {mosi_io_num, 27},
-            {sclk_io_num, 5}
+            {miso, 19},
+            {mosi, 27},
+            {sclk, 5}
         ]},
         {device_config, [
             {my_device_1, [
-                {spi_clock_hz, 1000000},
+                {clock_speed_hz, 1000000},
                 {mode, 0},
-                {spi_cs_io_num, 18},
+                {cs, 18},
                 {address_len_bits, 8}
             ]}
             {my_device_2, [
-                {spi_clock_hz, 1000000},
+                {clock_speed_hz, 1000000},
                 {mode, 0},
-                {spi_cs_io_num, 15},
+                {cs, 15},
                 {address_len_bits, 8}
             ]}
         ]}
@@ -1804,12 +1804,14 @@ Currently, the following options are supported:
 |------------|--------------|-------------|
 | `{socket, reuseaddr}` | `boolean()` | Sets `SO_REUSEADDR` on the socket. |
 | `{socket, linger}` | `#{onoff => boolean(), linger => non_neg_integer()}` | Sets `SO_LINGER` on the socekt. |
+| `{otp, rcvbuf}` | `non_neg_integer()` | Sets the default buffer size (in bytes) on receive calls.  This value is only used if the `Length` parameter of the `socket:recv` family of functions has the value `0`; otherwise, the specified non-zero length in the `socket:recv` takes precendence.  Note that the OTP option value `default` is not currently supported.|
 
 For example:
 
     %% erlang
     ok = socket:setopt(Socket, {socket, reuseaddr}, true),
     ok = socket:setopt(Socket, {socket, linger}, #{onoff => true, linger => 0}),
+    ok = socket:setopt(Socket, {otp, rcvbuf}, 1024),
 
 ### UDP Socket Programming
 
@@ -1860,3 +1862,49 @@ For example:
     end
 
 Close a UDP socket just as you would a TCP socket, as described above.
+
+### Miscellaneous Networking APIs
+
+You can retrieve information about hostnames and services using the `net:getaddrinfo/1` and  `net:getaddrinfo/2` functions.  The return value is a list of maps each of which contains address information about the host, including its family (`inet`), protocol (`tcp` or `udp`), type (`stream` or `dgram`), and the address, currently an IPv4 tuple.
+
+> Note.  Currently, the `net:getaddrinfo/1,2` functions only supports reporting of IPv4 addresses.
+
+For example:
+
+    %% erlang
+    {ok, AddrInfos} = net:getaddrinfo("www.atomvm.net"),
+
+    lists:foreach(
+        fun(AddrInfo) ->
+            #{
+                family := Family,
+                protocol := Protocol,
+                type := Type,
+                address := Address
+            } = AddrInfo,
+
+            io:format("family: ~p prototcol: ~p type: ~p address: ~p", [Family, Protocol, Type, Address])
+
+        end,
+        AddrInfos
+    ),
+
+The `host` parameter can be a domain name (typically) or a dotted pair IPv4 address.
+
+The returned map contains the network family (currently, only `inet` is supported), the protocol, type, and address of the host.
+
+The address is itself a map, containing the family, port and IPv4 address of the requested host, e.g.,
+
+    #{family => inet, port => 0, addr => {192, 168, 212, 153}}
+
+> Note.  The [OTP documentation](https://www.erlang.org/doc/man/net#type-address_info) states that the address is returned under the `address` key in the address info map.  However, OTP appears to use `addr` as the key.  For compatibility with OTP 22 ff., AtomVM supports both the `address` and `addr` keys in this map (they reference the same inner map).
+
+If you want to narrow the information you get back to a specific service type, you can specify a service name or port number (as a string value) as the second parameter:
+
+    %% erlang
+    {ok, AddrInfos} = net:getaddrinfo("www.atomvm.net", "https"),
+    ...
+
+Service names are well-known identifiers on the internet, but they may vary from operating system to operating system.  See the `services(3)` man pages for more information.
+
+> Note.  Narrowing results via the service parameter is not supported on all platforms.  In the case where it is not supported, AtomVM will resort to retrying the request without the service parameter.

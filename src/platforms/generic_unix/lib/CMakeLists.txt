@@ -26,6 +26,7 @@ set(HEADER_FILES
     generic_unix_sys.h
     mapped_file.h
     platform_defaultatoms.h
+    ../../../libAtomVM/otp_net.h
     ../../../libAtomVM/otp_socket.h
 )
 
@@ -37,6 +38,8 @@ set(SOURCE_FILES
     smp.c
     socket_driver.c
     sys.c
+    ../../../libAtomVM/inet.c
+    ../../../libAtomVM/otp_net.c
     ../../../libAtomVM/otp_socket.c
 )
 
@@ -53,17 +56,24 @@ endif()
 
 include(DefineIfExists)
 define_if_function_exists(libAtomVM${PLATFORM_LIB_SUFFIX} signal "signal.h" PRIVATE HAVE_SIGNAL)
+define_if_function_exists(libAtomVM${PLATFORM_LIB_SUFFIX} getservbyname "netdb.h" PRIVATE HAVE_SERVBYNAME)
 
 target_link_libraries(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC libAtomVM)
 include_directories(${CMAKE_SOURCE_DIR}/src/platforms/generic_unix/lib)
 
-find_package(OpenSSL)
-if (${OPENSSL_FOUND} STREQUAL TRUE)
-    target_include_directories(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC ${OPENSSL_INCLUDE_DIR})
-    target_compile_definitions(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC ATOMVM_HAS_OPENSSL)
-    target_link_libraries(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC ${OPENSSL_CRYPTO_LIBRARY})
+include(MbedTLS)
+if (MbedTLS_FOUND)
+    target_link_libraries(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC MbedTLS::mbedtls)
+    target_compile_definitions(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC ATOMVM_HAS_MBEDTLS)
+    target_sources(libAtomVM${PLATFORM_LIB_SUFFIX}
+        PRIVATE
+        ../../../libAtomVM/otp_crypto.c
+        ../../../libAtomVM/otp_crypto.h
+        ../../../libAtomVM/otp_ssl.c
+        ../../../libAtomVM/otp_ssl.h
+    )
 else()
-    message("WARNING:  Some crypto operations will not be supported.")
+    message("WARNING:  Could NOT find MbedTLS, ssl and crypto modules will not be supported. Install MbedTLS 3.x or try to set MBEDTLS_ROOT_DIR to installation prefix of MbedTLS 2.x")
 endif()
 
 # enable by default dynamic loading on unix
@@ -86,6 +96,11 @@ check_symbol_exists(EVFILT_USER "sys/event.h" HAVE_EVFILT_USER)
 check_symbol_exists(NOTE_TRIGGER "sys/event.h" HAVE_NOTE_TRIGGER)
 if (HAVE_KQUEUE AND HAVE_EVFILT_USER AND HAVE_NOTE_TRIGGER)
     target_compile_definitions(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC HAVE_KQUEUE)
+endif()
+# pick one as an example
+check_symbol_exists(EAI_BADHINTS "netdb.h" HAVE_EXTENDED_EAI_ERRNO)
+if (HAVE_EXTENDED_EAI_ERRNO)
+    target_compile_definitions(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC HAVE_EXTENDED_EAI_ERRNO)
 endif()
 
 if (COVERAGE)

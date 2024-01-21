@@ -47,7 +47,7 @@ format(Format, Args) ->
         true ->
             interleave(FormatTokens, Instr, Args, []);
         false ->
-            throw(badarg)
+            error(badarg)
     end.
 
 %%
@@ -145,7 +145,7 @@ parse_format_control([$+ | Rest], Format) -> {Format#format{control = '+'}, Rest
 parse_format_control([$e | Rest], Format) -> {Format#format{control = e}, Rest};
 parse_format_control([$f | Rest], Format) -> {Format#format{control = f}, Rest};
 parse_format_control([$g | Rest], Format) -> {Format#format{control = g}, Rest};
-parse_format_control(_String, _Format) -> throw({badarg, _String}).
+parse_format_control(_String, _Format) -> error({badarg, _String}).
 
 %% @private
 parse_integer([$- | Tail]) ->
@@ -217,8 +217,14 @@ format_string(Format, T) ->
     format_spw(Format, T).
 
 %% @private
-format_spw(_Format, T) when is_atom(T) ->
+format_spw(#format{control = s}, T) when is_atom(T) ->
     erlang:atom_to_list(T);
+format_spw(_Format, T) when is_atom(T) ->
+    AtomStr = erlang:atom_to_list(T),
+    case atom_requires_quotes(T, AtomStr) of
+        false -> AtomStr;
+        true -> [$', AtomStr, $']
+    end;
 format_spw(#format{control = s, mod = t} = Format, T) when is_binary(T) ->
     case unicode:characters_to_list(T, utf8) of
         L when is_list(L) -> L;
@@ -251,8 +257,8 @@ format_spw(#format{control = Control, mod = undefined}, T) when is_binary(T) ->
 format_spw(#format{control = s, mod = Mod}, L) when is_list(L) ->
     Flatten = lists:flatten(L),
     case {Mod, test_string_class(Flatten)} of
-        {_, not_a_string} -> throw(badarg);
-        {undefined, unicode} -> throw(badarg);
+        {_, not_a_string} -> error(badarg);
+        {undefined, unicode} -> error(badarg);
         {_, _} -> Flatten
     end;
 format_spw(#format{control = p} = Format, L) when is_list(L) ->
@@ -263,7 +269,7 @@ format_spw(#format{control = p} = Format, L) when is_list(L) ->
 format_spw(#format{control = w} = Format, L) when is_list(L) ->
     [$[, lists:join($,, [format_spw(Format, E) || E <- L]), $]];
 format_spw(#format{control = s}, _) ->
-    throw(badarg);
+    error(badarg);
 format_spw(_Format, T) when is_integer(T) ->
     erlang:integer_to_list(T);
 format_spw(_Format, T) when is_float(T) ->
@@ -286,6 +292,55 @@ format_spw(Format, T) when is_map(T) ->
         ]),
         $}
     ].
+
+%% We will probably need to add 'maybe' with OTP 27
+-define(RESERVED_KEYWORDS, [
+    'after',
+    'and',
+    'andalso',
+    'band',
+    'begin',
+    'bnot',
+    'bor',
+    'bsl',
+    'bsr',
+    'bxor',
+    'case',
+    'catch',
+    'cond',
+    'div',
+    'end',
+    'fun',
+    'if',
+    'let',
+    'not',
+    'of',
+    'or',
+    'orelse',
+    'receive',
+    'rem',
+    'try',
+    'when',
+    'xor'
+]).
+
+%% @private
+atom_requires_quotes(Atom, AtomStr) ->
+    case lists:member(Atom, ?RESERVED_KEYWORDS) of
+        true -> true;
+        false -> atom_requires_quotes0(AtomStr)
+    end.
+
+atom_requires_quotes0([C | _T]) when C < $a orelse C > $z -> true;
+atom_requires_quotes0([_C | T]) -> atom_requires_quotes1(T).
+
+atom_requires_quotes1([]) -> false;
+atom_requires_quotes1([$@ | T]) -> atom_requires_quotes1(T);
+atom_requires_quotes1([$_ | T]) -> atom_requires_quotes1(T);
+atom_requires_quotes1([C | T]) when C >= $A andalso C =< $Z -> atom_requires_quotes1(T);
+atom_requires_quotes1([C | T]) when C >= $0 andalso C =< $9 -> atom_requires_quotes1(T);
+atom_requires_quotes1([C | T]) when C >= $a andalso C =< $z -> atom_requires_quotes1(T);
+atom_requires_quotes1(_) -> true.
 
 %% @private
 format_integer(#format{control = C, precision = Precision0}, T0) when
@@ -317,7 +372,7 @@ format_integer(#format{control = 'B', precision = Base}, T) when is_integer(T) -
 format_integer(#format{control = b, precision = Base}, T) when is_integer(T) ->
     string:to_lower(integer_to_list(T, Base));
 format_integer(_Format, _) ->
-    throw(badarg).
+    error(badarg).
 
 %% @private
 format_float(#format{control = f, precision = undefined}, T) when is_float(T) ->
@@ -341,7 +396,7 @@ format_float(#format{control = C, precision = Precision}, T) when
 ->
     format_scientific(T, Precision, 0);
 format_float(_Format, _) ->
-    throw(badarg).
+    error(badarg).
 
 %% @private
 format_scientific(T, Precision, E) when (T < 1 andalso T > 0) orelse (T > -1 andalso T < 0) ->
@@ -366,7 +421,7 @@ format_char(#format{precision = Precision} = Format, T) when Precision =/= undef
     [Ch] = format_char(Format#format{field_width = undefined, precision = undefined}, T),
     lists:duplicate(Precision, Ch);
 format_char(_, _) ->
-    throw(badarg).
+    error(badarg).
 
 %% @private
 %% String classes:

@@ -9,7 +9,9 @@ name: Build and Test on Other Architectures
 on:
   push:
     paths-ignore:
+      - 'src/platforms/emscripten/**'
       - 'src/platforms/esp32/**'
+      - 'src/platforms/rp2040/**'
       - 'src/platforms/stm32/**'
       - 'doc/**'
       - 'LICENSES/**'
@@ -17,7 +19,9 @@ on:
       - '*.md'
   pull_request:
     paths-ignore:
+      - 'src/platforms/emscripten/**'
       - 'src/platforms/esp32/**'
+      - 'src/platforms/rp2040/**'
       - 'src/platforms/stm32/**'
       - 'doc/**'
       - 'LICENSES/**'
@@ -98,23 +102,26 @@ jobs:
             apt update &&
             apt install -y -t stretch-backports-sloppy libarchive13 &&
             apt install -y -t stretch-backports cmake &&
-            apt install -y file gcc g++ binutils make doxygen gperf zlib1g-dev libssl-dev
+            apt install -y file gcc g++ binutils make doxygen gperf zlib1g-dev libmbedtls-dev
 
         - arch: "arm32v7"
           platform: "arm/v7"
           tag: "bullseye"
           cflags: "-mcpu=cortex-a7 -mfloat-abi=hard -O2 -mthumb -mthumb-interwork"
+          cmake_opts: "-DAVM_WARNINGS_ARE_ERRORS=ON"
 
         - arch: "arm64v8"
           platform: "arm64/v8"
           tag: "bullseye"
           cflags: "-O2"
+          cmake_opts: "-DAVM_WARNINGS_ARE_ERRORS=ON"
 
         # Required for testing big endian archs
         - arch: "s390x"
           platform: "s390x"
           tag: "bullseye"
           cflags: "-O2"
+          cmake_opts: "-DAVM_WARNINGS_ARE_ERRORS=ON"
 
     steps:
     - name: Checkout repo
@@ -148,7 +155,7 @@ jobs:
             ${{ matrix.install_deps }}
         else
             apt update &&
-            apt install -y file gcc g++ binutils cmake make doxygen gperf zlib1g-dev libssl-dev
+            apt install -y file gcc g++ binutils cmake make doxygen gperf zlib1g-dev libmbedtls-dev
         fi &&
         file /bin/bash &&
         uname -a &&

@@ -17,6 +17,9 @@
  *
  * SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
  */
+#include <errno.h>
+#include <malloc.h>
+#include <stdint.h>
 #include <time.h>
 
 #include <avmpack.h>
@@ -36,9 +39,53 @@
 #include "stm_sys.h"
 
 #define TAG "sys"
+#define RESERVE_STACK_SIZE 4096U
+
+static Context *port_driver_create_port(const char *port_name, GlobalContext *global, term opts);
 
 struct PortDriverDefListItem *port_driver_list;
 struct NifCollectionDefListItem *nif_collection_list;
+
+/* These functions are needed to fix a hard fault when using malloc in devices with sram spanning
+ * multiple chips
+ */
+#pragma weak local_heap_setup = __local_ram
+
+/* these are defined by the linker script */
+extern uint8_t _ebss, _stack;
+
+static uint8_t *_cur_brk = NULL;
+static uint8_t *_heap_end = NULL;
+
+/*
+ * If not overridden, this puts the heap into the left
+ * over ram between the BSS section and the stack while
+ * preserving RESERVE_STACK_SIZE bytes for the stack itself.
+ * This may be overridden by defining the function
+ * `local_heap_setup` (exported in `stm_sys.h`).
+ */
+static void __local_ram(uint8_t **start, uint8_t **end)
+{
+    *start = &_ebss;
+    *end = (uint8_t *) (((uintptr_t) &_stack - RESERVE_STACK_SIZE));
+}
+
+void *_sbrk_r(struct _reent *reent, ptrdiff_t diff)
+{
+    uint8_t *_old_brk;
+
+    if (_heap_end == NULL) {
+        local_heap_setup(&_cur_brk, &_heap_end);
+    }
+
+    _old_brk = _cur_brk;
+    if (_cur_brk + diff > _heap_end) {
+        reent->_errno = ENOMEM;
+        return (void *) -1;
+    }
+    _cur_brk += diff;
+    return _old_brk;
+}
 
 // Monotonically increasing number of milliseconds from reset
 static volatile uint64_t system_millis;
@@ -51,14 +98,9 @@ void sys_tick_handler()
 
 static inline void sys_clock_gettime(struct timespec *t)
 {
-    uint64_t now = sys_monotonic_millis();
+    uint64_t now = sys_monotonic_time_u64();
     t->tv_sec = (time_t) now / 1000;
     t->tv_nsec = ((int32_t) now % 1000) * 1000000;
-}
-
-static int32_t timespec_diff_to_ms(struct timespec *timespec1, struct timespec *timespec2)
-{
-    return (int32_t) ((timespec1->tv_sec - timespec2->tv_sec) * 1000 + (timespec1->tv_nsec - timespec2->tv_nsec) / 1000000);
 }
 
 /* TODO: Needed because `defaultatoms_init` in libAtomVM/defaultatoms.c calls this function.
@@ -73,7 +115,7 @@ void platform_defaultatoms_init(GlobalContext *glb)
 void sys_enable_core_periph_clocks()
 {
     uint32_t list[] = GPIO_CLOCK_LIST;
-    for (int i = 0; i < sizeof(list) / sizeof(list[0]); i++) {
+    for (size_t i = 0; i < sizeof(list) / sizeof(list[0]); i++) {
         rcc_periph_clock_enable((enum rcc_periph_clken) list[i]);
     }
 #ifndef AVM_DISABLE_GPIO_PORT_DRIVER
@@ -131,6 +173,10 @@ bool sys_unlock_pin(GlobalContext *glb, uint32_t gpio_bank, uint16_t pin_num)
 void sys_init_platform(GlobalContext *glb)
 {
     struct STM32PlatformData *platform = malloc(sizeof(struct STM32PlatformData));
+    if (IS_NULL_PTR(platform)) {
+        AVM_LOGE(TAG, "Out of memory!");
+        AVM_ABORT();
+    }
     glb->platform_data = platform;
     list_init(&platform->locked_pins);
 }
@@ -175,14 +221,26 @@ void sys_monotonic_time(struct timespec *t)
     sys_clock_gettime(t);
 }
 
-uint64_t sys_monotonic_millis()
+uint64_t sys_monotonic_time_u64()
 {
     return system_millis;
 }
 
-enum OpenAVMResult sys_open_avm_from_file(
-    GlobalContext *global, const char *path, struct AVMPackData **data)
+uint64_t sys_monotonic_time_ms_to_u64(uint64_t ms)
 {
+    return ms;
+}
+
+uint64_t sys_monotonic_time_u64_to_ms(uint64_t t)
+{
+    return t;
+}
+
+enum OpenAVMResult sys_open_avm_from_file(GlobalContext *global, const char *path, struct AVMPackData **data)
+{
+    UNUSED(global);
+    UNUSED(path);
+    UNUSED(data);
     TRACE("sys_open_avm_from_file: Going to open: %s\n", path);
 
     // TODO
@@ -192,6 +250,8 @@ enum OpenAVMResult sys_open_avm_from_file(
 
 Module *sys_load_module_from_file(GlobalContext *global, const char *path)
 {
+    UNUSED(global);
+    UNUSED(path);
     // TODO
     return NULL;
 }
@@ -235,6 +295,8 @@ Context *sys_create_port(GlobalContext *glb, const char *driver_name, term opts)
 
 term sys_get_info(Context *ctx, term key)
 {
+    UNUSED(ctx);
+    UNUSED(key);
     return UNDEFINED_ATOM;
 }
 

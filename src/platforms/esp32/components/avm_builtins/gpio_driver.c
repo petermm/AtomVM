@@ -32,7 +32,6 @@
 #include "atom.h"
 #include "bif.h"
 #include "context.h"
-#include "scheduler.h"
 #include "debug.h"
 #include "defaultatoms.h"
 #include "globalcontext.h"
@@ -41,6 +40,8 @@
 #include "module.h"
 #include "nifs.h"
 #include "platform_defaultatoms.h"
+#include "port.h"
+#include "scheduler.h"
 #include "term.h"
 #include "utils.h"
 
@@ -132,6 +133,8 @@ struct GPIOData
 {
     struct ListHead gpio_listeners;
 };
+
+/* TODO: Change error returns to {error, Reason} (See: https://github.com/atomvm/AtomVM/issues/894) */
 
 static inline term gpio_set_pin_mode(Context *ctx, term gpio_num_term, term mode_term)
 {
@@ -252,8 +255,7 @@ Context *gpio_driver_create_port(GlobalContext *global, term opts)
 static term gpiodriver_close(Context *ctx)
 {
     GlobalContext *glb = ctx->global;
-    struct AtomsHashTable *htable = glb->atoms_table;
-    int gpio_atom_index = atomshashtable_get_value(htable, gpio_atom, ULONG_MAX);
+    int gpio_atom_index = atom_table_ensure_atom(glb->atom_table, gpio_atom, AtomTableNoOpts);
     if (UNLIKELY(!globalcontext_get_registered_process(glb, gpio_atom_index))) {
         return ERROR_ATOM;
     }
@@ -343,16 +345,38 @@ static bool gpiodriver_is_gpio_attached(struct GPIOData *gpio_data, int gpio_num
 static term gpiodriver_set_int(Context *ctx, int32_t target_pid, term cmd)
 {
     GlobalContext *glb = ctx->global;
+    int32_t target_local_pid;
 
     struct GPIOData *gpio_data = ctx->platform_data;
 
     int32_t gpio_num = term_to_int32(term_get_tuple_element(cmd, 1));
     term trigger = term_get_tuple_element(cmd, 2);
+    if (term_get_tuple_arity(cmd) == 4) {
+        term pid = term_get_tuple_element(cmd, 3);
+        if (UNLIKELY(!term_is_pid(pid) && !term_is_atom(pid))) {
+            ESP_LOGE(TAG, "Invalid listener parameter, must be a pid() or registered process!");
+            return ERROR_ATOM;
+        }
+        if (term_is_pid(pid)) {
+            target_local_pid = term_to_local_process_id(pid);
+        } else {
+            int pid_atom_index = term_to_atom_index(pid);
+            int32_t registered_process = (int32_t) globalcontext_get_registered_process(ctx->global, pid_atom_index);
+            if (UNLIKELY(registered_process == 0)) {
+                ESP_LOGE(TAG, "Invalid listener parameter, atom() is not a registered process name!");
+                return ERROR_ATOM;
+            }
+            target_local_pid = registered_process;
+        }
+    } else {
+        target_local_pid = target_pid;
+    }
 
     if (gpiodriver_is_gpio_attached(gpio_data, gpio_num)) {
         return ERROR_ATOM;
     }
 
+    /* TODO: GPIO specific atoms should be removed from platform_defaultatoms and constructed within this driver */
     gpio_int_type_t interrupt_type;
     switch (trigger) {
         case NONE_ATOM:
@@ -397,7 +421,7 @@ static term gpiodriver_set_int(Context *ctx, int32_t target_pid, term cmd)
     }
     list_append(&gpio_data->gpio_listeners, &data->gpio_listener_list_head);
     data->gpio = gpio_num;
-    data->target_local_pid = target_pid;
+    data->target_local_pid = target_local_pid;
     sys_register_listener(glb, &data->listener);
     data->listener.sender = data;
     data->listener.handler = gpio_interrupt_callback;
@@ -454,35 +478,39 @@ static term create_pair(Context *ctx, term term1, term term2)
 static NativeHandlerResult consume_gpio_mailbox(Context *ctx)
 {
     Message *message = mailbox_first(&ctx->mailbox);
-    term msg = message->message;
-    term pid = term_get_tuple_element(msg, 0);
-    term req = term_get_tuple_element(msg, 2);
-    term cmd_term = term_get_tuple_element(req, 0);
+    GenMessage gen_message;
+    if (UNLIKELY(port_parse_gen_message(message->message, &gen_message) != GenCallMessage)) {
+        ESP_LOGW(TAG, "Received invalid message.");
+        mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+        return NativeContinue;
+    }
 
-    int local_process_id = term_to_local_process_id(pid);
+    term cmd_term = term_get_tuple_element(gen_message.req, 0);
+
+    int local_process_id = term_to_local_process_id(gen_message.pid);
 
     term ret;
 
     enum gpio_cmd cmd = interop_atom_term_select_int(gpio_cmd_table, cmd_term, ctx->global);
     switch (cmd) {
         case GPIOSetLevelCmd:
-            ret = gpiodriver_set_level(ctx, req);
+            ret = gpiodriver_set_level(ctx, gen_message.req);
             break;
 
         case GPIOSetDirectionCmd:
-            ret = gpiodriver_set_direction(ctx, req);
+            ret = gpiodriver_set_direction(ctx, gen_message.req);
             break;
 
         case GPIOReadCmd:
-            ret = gpiodriver_read(req);
+            ret = gpiodriver_read(gen_message.req);
             break;
 
         case GPIOSetIntCmd:
-            ret = gpiodriver_set_int(ctx, local_process_id, req);
+            ret = gpiodriver_set_int(ctx, local_process_id, gen_message.req);
             break;
 
         case GPIORemoveIntCmd:
-            ret = gpiodriver_remove_int(ctx, req);
+            ret = gpiodriver_remove_int(ctx, gen_message.req);
             break;
 
         case GPIOCloseCmd:
@@ -498,8 +526,7 @@ static NativeHandlerResult consume_gpio_mailbox(Context *ctx)
     if (UNLIKELY(memory_ensure_free_with_roots(ctx, 3, 1, &ret, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
         ret_msg = OUT_OF_MEMORY_ATOM;
     } else {
-        term ref = term_get_tuple_element(msg, 1);
-        ret_msg = create_pair(ctx, ref, ret);
+        ret_msg = create_pair(ctx, gen_message.ref, ret);
     }
 
     globalcontext_send_message(ctx->global, local_process_id, ret_msg);
@@ -522,6 +549,8 @@ REGISTER_PORT_DRIVER(gpio, gpio_driver_init, NULL, gpio_driver_create_port)
 //
 
 #ifdef CONFIG_AVM_ENABLE_GPIO_NIFS
+
+/* TODO: in the case of {error, Return} we should RAISE_ERROR(Reason) */
 
 static term nif_gpio_set_pin_mode(Context *ctx, int argc, term argv[])
 {
@@ -551,6 +580,7 @@ static term nif_gpio_hold_dis(Context *ctx, int argc, term argv[])
     return hold_dis(argv[0]);
 }
 
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
 static term nif_gpio_deep_sleep_hold_en(Context *ctx, int argc, term argv[])
 {
     UNUSED(ctx);
@@ -570,6 +600,7 @@ static term nif_gpio_deep_sleep_hold_dis(Context *ctx, int argc, term argv[])
     gpio_deep_sleep_hold_dis();
     return OK_ATOM;
 }
+#endif
 
 static term nif_gpio_digital_write(Context *ctx, int argc, term argv[])
 {
@@ -605,6 +636,7 @@ static const struct Nif gpio_hold_dis_nif =
     .nif_ptr = nif_gpio_hold_dis
 };
 
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
 static const struct Nif gpio_deep_sleep_hold_en_nif =
 {
     .base.type = NIFFunctionType,
@@ -616,6 +648,7 @@ static const struct Nif gpio_deep_sleep_hold_dis_nif =
     .base.type = NIFFunctionType,
     .nif_ptr = nif_gpio_deep_sleep_hold_dis
 };
+#endif
 
 static const struct Nif gpio_digital_write_nif =
 {
@@ -654,6 +687,7 @@ const struct Nif *gpio_nif_get_nif(const char *nifname)
         return &gpio_hold_dis_nif;
     }
 
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
     if (strcmp("gpio:deep_sleep_hold_en/0", nifname) == 0 || strcmp("Elixir.GPIO:deep_sleep_hold_en/0", nifname) == 0) {
         TRACE("Resolved platform nif %s ...\n", nifname);
         return &gpio_deep_sleep_hold_en_nif;
@@ -663,6 +697,7 @@ const struct Nif *gpio_nif_get_nif(const char *nifname)
         TRACE("Resolved platform nif %s ...\n", nifname);
         return &gpio_deep_sleep_hold_dis_nif;
     }
+#endif
 
     if (strcmp("gpio:digital_write/2", nifname) == 0) {
         TRACE("Resolved platform nif %s ...\n", nifname);

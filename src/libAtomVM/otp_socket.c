@@ -23,6 +23,7 @@
 #include <dictionary.h>
 #include <erl_nif_priv.h>
 #include <globalcontext.h>
+#include <inet.h>
 #include <interop.h>
 #include <list.h>
 #include <mailbox.h>
@@ -148,6 +149,7 @@ struct SocketResource
     uint64_t ref_ticks;
     int32_t selecting_process_id;
     ErlNifMonitor selecting_process_monitor;
+    size_t buf_size;
 };
 #elif OTP_SOCKET_LWIP
 struct SocketResource
@@ -165,15 +167,19 @@ struct SocketResource
     int linger_sec;
     size_t pos;
     struct ListHead received_list;
+    size_t buf_size;
 };
 #endif
 
 static const char *const addr_atom = ATOM_STR("\x4", "addr");
 static const char *const any_atom = ATOM_STR("\x3", "any");
+static const char *const invalid_option_atom = ATOM_STR("\xE", "invalid_option");
+static const char *const invalid_value_atom = ATOM_STR("\xD", "invalid_value");
 static const char *const linger_atom = ATOM_STR("\x6", "linger");
 static const char *const loopback_atom = ATOM_STR("\x8", "loopback");
 static const char *const onoff_atom = ATOM_STR("\x5", "onoff");
 static const char *const port_atom = ATOM_STR("\x4", "port");
+static const char *const rcvbuf_atom = ATOM_STR("\x6", "rcvbuf");
 static const char *const reuseaddr_atom = ATOM_STR("\x9", "reuseaddr");
 
 #define CLOSED_FD 0
@@ -182,45 +188,6 @@ static const char *const reuseaddr_atom = ATOM_STR("\x9", "reuseaddr");
 #define CLOSE_INTERNAL_ATOM globalcontext_make_atom(global, close_internal_atom)
 #define ACCEPT_ATOM globalcontext_make_atom(global, accept_atom)
 #define RECV_ATOM globalcontext_make_atom(global, recv_atom)
-
-enum otp_socket_domain
-{
-    OtpSocketInvalidDomain = 0,
-    OtpSocketInetDomain
-};
-
-static const AtomStringIntPair otp_socket_domain_table[] = {
-    { ATOM_STR("\x4", "inet"), OtpSocketInetDomain },
-    SELECT_INT_DEFAULT(OtpSocketInvalidDomain)
-};
-
-enum otp_socket_type
-{
-    OtpSocketInvalidType = 0,
-    OtpSocketStreamType,
-    OtpSocketDgramType
-};
-
-static const AtomStringIntPair otp_socket_type_table[] = {
-    { ATOM_STR("\x6", "stream"), OtpSocketStreamType },
-    { ATOM_STR("\x5", "dgram"), OtpSocketDgramType },
-    SELECT_INT_DEFAULT(OtpSocketInvalidType)
-};
-
-enum otp_socket_protocol
-{
-    OtpSocketInvalidProtocol = 0,
-    OtpSocketIpProtocol,
-    OtpSocketTcpProtocol,
-    OtpSocketUdpProtocol
-};
-
-static const AtomStringIntPair otp_socket_protocol_table[] = {
-    { ATOM_STR("\x2", "ip"), OtpSocketIpProtocol },
-    { ATOM_STR("\x3", "tcp"), OtpSocketTcpProtocol },
-    { ATOM_STR("\x3", "udp"), OtpSocketUdpProtocol },
-    SELECT_INT_DEFAULT(OtpSocketInvalidProtocol)
-};
 
 enum otp_socket_shutdown_direction
 {
@@ -237,7 +204,21 @@ static const AtomStringIntPair otp_socket_shutdown_direction_table[] = {
     SELECT_INT_DEFAULT(OtpSocketInvalidShutdownDirection)
 };
 
-#define DEFAULT_BUFFER_SIZE 2048
+enum otp_socket_setopt_level
+{
+    OtpSocketInvalidSetoptLevel = 0,
+    OtpSocketSetoptLevelSocket,
+    OtpSocketSetoptLevelOTP
+};
+
+static const AtomStringIntPair otp_socket_setopt_level_table[] = {
+    { ATOM_STR("\x6", "socket"), OtpSocketSetoptLevelSocket },
+    { ATOM_STR("\x3", "otp"), OtpSocketSetoptLevelOTP },
+    SELECT_INT_DEFAULT(OtpSocketInvalidSetoptLevel)
+};
+
+#define DEFAULT_BUFFER_SIZE 512
+
 #ifndef MIN
 #define MIN(A, B) (((A) < (B)) ? (A) : (B))
 #endif
@@ -390,33 +371,14 @@ void otp_socket_init(GlobalContext *global)
 // socket operations
 //
 
-static uint32_t socket_tuple_to_addr(term addr_tuple)
-{
-    return ((term_to_int32(term_get_tuple_element(addr_tuple, 0)) & 0xFF) << 24)
-        | ((term_to_int32(term_get_tuple_element(addr_tuple, 1)) & 0xFF) << 16)
-        | ((term_to_int32(term_get_tuple_element(addr_tuple, 2)) & 0xFF) << 8)
-        | (term_to_int32(term_get_tuple_element(addr_tuple, 3)) & 0xFF);
-}
-
-static term socket_tuple_from_addr(Context *ctx, uint32_t addr)
-{
-    term terms[4];
-    terms[0] = term_from_int32((addr >> 24) & 0xFF);
-    terms[1] = term_from_int32((addr >> 16) & 0xFF);
-    terms[2] = term_from_int32((addr >> 8) & 0xFF);
-    terms[3] = term_from_int32(addr & 0xFF);
-
-    return port_create_tuple_n(ctx, 4, terms);
-}
-
 static inline int get_domain(GlobalContext *global, term domain_term, bool *ok)
 {
     *ok = true;
 
-    int val = interop_atom_term_select_int(otp_socket_domain_table, domain_term, global);
+    int val = inet_atom_to_domain(domain_term, global);
     switch (val) {
 
-        case OtpSocketInetDomain:
+        case InetDomain:
             return PF_INET;
 
         default:
@@ -430,13 +392,13 @@ static inline int get_type(GlobalContext *global, term type_term, bool *ok)
 {
     *ok = true;
 
-    int val = interop_atom_term_select_int(otp_socket_type_table, type_term, global);
+    int val = inet_atom_to_type(type_term, global);
     switch (val) {
 
-        case OtpSocketStreamType:
+        case InetStreamType:
             return SOCK_STREAM;
 
-        case OtpSocketDgramType:
+        case InetDgramType:
             return SOCK_DGRAM;
 
         default:
@@ -450,16 +412,16 @@ static inline int get_protocol(GlobalContext *global, term protocol_term, bool *
 {
     *ok = true;
 
-    int val = interop_atom_term_select_int(otp_socket_protocol_table, protocol_term, global);
+    int val = inet_atom_to_protocol(protocol_term, global);
     switch (val) {
 
-        case OtpSocketIpProtocol:
+        case InetIpProtocol:
             return IPPROTO_IP;
 
-        case OtpSocketTcpProtocol:
+        case InetTcpProtocol:
             return IPPROTO_TCP;
 
-        case OtpSocketUdpProtocol:
+        case InetUdpProtocol:
             return IPPROTO_UDP;
 
         default:
@@ -585,6 +547,7 @@ static term nif_socket_open(Context *ctx, int argc, term argv[])
             LWIP_END();
         }
 #endif
+        rsrc_obj->buf_size = DEFAULT_BUFFER_SIZE;
 
         if (UNLIKELY(memory_ensure_free(ctx, TERM_BOXED_RESOURCE_SIZE) != MEMORY_GC_OK)) {
             AVM_LOGW(TAG, "Failed to allocate memory: %s:%i.", __FILE__, __LINE__);
@@ -613,12 +576,18 @@ static term nif_socket_open(Context *ctx, int argc, term argv[])
     }
 }
 
-static term get_socket(term socket_term)
+bool term_to_otp_socket(term socket_term, struct SocketResource **rsrc_obj, Context *ctx)
 {
-    return term_get_tuple_element(socket_term, 0);
+    void *rsrc_obj_ptr;
+    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), term_get_tuple_element(socket_term, 0), socket_resource_type, &rsrc_obj_ptr))) {
+        return false;
+    }
+    *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
+
+    return true;
 }
 
-static bool term_is_socket(term socket_term)
+bool term_is_otp_socket(term socket_term)
 {
     bool ret = term_is_tuple(socket_term)
         && term_get_tuple_arity(socket_term) == 2
@@ -665,13 +634,12 @@ static term nif_socket_close(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_close\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 #if OTP_SOCKET_BSD
     if (rsrc_obj->fd) {
         if (rsrc_obj->selecting_process_id != INVALID_PROCESS_ID) {
@@ -752,6 +720,7 @@ static term nif_socket_close(Context *ctx, int argc, term argv[])
     }
 
 #endif
+    rsrc_obj->buf_size = DEFAULT_BUFFER_SIZE;
 
     return OK_ATOM;
 }
@@ -773,6 +742,7 @@ static struct SocketResource *make_accepted_socket_resource(struct tcp_pcb *newp
     conn_rsrc_obj->pos = 0;
     conn_rsrc_obj->linger_on = false;
     conn_rsrc_obj->linger_sec = 0;
+    conn_rsrc_obj->buf_size = DEFAULT_BUFFER_SIZE;
     list_init(&conn_rsrc_obj->received_list);
 
     tcp_arg(newpcb, conn_rsrc_obj);
@@ -923,17 +893,16 @@ static term nif_socket_select_read(Context *ctx, int argc, term argv[])
 
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
 
     term select_ref_term = argv[1];
     if (select_ref_term != UNDEFINED_ATOM) {
         VALIDATE_VALUE(select_ref_term, term_is_reference);
     }
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 
     ErlNifEnv *env = erl_nif_env_from_context(ctx);
     if (rsrc_obj->selecting_process_id != ctx->process_id && rsrc_obj->selecting_process_id != INVALID_PROCESS_ID) {
@@ -1017,13 +986,12 @@ static term nif_socket_select_stop(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_stop\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 #if OTP_SOCKET_BSD
     if (UNLIKELY(enif_select(erl_nif_env_from_context(ctx), rsrc_obj->fd, ERL_NIF_SELECT_STOP, rsrc_obj, NULL, term_nil()) < 0)) {
         RAISE_ERROR(BADARG_ATOM);
@@ -1050,15 +1018,14 @@ static term nif_socket_setopt(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_setopt\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
 
     GlobalContext *global = ctx->global;
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 
 #if OTP_SOCKET_BSD
     if (rsrc_obj->fd == 0) {
@@ -1070,62 +1037,101 @@ static term nif_socket_setopt(Context *ctx, int argc, term argv[])
     term level_tuple = argv[1];
     term value = argv[2];
 
-    term opt = term_get_tuple_element(level_tuple, 1);
-    if (globalcontext_is_term_equal_to_atom_string(global, opt, reuseaddr_atom)) {
-        int option_value = (value == TRUE_ATOM);
+    term level = term_get_tuple_element(level_tuple, 0);
+    int level_val = interop_atom_term_select_int(otp_socket_setopt_level_table, level, global);
+    switch (level_val) {
+
+        case OtpSocketSetoptLevelSocket: {
+
+            term opt = term_get_tuple_element(level_tuple, 1);
+            if (globalcontext_is_term_equal_to_atom_string(global, opt, reuseaddr_atom)) {
+                int option_value = (value == TRUE_ATOM);
 #if OTP_SOCKET_BSD
-        int res = setsockopt(rsrc_obj->fd, SOL_SOCKET, SO_REUSEADDR, &option_value, sizeof(int));
-        if (UNLIKELY(res != 0)) {
-            return make_errno_tuple(ctx);
-        } else {
-            return OK_ATOM;
-        }
+                int res = setsockopt(rsrc_obj->fd, SOL_SOCKET, SO_REUSEADDR, &option_value, sizeof(int));
+                if (UNLIKELY(res != 0)) {
+                    return make_errno_tuple(ctx);
+                } else {
+                    return OK_ATOM;
+                }
 #elif OTP_SOCKET_LWIP
-        LWIP_BEGIN();
-        if (option_value) {
-            if (rsrc_obj->socket_state & SocketStateTCP) {
-                ip_set_option(rsrc_obj->tcp_pcb, SOF_REUSEADDR);
-            } else {
-                ip_set_option(rsrc_obj->udp_pcb, SOF_REUSEADDR);
-            }
-        } else {
-            if (rsrc_obj->socket_state & SocketStateTCP) {
-                ip_reset_option(rsrc_obj->tcp_pcb, SOF_REUSEADDR);
-            } else {
-                ip_reset_option(rsrc_obj->udp_pcb, SOF_REUSEADDR);
-            }
-        }
-        LWIP_END();
-        return OK_ATOM;
+                LWIP_BEGIN();
+                if (option_value) {
+                    if (rsrc_obj->socket_state & SocketStateTCP) {
+                        ip_set_option(rsrc_obj->tcp_pcb, SOF_REUSEADDR);
+                    } else {
+                        ip_set_option(rsrc_obj->udp_pcb, SOF_REUSEADDR);
+                    }
+                } else {
+                    if (rsrc_obj->socket_state & SocketStateTCP) {
+                        ip_reset_option(rsrc_obj->tcp_pcb, SOF_REUSEADDR);
+                    } else {
+                        ip_reset_option(rsrc_obj->udp_pcb, SOF_REUSEADDR);
+                    }
+                }
+                LWIP_END();
+                return OK_ATOM;
 #endif
-    } else if (globalcontext_is_term_equal_to_atom_string(global, opt, linger_atom)) {
-        term onoff = interop_kv_get_value(value, onoff_atom, ctx->global);
-        term linger = interop_kv_get_value(value, linger_atom, ctx->global);
-        VALIDATE_VALUE(linger, term_is_integer);
+            } else if (globalcontext_is_term_equal_to_atom_string(global, opt, linger_atom)) {
+                term onoff = interop_kv_get_value(value, onoff_atom, ctx->global);
+                term linger = interop_kv_get_value(value, linger_atom, ctx->global);
+                VALIDATE_VALUE(linger, term_is_integer);
 
 #if OTP_SOCKET_BSD
-        struct linger sl;
-        sl.l_onoff = (onoff == TRUE_ATOM);
-        sl.l_linger = term_to_int(linger);
-        int res = setsockopt(rsrc_obj->fd, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
-        if (UNLIKELY(res != 0)) {
-            return make_errno_tuple(ctx);
-        } else {
-            return OK_ATOM;
-        }
+                struct linger sl;
+                sl.l_onoff = (onoff == TRUE_ATOM);
+                sl.l_linger = term_to_int(linger);
+                int res = setsockopt(rsrc_obj->fd, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
+                if (UNLIKELY(res != 0)) {
+                    return make_errno_tuple(ctx);
+                } else {
+                    return OK_ATOM;
+                }
 #elif OTP_SOCKET_LWIP
-        rsrc_obj->linger_on = (onoff == TRUE_ATOM);
-        rsrc_obj->linger_sec = term_to_int(linger);
-        return OK_ATOM;
+                rsrc_obj->linger_on = (onoff == TRUE_ATOM);
+                rsrc_obj->linger_sec = term_to_int(linger);
+                return OK_ATOM;
 #endif
-        // TODO add more as needed
-        // int flag = 1;
-        // int res = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int));
-        // if (UNLIKELY(res != 0)) {
-        //     AVM_LOGW(TAG, "Failed to set TCP_NODELAY.");
-        // }
-    } else {
-        RAISE_ERROR(BADARG_ATOM);
+                // TODO add more as needed
+                // int flag = 1;
+                // int res = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int));
+                // if (UNLIKELY(res != 0)) {
+                //     AVM_LOGW(TAG, "Failed to set TCP_NODELAY.");
+                // }
+            } else {
+                RAISE_ERROR(BADARG_ATOM);
+            }
+
+            case OtpSocketSetoptLevelOTP: {
+                term opt = term_get_tuple_element(level_tuple, 1);
+                if (globalcontext_is_term_equal_to_atom_string(global, opt, rcvbuf_atom)) {
+                    // socket:setopt(Socket, {otp, rcvbuf}, BufSize :: non_neg_integer())
+
+                    // TODO support the atom `default` as a value to roll back to the default buffer size
+                    if (UNLIKELY(!term_is_integer(value))) {
+                        AVM_LOGE(TAG, "socket:setopt: otp rcvbuf value must be an integer");
+                        return make_error_tuple(globalcontext_make_atom(global, invalid_value_atom), ctx);
+                    }
+
+                    avm_int_t buf_size = term_to_int(value);
+                    if (UNLIKELY(buf_size < 0)) {
+                        AVM_LOGE(TAG, "socket:setopt: otp rcvbuf value may not be negative");
+                        return make_error_tuple(globalcontext_make_atom(global, invalid_value_atom), ctx);
+                    }
+
+                    rsrc_obj->buf_size = (size_t) buf_size;
+
+                    return OK_ATOM;
+                } else {
+                    AVM_LOGE(TAG, "socket:setopt: Unsupported otp option");
+                    return make_error_tuple(globalcontext_make_atom(global, invalid_option_atom), ctx);
+                }
+            }
+
+            default: {
+                AVM_LOGE(TAG, "socket:setopt: Unsupported level");
+                RAISE_ERROR(BADARG_ATOM);
+            }
+        }
     }
 }
 
@@ -1138,15 +1144,14 @@ static term nif_socket_sockname(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_sockname\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
 
     GlobalContext *global = ctx->global;
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 #if OTP_SOCKET_BSD
     if (rsrc_obj->fd == 0) {
 #elif OTP_SOCKET_LWIP
@@ -1185,7 +1190,7 @@ static term nif_socket_sockname(Context *ctx, int argc, term argv[])
         AVM_LOGW(TAG, "Failed to allocate memory: %s:%i.", __FILE__, __LINE__);
         RAISE_ERROR(OUT_OF_MEMORY_ATOM);
     } else {
-        term address = socket_tuple_from_addr(ctx, ip4_u32);
+        term address = inet_make_addr4(ip4_u32, &ctx->heap);
         term port_number = term_from_int(port_u16);
 
         term map = term_alloc_map(2, &ctx->heap);
@@ -1206,15 +1211,14 @@ static term nif_socket_peername(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_peername\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
 
     GlobalContext *global = ctx->global;
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 
 #if OTP_SOCKET_BSD
     if (rsrc_obj->fd == 0) {
@@ -1255,7 +1259,7 @@ static term nif_socket_peername(Context *ctx, int argc, term argv[])
         AVM_LOGW(TAG, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
         RAISE_ERROR(OUT_OF_MEMORY_ATOM);
     } else {
-        term address = socket_tuple_from_addr(ctx, ip4_u32);
+        term address = inet_make_addr4(ip4_u32, &ctx->heap);
         term port_number = term_from_int(port_u16);
 
         term map = term_alloc_map(2, &ctx->heap);
@@ -1276,15 +1280,14 @@ static term nif_socket_bind(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_bind\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
 
     GlobalContext *global = ctx->global;
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 #if OTP_SOCKET_BSD
     TRACE("rsrc_obj->fd=%i\n", (int) rsrc_obj->fd);
     if (rsrc_obj->fd == 0) {
@@ -1338,9 +1341,9 @@ static term nif_socket_bind(Context *ctx, int argc, term argv[])
 #endif
         } else {
 #if OTP_SOCKET_BSD
-            serveraddr.sin_addr.s_addr = htonl(socket_tuple_to_addr(addr));
+            serveraddr.sin_addr.s_addr = htonl(inet_addr4_to_uint32(addr));
 #elif OTP_SOCKET_LWIP
-            ip_addr_set_ip4_u32(&ip_addr, htonl(socket_tuple_to_addr(addr)));
+            ip_addr_set_ip4_u32(&ip_addr, htonl(inet_addr4_to_uint32(addr)));
 #endif
         }
     }
@@ -1382,14 +1385,13 @@ static term nif_socket_listen(Context *ctx, int argc, term argv[])
 
     GlobalContext *global = ctx->global;
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
     VALIDATE_VALUE(argv[1], term_is_integer);
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 #if OTP_SOCKET_BSD
     if (rsrc_obj->fd == 0) {
         return make_error_tuple(posix_errno_to_term(EBADF, global), ctx);
@@ -1461,15 +1463,14 @@ static term nif_socket_accept(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_accept\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
 
     GlobalContext *global = ctx->global;
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 #if OTP_SOCKET_BSD
     if (rsrc_obj->fd == 0) {
         return make_error_tuple(posix_errno_to_term(EBADF, global), ctx);
@@ -1501,6 +1502,7 @@ static term nif_socket_accept(Context *ctx, int argc, term argv[])
         struct SocketResource *conn_rsrc_obj = enif_alloc_resource(socket_resource_type, sizeof(struct SocketResource));
         conn_rsrc_obj->fd = fd;
         conn_rsrc_obj->selecting_process_id = INVALID_PROCESS_ID;
+        conn_rsrc_obj->buf_size = DEFAULT_BUFFER_SIZE;
         TRACE("nif_socket_accept: Created socket on accept fd=%i\n", rsrc_obj->fd);
 
         term obj = enif_make_resource(erl_nif_env_from_context(ctx), conn_rsrc_obj);
@@ -1562,6 +1564,146 @@ static term nif_socket_accept(Context *ctx, int argc, term argv[])
 //
 // recv/recvfrom
 //
+#if OTP_SOCKET_LWIP
+static size_t copy_pbuf_data(struct pbuf *src, size_t offset, size_t count, uint8_t *dst)
+{
+    size_t copied = 0;
+    while (count > 0 && src != NULL) {
+        if (offset > src->len) {
+            offset -= src->len;
+            src = src->next;
+            continue;
+        }
+        size_t chunk_count = MIN(count, src->len - offset);
+        memcpy(dst, ((const uint8_t *) src->payload) + offset, chunk_count);
+        count -= chunk_count;
+        copied += chunk_count;
+        dst += chunk_count;
+        src = src->next;
+    }
+    return copied;
+}
+#endif
+
+ssize_t socket_recv(struct SocketResource *rsrc_obj, uint8_t *buf, size_t len, int flags, term *from, Heap *heap)
+{
+#if OTP_SOCKET_BSD
+    //
+    // receive data on the socket
+    //
+    struct sockaddr_in addr;
+    socklen_t addrlen = sizeof(addr);
+    ssize_t res;
+    if (from) {
+        struct RefcBinary *rsrc_refc = refc_binary_from_data(rsrc_obj);
+        GlobalContext *global = rsrc_refc->resource_type->global;
+
+        res = recvfrom(rsrc_obj->fd, buf, len, flags, (struct sockaddr *) &addr, &addrlen);
+
+        term address = inet_make_addr4(ntohl(addr.sin_addr.s_addr), heap);
+        term port_number = term_from_int(ntohs(addr.sin_port));
+
+        term map = term_alloc_map(2, heap);
+        term_set_map_assoc(map, 0, ADDR_ATOM, address);
+        term_set_map_assoc(map, 1, PORT_ATOM, port_number);
+        *from = map;
+    } else {
+        res = recv(rsrc_obj->fd, buf, len, flags);
+    }
+    if (res == 0) {
+        return SocketClosed;
+    }
+    if (res < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return SocketWouldBlock;
+        }
+        return SocketOtherError;
+    }
+    return res;
+#elif OTP_SOCKET_LWIP
+    UNUSED(flags);
+
+    uint32_t ip4_u32;
+    uint16_t port_u16;
+
+    size_t remaining = len;
+    uint8_t *ptr = buf;
+    bool closed = false;
+    err_t err = ERR_OK;
+    // Use lwIP lock
+    LWIP_BEGIN();
+    if (rsrc_obj->socket_state & SocketStateTCP) {
+        size_t pos = rsrc_obj->pos;
+        struct ListHead *item;
+        struct ListHead *tmp;
+        MUTABLE_LIST_FOR_EACH (item, tmp, &rsrc_obj->received_list) {
+            struct TCPReceivedItem *received_item = GET_LIST_ENTRY(item, struct TCPReceivedItem, list_head);
+            if (received_item->buf == NULL || received_item->err != ERR_OK) {
+                closed = received_item->buf == NULL;
+                err = received_item->err;
+                break;
+            }
+            if (pos < received_item->buf->tot_len) {
+                size_t copied = copy_pbuf_data(received_item->buf, pos, remaining, ptr);
+                ptr += copied;
+                remaining -= copied;
+                tcp_recved(rsrc_obj->tcp_pcb, copied);
+                if (copied + pos == received_item->buf->tot_len) {
+                    // all data was copied.
+                    list_remove(item);
+                    pbuf_free(received_item->buf);
+                    pos = 0;
+                } else {
+                    pos = pos + copied;
+                }
+                if (remaining == 0) {
+                    break;
+                }
+            } else {
+                pos -= received_item->buf->tot_len;
+            }
+        }
+        rsrc_obj->pos = pos;
+        if (from) {
+            ip4_u32 = ntohl(ip_addr_get_ip4_u32(&rsrc_obj->tcp_pcb->remote_ip));
+            port_u16 = rsrc_obj->tcp_pcb->remote_port;
+        }
+    } else {
+        struct UDPReceivedItem *first_item = CONTAINER_OF(list_first(&rsrc_obj->received_list), struct UDPReceivedItem, list_head);
+        size_t copied = copy_pbuf_data(first_item->buf, 0, remaining, ptr);
+        remaining -= copied;
+        if (from) {
+            ip4_u32 = first_item->addr;
+            port_u16 = first_item->port;
+        }
+        list_remove(&first_item->list_head);
+        pbuf_free(first_item->buf);
+        free(first_item);
+    }
+    LWIP_END();
+    if (remaining < len) {
+        if (from) {
+            struct RefcBinary *rsrc_refc = refc_binary_from_data(rsrc_obj);
+            GlobalContext *global = rsrc_refc->resource_type->global;
+
+            term address = inet_make_addr4(ip4_u32, heap);
+            term port_number = term_from_int(port_u16);
+
+            term map = term_alloc_map(2, heap);
+            term_set_map_assoc(map, 0, globalcontext_make_atom(global, addr_atom), address);
+            term_set_map_assoc(map, 1, PORT_ATOM, port_number);
+
+            *from = map;
+        }
+
+        return len - remaining;
+    }
+    if (closed) {
+        return SocketClosed;
+    }
+    return err == ERR_OK ? SocketWouldBlock : SocketOtherError;
+#endif
+}
 
 #if OTP_SOCKET_BSD
 static term nif_socket_recv_with_peek(Context *ctx, struct SocketResource *rsrc_obj, size_t len, bool is_recvfrom)
@@ -1571,8 +1713,7 @@ static term nif_socket_recv_with_peek(Context *ctx, struct SocketResource *rsrc_
     GlobalContext *global = ctx->global;
 
     int flags = MSG_WAITALL;
-    // TODO parameterize buffer size
-    ssize_t res = recvfrom(rsrc_obj->fd, NULL, DEFAULT_BUFFER_SIZE, MSG_PEEK | flags, NULL, NULL);
+    ssize_t res = recvfrom(rsrc_obj->fd, NULL, rsrc_obj->buf_size, MSG_PEEK | flags, NULL, NULL);
     TRACE("%li bytes available.\n", (long int) res);
     if (res < 0) {
         AVM_LOGI(TAG, "Unable to receive data on fd %i.  errno=%i", rsrc_obj->fd, errno);
@@ -1581,12 +1722,14 @@ static term nif_socket_recv_with_peek(Context *ctx, struct SocketResource *rsrc_
         TRACE("Peer closed socket %i.\n", rsrc_obj->fd);
         return make_error_tuple(CLOSED_ATOM, ctx);
     } else {
-        ssize_t buffer_size = len == 0 ? (ssize_t) res : MIN((size_t) res, len);
+        // user-supplied len has higher precedence than the default buffer size, but we also
+        // want the configured default buffer size to be a lower bound on anything we peek
+        ssize_t buffer_size = MIN(len == 0 ? (ssize_t) rsrc_obj->buf_size : (ssize_t) len, res);
 
         // {ok, Data :: binary()}
         // {ok, {Source :: #{addr => Address :: {0..255, 0..255, 0..255, 0..255}, port => Port :: non_neg_integer()}, Data :: binary()}}
         size_t ensure_packet_avail = term_binary_data_size_in_terms(buffer_size) + BINARY_HEADER_SIZE;
-        size_t requested_size = TUPLE_SIZE(2) + ensure_packet_avail + (is_recvfrom ? (TUPLE_SIZE(2) + TUPLE_SIZE(4) + term_map_size_in_terms(2)) : 0);
+        size_t requested_size = TUPLE_SIZE(2) + ensure_packet_avail + (is_recvfrom ? (TUPLE_SIZE(2) + INET_ADDR4_TUPLE_SIZE + TERM_MAP_SIZE(2)) : 0);
 
         if (UNLIKELY(memory_ensure_free(ctx, requested_size) != MEMORY_GC_OK)) {
             AVM_LOGW(TAG, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
@@ -1594,25 +1737,18 @@ static term nif_socket_recv_with_peek(Context *ctx, struct SocketResource *rsrc_
         }
 
         term data = term_create_uninitialized_binary(buffer_size, &ctx->heap, global);
-        const char *buffer = term_binary_data(data);
+        uint8_t *buffer = (uint8_t *) term_binary_data(data);
 
         //
         // receive data on the socket
         //
-        struct sockaddr_in addr;
-        socklen_t addrlen = sizeof(addr);
-        res = recvfrom(rsrc_obj->fd, (char *) buffer, buffer_size, flags, (struct sockaddr *) &addr, &addrlen);
+        term map = term_invalid_term();
+        res = socket_recv(rsrc_obj, buffer, buffer_size, flags, is_recvfrom ? &map : NULL, &ctx->heap);
 
         TRACE("otp_socket.recv_handler: received data on fd: %i available=%lu, read=%lu\n", rsrc_obj->fd, (unsigned long) res, (unsigned long) buffer_size);
 
-        term payload = term_invalid_term();
+        term payload;
         if (is_recvfrom) {
-            term address = socket_tuple_from_addr(ctx, ntohl(addr.sin_addr.s_addr));
-            term port_number = term_from_int(ntohs(addr.sin_port));
-
-            term map = term_alloc_map(2, &ctx->heap);
-            term_set_map_assoc(map, 0, ADDR_ATOM, address);
-            term_set_map_assoc(map, 1, PORT_ATOM, port_number);
             term tuple = port_heap_create_tuple2(&ctx->heap, map, data);
             payload = port_heap_create_ok_tuple(&ctx->heap, tuple);
         } else {
@@ -1629,9 +1765,8 @@ static term nif_socket_recv_without_peek(Context *ctx, struct SocketResource *rs
 
     GlobalContext *global = ctx->global;
 
-    // TODO plumb through buffer size
-    size_t buffer_size = len == 0 ? DEFAULT_BUFFER_SIZE : len;
-    char *buffer = malloc(buffer_size);
+    size_t buffer_size = len == 0 ? rsrc_obj->buf_size : len;
+    uint8_t *buffer = (uint8_t *) malloc(buffer_size);
     term payload = term_invalid_term();
 
     if (IS_NULL_PTR(buffer)) {
@@ -1640,10 +1775,15 @@ static term nif_socket_recv_without_peek(Context *ctx, struct SocketResource *rs
 
     } else {
 
-        int flags = 0;
-        struct sockaddr_in addr;
-        socklen_t addrlen = sizeof(addr);
-        ssize_t res = recvfrom(rsrc_obj->fd, (char *) buffer, buffer_size, flags, (struct sockaddr *) &addr, &addrlen);
+        term map = term_invalid_term();
+        if (is_recvfrom) {
+            if (UNLIKELY(memory_ensure_free(ctx, INET_ADDR4_TUPLE_SIZE + TERM_MAP_SIZE(2)) != MEMORY_GC_OK)) {
+                AVM_LOGW(TAG, "Failed to allocate memory: %s:%i.", __FILE__, __LINE__);
+                RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+            }
+        }
+
+        ssize_t res = socket_recv(rsrc_obj, buffer, buffer_size, 0, is_recvfrom ? &map : NULL, &ctx->heap);
 
         if (res < 0) {
 
@@ -1669,9 +1809,9 @@ static term nif_socket_recv_without_peek(Context *ctx, struct SocketResource *rs
             // {ok, Data :: binary()}
             // {ok, {Source :: #{addr => Address :: {0..255, 0..255, 0..255, 0..255}, port => Port :: non_neg_integer()}, Data :: binary()}}
             size_t ensure_packet_avail = term_binary_data_size_in_terms(len) + BINARY_HEADER_SIZE;
-            size_t requested_size = TUPLE_SIZE(2) + ensure_packet_avail + (is_recvfrom ? (TUPLE_SIZE(2) + TUPLE_SIZE(4) + term_map_size_in_terms(2)) : 0);
+            size_t requested_size = TUPLE_SIZE(2) + ensure_packet_avail + (is_recvfrom ? TUPLE_SIZE(2) : 0);
 
-            if (UNLIKELY(memory_ensure_free(ctx, requested_size) != MEMORY_GC_OK)) {
+            if (UNLIKELY(memory_ensure_free_with_roots(ctx, requested_size, is_recvfrom ? 1 : 0, &map, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
                 AVM_LOGW(TAG, "Failed to allocate memory: %s:%i.", __FILE__, __LINE__);
                 RAISE_ERROR(OUT_OF_MEMORY_ATOM);
             }
@@ -1679,12 +1819,6 @@ static term nif_socket_recv_without_peek(Context *ctx, struct SocketResource *rs
             term data = term_from_literal_binary(buffer, len, &ctx->heap, global);
 
             if (is_recvfrom) {
-                term address = socket_tuple_from_addr(ctx, ntohl(addr.sin_addr.s_addr));
-                term port_number = term_from_int(ntohs(addr.sin_port));
-
-                term map = term_alloc_map(2, &ctx->heap);
-                term_set_map_assoc(map, 0, ADDR_ATOM, address);
-                term_set_map_assoc(map, 1, PORT_ATOM, port_number);
                 term tuple = port_heap_create_tuple2(&ctx->heap, map, data);
                 payload = port_heap_create_ok_tuple(&ctx->heap, tuple);
             } else {
@@ -1698,24 +1832,6 @@ static term nif_socket_recv_without_peek(Context *ctx, struct SocketResource *rs
 }
 
 #elif OTP_SOCKET_LWIP
-static size_t copy_pbuf_data(struct pbuf *src, size_t offset, size_t count, uint8_t *dst)
-{
-    size_t copied = 0;
-    while (count > 0 && src != NULL) {
-        if (offset > src->len) {
-            offset -= src->len;
-            src = src->next;
-            continue;
-        }
-        size_t chunk_count = MIN(count, src->len - offset);
-        memcpy(dst, src->payload, chunk_count);
-        count -= chunk_count;
-        copied += chunk_count;
-        dst += chunk_count;
-        src = src->next;
-    }
-    return copied;
-}
 
 static term nif_socket_recv_lwip(Context *ctx, struct SocketResource *rsrc_obj, size_t len, bool is_recvfrom)
 {
@@ -1769,7 +1885,7 @@ static term nif_socket_recv_lwip(Context *ctx, struct SocketResource *rsrc_obj, 
     }
 
     size_t ensure_packet_avail = term_binary_data_size_in_terms(len) + BINARY_HEADER_SIZE;
-    size_t requested_size = REF_SIZE + 2 * TUPLE_SIZE(2) + ensure_packet_avail + (is_recvfrom ? (TUPLE_SIZE(2) + term_map_size_in_terms(2)) : 0);
+    size_t requested_size = REF_SIZE + 2 * TUPLE_SIZE(2) + ensure_packet_avail + (is_recvfrom ? (TUPLE_SIZE(2) + INET_ADDR4_TUPLE_SIZE + TERM_MAP_SIZE(2)) : 0);
     if (UNLIKELY(memory_ensure_free(ctx, requested_size) != MEMORY_GC_OK)) {
         AVM_LOGW(TAG, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
         RAISE_ERROR(OUT_OF_MEMORY_ATOM);
@@ -1779,66 +1895,14 @@ static term nif_socket_recv_lwip(Context *ctx, struct SocketResource *rsrc_obj, 
     uint8_t *ptr = (uint8_t *) term_binary_data(data);
     size_t remaining = buffer_size;
 
-    uint32_t ip4_u32;
-    uint16_t port_u16;
+    term map = term_invalid_term();
 
-    // Use lwIP lock
-    LWIP_BEGIN();
-    if (rsrc_obj->socket_state & SocketStateTCP) {
-        size_t pos = rsrc_obj->pos;
-        struct ListHead *item;
-        struct ListHead *tmp;
-        MUTABLE_LIST_FOR_EACH (item, tmp, &rsrc_obj->received_list) {
-            struct TCPReceivedItem *received_item = GET_LIST_ENTRY(item, struct TCPReceivedItem, list_head);
-            if (received_item->buf == NULL || received_item->err != ERR_OK) {
-                break;
-            }
-            if (pos < received_item->buf->tot_len) {
-                size_t copied = copy_pbuf_data(received_item->buf, pos, remaining, ptr);
-                ptr += copied;
-                tcp_recved(rsrc_obj->tcp_pcb, copied);
-                if (copied + pos == received_item->buf->tot_len) {
-                    // all data was copied.
-                    list_remove(item);
-                    pbuf_free(received_item->buf);
-                    pos = 0;
-                } else {
-                    pos = pos + copied;
-                }
-                if (remaining == 0) {
-                    break;
-                }
-            } else {
-                pos -= received_item->buf->tot_len;
-            }
-        }
-        rsrc_obj->pos = pos;
-        if (is_recvfrom) {
-            ip4_u32 = ntohl(ip_addr_get_ip4_u32(&rsrc_obj->tcp_pcb->remote_ip));
-            port_u16 = rsrc_obj->tcp_pcb->remote_port;
-        }
-    } else {
-        struct UDPReceivedItem *first_item = CONTAINER_OF(list_first(&rsrc_obj->received_list), struct UDPReceivedItem, list_head);
-        copy_pbuf_data(first_item->buf, 0, remaining, ptr);
-        if (is_recvfrom) {
-            ip4_u32 = first_item->addr;
-            port_u16 = first_item->port;
-        }
-        list_remove(&first_item->list_head);
-        pbuf_free(first_item->buf);
-        free(first_item);
-    }
-    LWIP_END();
+    ssize_t result = socket_recv(rsrc_obj, ptr, remaining, 0, is_recvfrom ? &map : NULL, &ctx->heap);
+    UNUSED(result);
 
     term payload;
 
     if (is_recvfrom) {
-        term address = socket_tuple_from_addr(ctx, ip4_u32);
-        term port_number = term_from_int(port_u16);
-
-        term map = term_alloc_map(2, &ctx->heap);
-        term_set_map_assoc(map, 0, ADDR_ATOM, address);
-        term_set_map_assoc(map, 1, PORT_ATOM, port_number);
         term tuple = port_heap_create_tuple2(&ctx->heap, map, data);
         payload = port_heap_create_ok_tuple(&ctx->heap, tuple);
     } else {
@@ -1851,7 +1915,7 @@ static term nif_socket_recv_lwip(Context *ctx, struct SocketResource *rsrc_obj, 
 
 static term nif_socket_recv_internal(Context *ctx, term argv[], bool is_recvfrom)
 {
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
     VALIDATE_VALUE(argv[1], term_is_integer);
     avm_int_t len = term_to_int(argv[1]);
     // We raise badarg but return error tuples for POSIX errors
@@ -1859,11 +1923,10 @@ static term nif_socket_recv_internal(Context *ctx, term argv[], bool is_recvfrom
         RAISE_ERROR(BADARG_ATOM);
     }
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
-        return make_error_tuple(posix_errno_to_term(EINVAL, ctx->global), ctx);
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
+        RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 #if OTP_SOCKET_BSD
     if (rsrc_obj->fd == 0) {
         return make_error_tuple(posix_errno_to_term(EBADF, ctx->global), ctx);
@@ -1907,50 +1970,13 @@ static term nif_socket_recvfrom(Context *ctx, int argc, term argv[])
 //
 // send/sendto
 //
-static term nif_socket_send_internal(Context *ctx, int argc, term argv[], bool is_sendto)
+ssize_t socket_send(struct SocketResource *rsrc_obj, const uint8_t *buf, size_t len, term dest)
 {
-    TRACE("nif_socket_send_internal\n");
-    UNUSED(argc);
-
-    VALIDATE_VALUE(argv[0], term_is_socket);
-    VALIDATE_VALUE(argv[1], term_is_binary);
-
-    GlobalContext *global = ctx->global;
-
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
-        RAISE_ERROR(BADARG_ATOM);
-    }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
-
-#if OTP_SOCKET_BSD
-    if (rsrc_obj->fd == 0) {
-        return make_error_tuple(posix_errno_to_term(EBADF, global), ctx);
-    }
-#elif OTP_SOCKET_LWIP
-    if (rsrc_obj->socket_state == SocketStateClosed) {
-        return make_error_tuple(posix_errno_to_term(EBADF, global), ctx);
-    }
-    if (rsrc_obj->socket_state & SocketStateListening) {
-        return make_error_tuple(posix_errno_to_term(EOPNOTSUPP, global), ctx);
-    }
-#endif
-
-    term data = argv[1];
-    term dest = term_invalid_term();
-    if (is_sendto) {
-        dest = argv[2];
-    }
-
-    const char *buf = term_binary_data(data);
-    size_t len = term_binary_size(data);
-
     ssize_t sent_data = -1;
-
 #if OTP_SOCKET_BSD
-    // TODO make non-blocking
-
-    if (is_sendto) {
+    if (!term_is_invalid_term(dest)) {
+        struct RefcBinary *rsrc_refc = refc_binary_from_data(rsrc_obj);
+        GlobalContext *global = rsrc_refc->resource_type->global;
 
         struct sockaddr_in destaddr;
         memset(&destaddr, 0, sizeof(destaddr));
@@ -1958,11 +1984,11 @@ static term nif_socket_send_internal(Context *ctx, int argc, term argv[], bool i
 
         term port = interop_kv_get_value_default(dest, port_atom, term_from_int(0), global);
         destaddr.sin_port = htons(term_to_int(port));
-        term addr = interop_kv_get_value(dest, addr_atom, ctx->global);
+        term addr = interop_kv_get_value(dest, addr_atom, global);
         if (globalcontext_is_term_equal_to_atom_string(global, addr, loopback_atom)) {
             destaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         } else {
-            destaddr.sin_addr.s_addr = htonl(socket_tuple_to_addr(addr));
+            destaddr.sin_addr.s_addr = htonl(inet_addr4_to_uint32(addr));
         }
 
         sent_data = sendto(rsrc_obj->fd, buf, len, 0, (struct sockaddr *) &destaddr, sizeof(destaddr));
@@ -1970,33 +1996,44 @@ static term nif_socket_send_internal(Context *ctx, int argc, term argv[], bool i
     } else {
         sent_data = send(rsrc_obj->fd, buf, len, 0);
     }
-
+    if (sent_data == 0) {
+        return SocketClosed;
+    }
+    if (sent_data < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return SocketWouldBlock;
+        }
+        return SocketOtherError;
+    }
+    return sent_data;
 #elif OTP_SOCKET_LWIP
     err_t err;
     ip_addr_t ip_addr;
     uint16_t port_u16;
-    if (is_sendto) {
+    if (!term_is_invalid_term(dest)) {
+        struct RefcBinary *rsrc_refc = refc_binary_from_data(rsrc_obj);
+        GlobalContext *global = rsrc_refc->resource_type->global;
 
         term port_term = interop_kv_get_value_default(dest, port_atom, term_from_int(0), global);
         avm_int_t port_number = term_to_int(port_term);
         if (port_number < 0 || port_number > 65535) {
-            RAISE_ERROR(BADARG_ATOM);
+            return SocketOtherError;
         }
         port_u16 = (uint16_t) port_number;
-        term addr = interop_kv_get_value(dest, addr_atom, ctx->global);
+        term addr = interop_kv_get_value(dest, addr_atom, global);
         if (globalcontext_is_term_equal_to_atom_string(global, addr, loopback_atom)) {
             ip_addr_set_loopback(false, &ip_addr);
         } else {
-            ip_addr_set_ip4_u32(&ip_addr, htonl(socket_tuple_to_addr(addr)));
+            ip_addr_set_ip4_u32(&ip_addr, htonl(inet_addr4_to_uint32(addr)));
         }
     }
 
     LWIP_BEGIN();
     if (rsrc_obj->socket_state & SocketStateUDP) {
         struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
-        char *bytes = (char *) p->payload;
+        uint8_t *bytes = (uint8_t *) p->payload;
         memcpy(bytes, buf, len);
-        if (is_sendto) {
+        if (!term_is_invalid_term(dest)) {
             err = udp_sendto(rsrc_obj->udp_pcb, p, &ip_addr, port_u16);
         } else {
             err = udp_send(rsrc_obj->udp_pcb, p);
@@ -2026,8 +2063,58 @@ static term nif_socket_send_internal(Context *ctx, int argc, term argv[], bool i
         }
     }
     LWIP_END();
-
+    if (err == ERR_CLSD) {
+        return SocketClosed;
+    }
+    if (sent_data == 0) {
+        return SocketWouldBlock;
+    }
+    if (err != ERR_OK) {
+        return SocketOtherError;
+    }
+    return sent_data;
 #endif
+}
+
+static term nif_socket_send_internal(Context *ctx, int argc, term argv[], bool is_sendto)
+{
+    TRACE("nif_socket_send_internal\n");
+    UNUSED(argc);
+
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
+    VALIDATE_VALUE(argv[1], term_is_binary);
+
+    GlobalContext *global = ctx->global;
+
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
+        RAISE_ERROR(BADARG_ATOM);
+    }
+
+#if OTP_SOCKET_BSD
+    if (rsrc_obj->fd == 0) {
+        return make_error_tuple(posix_errno_to_term(EBADF, global), ctx);
+    }
+#elif OTP_SOCKET_LWIP
+    if (rsrc_obj->socket_state == SocketStateClosed) {
+        return make_error_tuple(posix_errno_to_term(EBADF, global), ctx);
+    }
+    if (rsrc_obj->socket_state & SocketStateListening) {
+        return make_error_tuple(posix_errno_to_term(EOPNOTSUPP, global), ctx);
+    }
+#endif
+
+    term data = argv[1];
+    term dest = term_invalid_term();
+    if (is_sendto) {
+        dest = argv[2];
+    }
+
+    const uint8_t *buf = (const uint8_t *) term_binary_data(data);
+    size_t len = term_binary_size(data);
+
+    ssize_t sent_data = socket_send(rsrc_obj, buf, len, dest);
+
     // {ok, RestData} | {error, Reason}
 
     size_t rest_len = len - sent_data;
@@ -2134,16 +2221,15 @@ static term nif_socket_connect(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_connect\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
     VALIDATE_VALUE(argv[1], term_is_map);
 
     GlobalContext *global = ctx->global;
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 
     term sockaddr = argv[1];
     term port = interop_kv_get_value_default(sockaddr, port_atom, term_from_int(0), ctx->global);
@@ -2181,7 +2267,7 @@ static term nif_socket_connect(Context *ctx, int argc, term argv[])
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     } else {
         // TODO more validation on addr tuple
-        address.sin_addr.s_addr = htonl(socket_tuple_to_addr(addr));
+        address.sin_addr.s_addr = htonl(inet_addr4_to_uint32(addr));
     }
 
     socklen_t addr_len = sizeof(struct sockaddr_in);
@@ -2204,7 +2290,7 @@ static term nif_socket_connect(Context *ctx, int argc, term argv[])
     }
 #elif OTP_SOCKET_LWIP
     ip_addr_t ip_addr;
-    ip_addr_set_ip4_u32(&ip_addr, htonl(socket_tuple_to_addr(addr)));
+    ip_addr_set_ip4_u32(&ip_addr, htonl(inet_addr4_to_uint32(addr)));
     err_t err;
     LWIP_BEGIN();
     if (rsrc_obj->socket_state & SocketStateUDP) {
@@ -2237,16 +2323,15 @@ static term nif_socket_shutdown(Context *ctx, int argc, term argv[])
     TRACE("nif_socket_shutdown\n");
     UNUSED(argc);
 
-    VALIDATE_VALUE(argv[0], term_is_socket);
+    VALIDATE_VALUE(argv[0], term_is_otp_socket);
     VALIDATE_VALUE(argv[1], term_is_atom);
 
     GlobalContext *global = ctx->global;
 
-    void *rsrc_obj_ptr;
-    if (UNLIKELY(!enif_get_resource(erl_nif_env_from_context(ctx), get_socket(argv[0]), socket_resource_type, &rsrc_obj_ptr))) {
+    struct SocketResource *rsrc_obj;
+    if (UNLIKELY(!term_to_otp_socket(argv[0], &rsrc_obj, ctx))) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    struct SocketResource *rsrc_obj = (struct SocketResource *) rsrc_obj_ptr;
 
     int how;
     int val = interop_atom_term_select_int(otp_socket_shutdown_direction_table, argv[1], global);

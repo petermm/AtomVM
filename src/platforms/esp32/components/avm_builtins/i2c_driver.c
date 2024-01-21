@@ -108,24 +108,20 @@ Context *i2c_driver_create_port(GlobalContext *global, term opts)
     struct I2CData *i2c_data = calloc(1, sizeof(struct I2CData));
     i2c_data->transmitting_pid = term_invalid_term();
 
-    term scl_io_num_term = interop_kv_get_value(
-        opts, ATOM_STR("\xA", "scl_io_num"), global);
+    term scl_io_num_term = interop_kv_get_value(opts, ATOM_STR("\x3", "scl"), global);
     I2C_VALIDATE_NOT_INVALID(scl_io_num);
 
-    term sda_io_num_term = interop_kv_get_value(
-        opts, ATOM_STR("\xA", "sda_io_num"), global);
+    term sda_io_num_term = interop_kv_get_value(opts, ATOM_STR("\x3", "sda"), global);
     I2C_VALIDATE_NOT_INVALID(sda_io_num);
 
-    term clock_hz_term = interop_kv_get_value(
-        opts, ATOM_STR("\xC", "i2c_clock_hz"), global);
+    term clock_hz_term = interop_kv_get_value(opts, ATOM_STR("\xE", "clock_speed_hz"), global);
     I2C_VALIDATE_NOT_INVALID(clock_hz);
 
     i2c_data->i2c_num = I2C_NUM_0;
-    term i2c_num_term = interop_kv_get_value(
-        opts, ATOM_STR("\x7", "i2c_num"), global);
+    term i2c_num_term = interop_kv_get_value(opts, ATOM_STR("\xA", "peripheral"), global);
     if (!term_is_invalid_term(i2c_num_term)) {
         if (!term_is_integer(i2c_num_term)) {
-            ESP_LOGE(TAG, "Invalid parameter: i2c_num is not an integer");
+            ESP_LOGE(TAG, "Invalid parameter: peripheral is not an integer");
             goto free_and_exit;
         }
         i2c_data->i2c_num = term_to_int32(i2c_num_term);
@@ -178,6 +174,7 @@ static void i2c_driver_close(Context *ctx)
         ESP_LOGW(TAG, "Failed to delete I2C driver.  err=%i", err);
     }
     free(ctx->platform_data);
+    ctx->platform_data = NULL;
 }
 
 static term i2cdriver_begin_transmission(Context *ctx, term pid, term req)
@@ -549,9 +546,12 @@ static term create_pair(Context *ctx, term term1, term term2)
 static NativeHandlerResult i2cdriver_consume_mailbox(Context *ctx)
 {
     Message *message = mailbox_first(&ctx->mailbox);
-    term msg = message->message;
-    term pid = term_get_tuple_element(msg, 0);
-    term req = term_get_tuple_element(msg, 2);
+    GenMessage gen_message;
+    if (UNLIKELY(port_parse_gen_message(message->message, &gen_message) != GenCallMessage)) {
+        ESP_LOGW(TAG, "Received invalid message.");
+        mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+        return NativeContinue;
+    }
 
 #ifdef ENABLE_TRACE
     TRACE("message: ");
@@ -559,35 +559,35 @@ static NativeHandlerResult i2cdriver_consume_mailbox(Context *ctx)
     TRACE("\n");
 #endif
 
-    term cmd_term = term_get_tuple_element(req, 0);
+    term cmd_term = term_get_tuple_element(gen_message.req, 0);
 
-    int local_process_id = term_to_local_process_id(pid);
+    int local_process_id = term_to_local_process_id(gen_message.pid);
 
     term ret;
 
     enum i2c_cmd cmd = interop_atom_term_select_int(cmd_table, cmd_term, ctx->global);
     switch (cmd) {
         case I2CBeginTransmissionCmd:
-            ret = i2cdriver_begin_transmission(ctx, pid, req);
+            ret = i2cdriver_begin_transmission(ctx, gen_message.pid, gen_message.req);
             break;
 
         case I2CEndTransmissionCmd:
-            ret = i2cdriver_end_transmission(ctx, pid);
+            ret = i2cdriver_end_transmission(ctx, gen_message.pid);
             break;
 
         case I2CWriteByteCmd:
-            ret = i2cdriver_write_byte(ctx, pid, req);
+            ret = i2cdriver_write_byte(ctx, gen_message.pid, gen_message.req);
             break;
 
         case I2CReadBytesCmd:
-            ret = i2cdriver_read_bytes(ctx, pid, req);
+            ret = i2cdriver_read_bytes(ctx, gen_message.pid, gen_message.req);
             break;
 
         case I2CWriteBytesCmd:
-            if (term_get_tuple_arity(req) == 2) {
-                ret = i2cdriver_qwrite_bytes(ctx, pid, req);
+            if (term_get_tuple_arity(gen_message.req) == 2) {
+                ret = i2cdriver_qwrite_bytes(ctx, gen_message.pid, gen_message.req);
             } else {
-                ret = i2cdriver_write_bytes(ctx, pid, req);
+                ret = i2cdriver_write_bytes(ctx, gen_message.pid, gen_message.req);
             }
             break;
         case I2CCloseCmd:
@@ -604,8 +604,7 @@ static NativeHandlerResult i2cdriver_consume_mailbox(Context *ctx)
     if (UNLIKELY(memory_ensure_free_with_roots(ctx, 3, 1, &ret, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
         ret_msg = OUT_OF_MEMORY_ATOM;
     } else {
-        term ref = term_get_tuple_element(msg, 1);
-        ret_msg = create_pair(ctx, ref, ret);
+        ret_msg = create_pair(ctx, gen_message.ref, ret);
     }
 
     globalcontext_send_message(ctx->global, local_process_id, ret_msg);

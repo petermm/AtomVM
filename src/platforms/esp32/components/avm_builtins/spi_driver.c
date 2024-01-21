@@ -41,6 +41,7 @@
 #include "mailbox.h"
 #include "module.h"
 #include "platform_defaultatoms.h"
+#include "port.h"
 #include "scheduler.h"
 #include "term.h"
 #include "utils.h"
@@ -113,9 +114,23 @@ static const AtomStringIntPair spi_cmd_table[] = {
 };
 
 static const AtomStringIntPair spi_host_table[] = {
+// aliases for different chips, deprecated for the chips after esp32s2
+#ifdef SPI_HOST
+    { ATOM_STR("\x3", "spi"), SPI_HOST },
+#endif
+#ifdef HSPI_HOST
     { ATOM_STR("\x4", "hspi"), HSPI_HOST },
-#ifndef CONFIG_IDF_TARGET_ESP32C3
+#endif
+#ifdef VSPI_HOST
     { ATOM_STR("\x4", "vspi"), VSPI_HOST },
+#endif
+#ifdef FSPI_HOST
+    { ATOM_STR("\x4", "fspi"), FSPI_HOST },
+#endif
+    { ATOM_STR("\x4", "spi1"), SPI1_HOST },
+    { ATOM_STR("\x4", "spi2"), SPI2_HOST },
+#if SOC_SPI_PERIPH_NUM > 2
+    { ATOM_STR("\x4", "spi3"), SPI3_HOST },
 #endif
     SELECT_INT_DEFAULT(-1)
 };
@@ -125,8 +140,8 @@ static spi_host_device_t get_spi_host_device(term spi_peripheral, GlobalContext 
     int peripheral = interop_atom_term_select_int(spi_host_table, spi_peripheral, global);
 
     if (peripheral < 0) {
-        ESP_LOGW(TAG, "Unrecognized SPI peripheral.  Must be either hspi or vspi.  Defaulting to hspi.");
-        return HSPI_HOST;
+        ESP_LOGW(TAG, "Unrecognized SPI peripheral.  Defaulting to spi2.");
+        return SPI2_HOST;
     }
 
     return peripheral;
@@ -148,10 +163,10 @@ static void debug_buscfg(spi_bus_config_t *buscfg)
 {
     TRACE("Bus Config\n");
     TRACE("==========\n");
-    TRACE("    miso_io_num: %i\n", buscfg->miso_io_num);
-    TRACE("    mosi_io_num: %i\n", buscfg->mosi_io_num);
-    TRACE("    sclk_io_num: %i\n", buscfg->sclk_io_num);
-    TRACE("    miso_io_num: %i\n", buscfg->miso_io_num);
+    TRACE("    miso: %i\n", buscfg->miso_io_num);
+    TRACE("    mosi: %i\n", buscfg->mosi_io_num);
+    TRACE("    sclk: %i\n", buscfg->sclk_io_num);
+    TRACE("    miso: %i\n", buscfg->miso_io_num);
     TRACE("    quadwp_io_num: %i\n", buscfg->quadwp_io_num);
     TRACE("    quadhd_io_num: %i\n", buscfg->quadhd_io_num);
 }
@@ -162,7 +177,7 @@ static void debug_devcfg(spi_device_interface_config_t *devcfg)
     TRACE("==========\n");
     TRACE("    clock_speed_hz: %i\n", devcfg->clock_speed_hz);
     TRACE("    mode: %i\n", devcfg->mode);
-    TRACE("    spics_io_num: %i\n", devcfg->spics_io_num);
+    TRACE("    cs: %i\n", devcfg->spics_io_num);
     TRACE("    queue_size: %i\n", devcfg->queue_size);
     TRACE("    address_bits: %i\n", devcfg->address_bits);
 }
@@ -181,16 +196,16 @@ Context *spi_driver_create_port(GlobalContext *global, term opts)
     term hspi_atom = globalcontext_make_atom(global, ATOM_STR("\x4", "hspi"));
 
     term bus_config = interop_kv_get_value(opts, ATOM_STR("\xA", "bus_config"), global);
-    term miso_io_num_term = interop_kv_get_value(bus_config, ATOM_STR("\xB", "miso_io_num"), global);
-    term mosi_io_num_term = interop_kv_get_value(bus_config, ATOM_STR("\xB", "mosi_io_num"), global);
-    term sclk_io_num_term = interop_kv_get_value(bus_config, ATOM_STR("\xB", "sclk_io_num"), global);
-    term spi_peripheral_term = interop_kv_get_value_default(bus_config, ATOM_STR("\xB", "spi_peripheral"), hspi_atom, global);
-    spi_host_device_t host_device = get_spi_host_device(spi_peripheral_term, global);
+    term miso_term = interop_kv_get_value(bus_config, ATOM_STR("\x4", "miso"), global);
+    term mosi_term = interop_kv_get_value(bus_config, ATOM_STR("\x4", "mosi"), global);
+    term sclk_term = interop_kv_get_value(bus_config, ATOM_STR("\x4", "sclk"), global);
+    term peripheral_term = interop_kv_get_value_default(bus_config, ATOM_STR("\xA", "peripheral"), hspi_atom, global);
+    spi_host_device_t host_device = get_spi_host_device(peripheral_term, global);
 
     spi_bus_config_t buscfg = { 0 };
-    buscfg.miso_io_num = term_to_int32(miso_io_num_term);
-    buscfg.mosi_io_num = term_to_int32(mosi_io_num_term);
-    buscfg.sclk_io_num = term_to_int32(sclk_io_num_term);
+    buscfg.miso_io_num = term_to_int32(miso_term);
+    buscfg.mosi_io_num = term_to_int32(mosi_term);
+    buscfg.sclk_io_num = term_to_int32(sclk_term);
     buscfg.quadwp_io_num = -1;
     buscfg.quadhd_io_num = -1;
 
@@ -223,16 +238,16 @@ Context *spi_driver_create_port(GlobalContext *global, term opts)
         term device_name = term_get_tuple_element(device_names, i);
         term device_config = term_get_map_assoc(device_map, device_name, ctx->global);
 
-        term clock_speed_hz_term = interop_kv_get_value(device_config, ATOM_STR("\xC", "spi_clock_hz"), global);
+        term clock_speed_hz_term = interop_kv_get_value(device_config, ATOM_STR("\xE", "clock_speed_hz"), global);
         term mode_term = interop_kv_get_value(device_config, ATOM_STR("\x4", "mode"), global);
-        term spics_io_num_term = interop_kv_get_value(device_config, ATOM_STR("\xD", "spi_cs_io_num"), global);
+        term cs_term = interop_kv_get_value(device_config, ATOM_STR("\x2", "cs"), global);
         term address_bits_term = interop_kv_get_value(device_config, ATOM_STR("\x10", "address_len_bits"), global);
         term command_bits_term = interop_kv_get_value(device_config, ATOM_STR("\x10", "command_len_bits"), global);
 
         spi_device_interface_config_t devcfg = { 0 };
         devcfg.clock_speed_hz = term_to_int32(clock_speed_hz_term);
         devcfg.mode = term_to_int32(mode_term);
-        devcfg.spics_io_num = term_to_int32(spics_io_num_term);
+        devcfg.spics_io_num = term_to_int32(cs_term);
         devcfg.queue_size = 4;
         devcfg.address_bits = term_to_int32(address_bits_term);
         devcfg.command_bits = term_to_int32(command_bits_term);
@@ -587,14 +602,16 @@ static term create_pair(Context *ctx, term term1, term term2)
 static NativeHandlerResult spidriver_consume_mailbox(Context *ctx)
 {
     Message *message = mailbox_first(&ctx->mailbox);
-    term msg = message->message;
-    term pid = term_get_tuple_element(msg, 0);
-    term ref = term_get_tuple_element(msg, 1);
-    term req = term_get_tuple_element(msg, 2);
+    GenMessage gen_message;
+    if (UNLIKELY(port_parse_gen_message(message->message, &gen_message) != GenCallMessage)) {
+        ESP_LOGW(TAG, "Received invalid message.");
+        mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+        return NativeContinue;
+    }
 
-    term cmd_term = term_get_tuple_element(req, 0);
+    term cmd_term = term_get_tuple_element(gen_message.req, 0);
 
-    int local_process_id = term_to_local_process_id(pid);
+    int local_process_id = term_to_local_process_id(gen_message.pid);
     Context *target = globalcontext_get_process_lock(ctx->global, local_process_id);
 
     term ret;
@@ -603,22 +620,22 @@ static NativeHandlerResult spidriver_consume_mailbox(Context *ctx)
     switch (cmd) {
         case SPIReadAtCmd:
             TRACE("spi: read at.\n");
-            ret = spidriver_read_at(ctx, req);
+            ret = spidriver_read_at(ctx, gen_message.req);
             break;
 
         case SPIWriteAtCmd:
             TRACE("spi: write at.\n");
-            ret = spidriver_write_at(ctx, req);
+            ret = spidriver_write_at(ctx, gen_message.req);
             break;
 
         case SPIWriteCmd:
             TRACE("spi: write.\n");
-            ret = spidriver_write(ctx, req);
+            ret = spidriver_write(ctx, gen_message.req);
             break;
 
         case SPIWriteReadCmd:
             TRACE("spi: write_read.\n");
-            ret = spidriver_write_read(ctx, req);
+            ret = spidriver_write_read(ctx, gen_message.req);
             break;
 
         case SPICloseCmd:
@@ -638,8 +655,7 @@ static NativeHandlerResult spidriver_consume_mailbox(Context *ctx)
     if (UNLIKELY(memory_ensure_free_with_roots(ctx, 3, 1, &ret, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
         ret_msg = OUT_OF_MEMORY_ATOM;
     } else {
-        ref = term_get_tuple_element(msg, 1);
-        ret_msg = create_pair(ctx, ref, ret);
+        ret_msg = create_pair(ctx, gen_message.ref, ret);
     }
 
     mailbox_send(target, ret_msg);

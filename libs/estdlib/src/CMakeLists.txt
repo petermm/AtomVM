@@ -33,7 +33,11 @@ set(ERLANG_MODULES
     gen_server
     gen_statem
     gen_udp
+    gen_udp_inet
+    gen_udp_socket
     gen_tcp
+    gen_tcp_inet
+    gen_tcp_socket
     supervisor
     inet
     io_lib
@@ -41,10 +45,12 @@ set(ERLANG_MODULES
     lists
     maps
     math
+    net
     logger
     logger_std_h
     proplists
     socket
+    ssl
     string
     timer
     unicode

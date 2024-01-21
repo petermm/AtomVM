@@ -38,6 +38,7 @@
 #include "interop.h"
 #include "mailbox.h"
 #include "module.h"
+#include "port.h"
 #include "platform_defaultatoms.h"
 #include "scheduler.h"
 #include "term.h"
@@ -172,7 +173,8 @@ Context *uart_driver_create_port(GlobalContext *global, term opts)
 {
     Context *ctx = context_new(global);
 
-    term uart_name_term = interop_proplist_get_value(opts, NAME_ATOM);
+    term uart_name_term = interop_kv_get_value_default(opts, ATOM_STR("\xA", "peripheral"),
+        UNDEFINED_ATOM, global);
     term uart_speed_term = interop_proplist_get_value_default(opts, SPEED_ATOM, term_from_int(115200));
 
     term data_bits_term = interop_proplist_get_value_default(opts, DATA_BITS_ATOM, term_from_int(8));
@@ -180,10 +182,10 @@ Context *uart_driver_create_port(GlobalContext *global, term opts)
     term flow_control_term = interop_proplist_get_value_default(opts, FLOW_CONTROL_ATOM, NONE_ATOM);
     term parity_term = interop_proplist_get_value_default(opts, PARITY_ATOM, NONE_ATOM);
 
-    term tx_pin = get_uart_pin_opt(opts, TX_PIN_ATOM);
-    term rx_pin = get_uart_pin_opt(opts, RX_PIN_ATOM);
-    term rts_pin = get_uart_pin_opt(opts, RTS_PIN_ATOM);
-    term cts_pin = get_uart_pin_opt(opts, CTS_PIN_ATOM);
+    term tx_pin = get_uart_pin_opt(opts, TX_ATOM);
+    term rx_pin = get_uart_pin_opt(opts, RX_ATOM);
+    term rts_pin = get_uart_pin_opt(opts, RTS_ATOM);
+    term cts_pin = get_uart_pin_opt(opts, CTS_ATOM);
 
     term event_queue_len_term = interop_proplist_get_value_default(opts, EVENT_QUEUE_LEN_ATOM, term_from_int(16));
     if (!term_is_integer(event_queue_len_term)) {
@@ -257,6 +259,9 @@ Context *uart_driver_create_port(GlobalContext *global, term opts)
     }
 
     uart_config_t uart_config = {
+#if ESP_IDF_VERSION_MAJOR >= 5
+        .source_clk = UART_SCLK_DEFAULT,
+#endif
         .baud_rate = uart_speed,
         .data_bits = data_bits,
         .parity = parity,
@@ -448,12 +453,16 @@ static NativeHandlerResult uart_driver_consume_mailbox(Context *ctx)
     while (mailbox_has_next(&ctx->mailbox)) {
         Message *message = mailbox_first(&ctx->mailbox);
         term msg = message->message;
-        term pid = term_get_tuple_element(msg, 0);
-        term ref = term_get_tuple_element(msg, 1);
-        term req = term_get_tuple_element(msg, 2);
-        uint64_t ref_ticks = term_to_ref_ticks(ref);
+        GenMessage gen_message;
+        if (UNLIKELY(port_parse_gen_message(msg, &gen_message) != GenCallMessage)) {
+            ESP_LOGW(TAG, "Received invalid message.");
+            mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+            return NativeContinue;
+        }
 
-        int local_pid = term_to_local_process_id(pid);
+        uint64_t ref_ticks = term_to_ref_ticks(gen_message.ref);
+
+        int local_pid = term_to_local_process_id(gen_message.pid);
 
         if (is_closed) {
             if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2) * 2 + REF_SIZE) != MEMORY_GC_OK)) {
@@ -476,6 +485,7 @@ static NativeHandlerResult uart_driver_consume_mailbox(Context *ctx)
             continue;
         }
 
+        term req = gen_message.req;
         term cmd_term = term_is_atom(req) ? req : term_get_tuple_element(req, 0);
 
         enum uart_cmd cmd = interop_atom_term_select_int(cmd_table, cmd_term, ctx->global);

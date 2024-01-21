@@ -48,19 +48,19 @@ struct Test
 // Favor modules that return 0
 #define TEST_CASE(module)        \
     {                            \
-#module, 0, false, false \
+        #module, 0, false, false \
     }
 #define TEST_CASE_EXPECTED(module, expected) \
     {                                        \
-#module, expected, false, false      \
+        #module, expected, false, false      \
     }
 #define TEST_CASE_ATOMVM_ONLY(module, expected) \
     {                                           \
-#module, expected, false, true          \
+        #module, expected, false, true          \
     }
 #define TEST_CASE_COND(module, expected, skip) \
     {                                          \
-#module, expected, skip, false         \
+        #module, expected, skip, false         \
     }
 
 #ifndef AVM_NO_SMP
@@ -155,6 +155,7 @@ struct Test tests[] = {
     TEST_CASE_EXPECTED(test_tl, 5),
     TEST_CASE_EXPECTED(test_list_to_atom, 9),
     TEST_CASE_EXPECTED(test_list_to_existing_atom, 9),
+    TEST_CASE(test_lists_reverse),
     TEST_CASE_EXPECTED(test_binary_to_atom, 9),
     TEST_CASE_EXPECTED(test_binary_to_existing_atom, 9),
     TEST_CASE_EXPECTED(test_atom_to_list, 1),
@@ -512,6 +513,13 @@ struct Test tests[] = {
     TEST_CASE(test_crypto),
     TEST_CASE(test_min_max_guard),
     TEST_CASE(int64_build_binary),
+
+#if defined ATOMVM_HAS_MBEDTLS
+    TEST_CASE(test_crypto_strong_rand_bytes),
+    TEST_CASE(test_atomvm_random),
+#endif
+
+    TEST_CASE(float_decode),
     // TEST CRASHES HERE: TEST_CASE(memlimit),
 
     { NULL, 0, false, false }
@@ -591,7 +599,8 @@ int test_module_execution(bool beam, struct Test *test)
 
 int test_modules_execution(bool beam, bool skip, int count, char **item)
 {
-    if (chdir("erlang_tests")) {
+    if (chdir("erlang_tests") != 0) {
+        perror("Error: ");
         return EXIT_FAILURE;
     }
 
@@ -658,7 +667,10 @@ int main(int argc, char **argv)
     fprintf(stderr, "Seed is %li\n", seed);
     srand(seed);
 
-    chdir(dirname(name));
+    if (chdir(dirname(name)) != 0) {
+        perror("Error: ");
+        return EXIT_FAILURE;
+    }
 
     int opt;
     bool beam = false;

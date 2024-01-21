@@ -9,7 +9,9 @@ name: build-and-test-on-freebsd
 on:
   push:
     paths-ignore:
+      - 'src/platforms/emscripten/**'
       - 'src/platforms/esp32/**'
+      - 'src/platforms/rp2040/**'
       - 'src/platforms/stm32/**'
       - 'doc/**'
       - 'LICENSES/**'
@@ -17,7 +19,9 @@ on:
       - '*.md'
   pull_request:
     paths-ignore:
+      - 'src/platforms/emscripten/**'
       - 'src/platforms/esp32/**'
+      - 'src/platforms/rp2040/**'
       - 'src/platforms/stm32/**'
       - 'doc/**'
       - 'LICENSES/**'
@@ -36,21 +40,20 @@ jobs:
       ATOMVM_EXAMPLE: "atomvm-example"
     steps:
 
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Build and Test on FreeBSD
       id: build-and-test-on-freebsd
-      uses: vmactions/freebsd-vm@v0
-      timeout-minutes: 20
+      uses: cross-platform-actions/action@v0.21.1
+      timeout-minutes: 25
       with:
-        envs: 'ATOMVM_EXAMPLE'
-        usesh: true
-        sync: rsync
-        copyback: false
-
-        prepare: |
-          pkg install -y curl cmake gperf erlang elixir
-
+        memory: 8G
+        hypervisor: qemu
+        shell: sh
+        operating_system: freebsd
+        version: '13.2'
+        sync_files: runner-to-vm
+        environment_variables: 'ATOMVM_EXAMPLE'
         run: |
 
           echo "%%"
@@ -58,6 +61,7 @@ jobs:
           echo "%%"
           echo "**freebsd-version:**"
           freebsd-version
+          sudo pkg install -y cmake gperf erlang elixir mbedtls
           echo "**uname:**"
           uname -a
           echo "**C Compiler version:**"
@@ -73,7 +77,7 @@ jobs:
           echo "%%"
           mkdir build
           cd build
-          cmake ..
+          cmake .. -DMBEDTLS_ROOT_DIR=/usr/local -DAVM_WARNINGS_ARE_ERRORS=ON
 
           echo "%%"
           echo "%% Building AtomVM ..."
@@ -118,7 +122,7 @@ jobs:
           echo "%%"
           echo "%% Running install ..."
           echo "%%"
-          make install
+          sudo make install
           atomvm examples/erlang/hello_world.avm
           atomvm -v
           atomvm -h

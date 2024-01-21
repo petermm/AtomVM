@@ -25,10 +25,25 @@
 #include "defaultatoms.h"
 #include "iff.h"
 #include "mapped_file.h"
+#include "otp_net.h"
 #include "otp_socket.h"
 #include "scheduler.h"
 #include "smp.h"
 #include "utils.h"
+
+#if ATOMVM_HAS_MBEDTLS
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
+
+#if defined(MBEDTLS_VERSION_NUMBER) && (MBEDTLS_VERSION_NUMBER >= 0x03000000)
+#include <mbedtls/build_info.h>
+#else
+#include <mbedtls/config.h>
+#endif
+
+#include "otp_ssl.h"
+#include "sys_mbedtls.h"
+#endif
 
 #include <fcntl.h>
 #include <limits.h>
@@ -93,6 +108,20 @@ struct GenericUnixPlatformData
 #endif
 #endif
 #endif
+
+#ifdef ATOMVM_HAS_MBEDTLS
+#ifndef AVM_NO_SMP
+    Mutex *entropy_mutex;
+#endif
+    mbedtls_entropy_context entropy_ctx;
+    bool entropy_is_initialized;
+
+#ifndef AVM_NO_SMP
+    Mutex *random_mutex;
+#endif
+    mbedtls_ctr_drbg_context random_ctx;
+    bool random_is_initialized;
+#endif
 };
 
 static void mapped_file_avm_pack_destructor(struct AVMPackData *obj, GlobalContext *global);
@@ -132,7 +161,7 @@ static inline void sys_poll_events_with_kqueue(GlobalContext *glb, int timeout_m
         ts_ptr = NULL;
     } else {
         ts.tv_sec = timeout_ms / 1000;
-        ts.tv_nsec = (timeout_ms % 1000) * 1000000UL;
+        ts.tv_nsec = (uint_least64_t) (timeout_ms % 1000) * 1000000;
     }
 
     int nbEvents = kevent(platform->kqueue_fd, NULL, 0, notified, poll_count, ts_ptr);
@@ -173,6 +202,10 @@ static inline void sys_poll_events_with_poll(GlobalContext *glb, int timeout_ms)
     int fd_index;
     if (listeners_poll_count < 0 || select_events_poll_count < 0) {
         // Means it is dirty and should be rebuilt.
+        // The array of polling fds is composed of, in this order:
+        // - the signaling fd (for SMP), which is eventfd or a pipe
+        // - the listeners fd
+        // - the sockets fd
         struct ListHead *select_events = synclist_wrlock(&glb->select_events);
         size_t select_events_new_count;
         if (select_events_poll_count < 0) {
@@ -184,6 +217,7 @@ static inline void sys_poll_events_with_poll(GlobalContext *glb, int timeout_ms)
         size_t listeners_new_count = 0;
         struct ListHead *listeners = NULL;
         struct ListHead *item;
+        // We avoid acquiring a lock on the list of listeners and rebuild the list of fds for listeners if we can
         if (listeners_poll_count < 0) {
             listeners = synclist_rdlock(&glb->listeners);
             LIST_FOR_EACH (item, listeners) {
@@ -212,6 +246,7 @@ static inline void sys_poll_events_with_poll(GlobalContext *glb, int timeout_ms)
 
         fd_index = poll_count;
 
+        // Rebuild the list of fds for listeners if it is dirty
         if (listeners_poll_count < 0) {
             // We put listeners first
             LIST_FOR_EACH (item, listeners) {
@@ -226,6 +261,9 @@ static inline void sys_poll_events_with_poll(GlobalContext *glb, int timeout_ms)
                 }
             }
             synclist_unlock(&glb->listeners);
+        } else {
+            // Else we can reuse the previous list
+            fd_index += listeners_new_count;
         }
 
         // We put select events next
@@ -250,6 +288,9 @@ static inline void sys_poll_events_with_poll(GlobalContext *glb, int timeout_ms)
     poll_count += listeners_poll_count + select_events_poll_count;
 
     int nb_descriptors = poll(fds, poll_count, timeout_ms);
+
+    // After poll, process the list of fds in order, using fd_index as the index
+    // on the list and nb_descriptors as the number of fds to process left
     fd_index = 0;
 #ifndef AVM_NO_SMP
     if (nb_descriptors > 0) {
@@ -360,12 +401,23 @@ void sys_monotonic_time(struct timespec *t)
     }
 }
 
-uint64_t sys_monotonic_millis()
+uint64_t sys_monotonic_time_u64()
 {
     // On generic unix, native format is timespec.
     struct timespec ts;
     sys_monotonic_time(&ts);
-    return (ts.tv_nsec / 1000000UL) + (ts.tv_sec * 1000UL);
+    // 2^64/10^9/86400/365 around 585 years
+    return ((uint_least64_t) ts.tv_sec * 1000000000) + ts.tv_nsec;
+}
+
+uint64_t sys_monotonic_time_ms_to_u64(uint64_t ms)
+{
+    return ms * 1000000;
+}
+
+uint64_t sys_monotonic_time_u64_to_ms(uint64_t t)
+{
+    return t / 1000000;
 }
 
 enum OpenAVMResult sys_open_avm_from_file(
@@ -492,7 +544,8 @@ Context *sys_create_port(GlobalContext *glb, const char *driver_name, term opts)
         }
         char port_driver_func_name[64 + strlen("_create_port") + 1];
         snprintf(port_driver_func_name, sizeof(port_driver_func_name), "%s_create_port", driver_name);
-        create_port_t create_port = (create_port_t) dlsym(handle, port_driver_func_name);
+        create_port_t create_port
+            = (create_port_t) CAST_VOID_TO_FUNC_PTR(dlsym(handle, port_driver_func_name));
         if (IS_NULL_PTR(create_port)) {
             return NULL;
         }
@@ -559,7 +612,23 @@ void sys_init_platform(GlobalContext *global)
 #endif
 #endif
 
+    otp_net_init(global);
     otp_socket_init(global);
+#if ATOMVM_HAS_MBEDTLS
+#ifndef AVM_NO_SMP
+    platform->entropy_mutex = smp_mutex_create();
+    if (IS_NULL_PTR(platform->entropy_mutex)) {
+        AVM_ABORT();
+    }
+    platform->random_mutex = smp_mutex_create();
+    if (IS_NULL_PTR(platform->random_mutex)) {
+        AVM_ABORT();
+    }
+#endif
+    platform->entropy_is_initialized = false;
+    platform->random_is_initialized = false;
+    otp_ssl_init(global);
+#endif
 
     global->platform_data = platform;
 }
@@ -586,6 +655,22 @@ void sys_free_platform(GlobalContext *global)
 #endif
 #endif
 #endif
+
+#if !defined(AVM_NO_SMP) && ATOMVM_HAS_MBEDTLS
+    smp_mutex_destroy(platform->entropy_mutex);
+    smp_mutex_destroy(platform->random_mutex);
+#endif
+
+#if ATOMVM_HAS_MBEDTLS
+    if (platform->random_is_initialized) {
+        mbedtls_ctr_drbg_free(&platform->random_ctx);
+    }
+
+    if (platform->entropy_is_initialized) {
+        mbedtls_entropy_free(&platform->entropy_ctx);
+    }
+#endif
+
     free(platform);
 }
 
@@ -691,3 +776,73 @@ bool event_listener_is_event(EventListener *listener, listener_event_t event)
 {
     return listener->fd == event;
 }
+
+#ifdef ATOMVM_HAS_MBEDTLS
+int sys_mbedtls_entropy_func(void *entropy, unsigned char *buf, size_t size)
+{
+#ifndef MBEDTLS_THREADING_C
+    struct GenericUnixPlatformData *platform
+        = CONTAINER_OF(entropy, struct GenericUnixPlatformData, entropy_ctx);
+    SMP_MUTEX_LOCK(platform->entropy_mutex);
+    int result = mbedtls_entropy_func(entropy, buf, size);
+    SMP_MUTEX_UNLOCK(platform->entropy_mutex);
+
+    return result;
+#else
+    return mbedtls_entropy_func(entropy, buf, size);
+#endif
+}
+
+mbedtls_entropy_context *sys_mbedtls_get_entropy_context_lock(GlobalContext *global)
+{
+    struct GenericUnixPlatformData *platform = global->platform_data;
+
+    SMP_MUTEX_LOCK(platform->entropy_mutex);
+
+    if (!platform->entropy_is_initialized) {
+        mbedtls_entropy_init(&platform->entropy_ctx);
+        platform->entropy_is_initialized = true;
+    }
+
+    return &platform->entropy_ctx;
+}
+
+void sys_mbedtls_entropy_context_unlock(GlobalContext *global)
+{
+    struct GenericUnixPlatformData *platform = global->platform_data;
+    SMP_MUTEX_UNLOCK(platform->entropy_mutex);
+}
+
+mbedtls_ctr_drbg_context *sys_mbedtls_get_ctr_drbg_context_lock(GlobalContext *global)
+{
+    struct GenericUnixPlatformData *platform = global->platform_data;
+
+    SMP_MUTEX_LOCK(platform->random_mutex);
+
+    if (!platform->random_is_initialized) {
+        mbedtls_ctr_drbg_init(&platform->random_ctx);
+
+        mbedtls_entropy_context *entropy_ctx = sys_mbedtls_get_entropy_context_lock(global);
+        // Safe to unlock it now, sys_mbedtls_entropy_func will lock it again later
+        sys_mbedtls_entropy_context_unlock(global);
+
+        const char *seed = "AtomVM Mbed-TLS initial seed.";
+        int seed_len = strlen(seed);
+        int seed_err = mbedtls_ctr_drbg_seed(&platform->random_ctx, sys_mbedtls_entropy_func,
+            entropy_ctx, (const unsigned char *) seed, seed_len);
+        if (UNLIKELY(seed_err != 0)) {
+            abort();
+        }
+        platform->random_is_initialized = true;
+    }
+
+    return &platform->random_ctx;
+}
+
+void sys_mbedtls_ctr_drbg_context_unlock(GlobalContext *global)
+{
+    struct GenericUnixPlatformData *platform = global->platform_data;
+    SMP_MUTEX_UNLOCK(platform->random_mutex);
+}
+
+#endif

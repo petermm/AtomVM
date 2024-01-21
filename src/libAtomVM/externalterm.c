@@ -58,7 +58,8 @@
 #define SMALL_ATOM_EXT_BASE_SIZE 2
 
 // Assuming two's-complement implementation of signed integers
-#define SIGNED_INT_TO_UNSIGNED(val, unsigned_type) ((val) < 0 ? ~((unsigned_type) (val)) + 1 : (val))
+#define REMOVE_SIGN(val, unsigned_type)                                                            \
+    ((val) < 0 ? ~((unsigned_type) (val)) + 1 : (unsigned_type) (val))
 
 // MAINTENANCE NOTE.  Range checking on the external term buffer is only performed in
 // the calculate_heap_usage function, which will fail with an invalid term if there is
@@ -239,7 +240,7 @@ static int serialize_term(uint8_t *buf, term t, GlobalContext *glb)
             }
             return INTEGER_EXT_SIZE;
         } else {
-            avm_uint64_t unsigned_val = SIGNED_INT_TO_UNSIGNED(val, avm_uint64_t);
+            avm_uint64_t unsigned_val = REMOVE_SIGN(val, avm_uint64_t);
             uint8_t num_bytes = get_num_bytes(unsigned_val);
             if (buf != NULL) {
                 buf[0] = SMALL_BIG_EXT;
@@ -264,15 +265,13 @@ static int serialize_term(uint8_t *buf, term t, GlobalContext *glb)
         return NEW_FLOAT_EXT_SIZE;
 
     } else if (term_is_atom(t)) {
-        AtomString atom_string = globalcontext_atomstring_from_term(glb, t);
-        size_t atom_len = atom_string_len(atom_string);
+        int atom_index = term_to_atom_index(t);
+        size_t atom_len;
+        atom_ref_t atom_ref = atom_table_get_atom_ptr_and_len(glb->atom_table, atom_index, &atom_len);
         if (!IS_NULL_PTR(buf)) {
             buf[0] = ATOM_EXT;
             WRITE_16_UNALIGNED(buf + 1, atom_len);
-            int8_t *atom_data = (int8_t *) atom_string_data(atom_string);
-            for (size_t i = 3; i < atom_len + 3; ++i) {
-                buf[i] = (int8_t) atom_data[i - 3];
-            }
+            atom_table_write_bytes(glb->atom_table, atom_ref, atom_len, buf + 3);
         }
         return 3 + atom_len;
 
@@ -626,7 +625,7 @@ static int calculate_heap_usage(const uint8_t *external_term_buf, size_t remaini
         }
 
         case SMALL_BIG_EXT: {
-            uint8_t num_bytes = external_term_buf[1];
+            size_t num_bytes = external_term_buf[1];
             if (UNLIKELY(num_bytes > 8 || remaining < (SMALL_BIG_EXT_BASE_SIZE + num_bytes))) {
                 return INVALID_TERM_SIZE;
             }

@@ -152,7 +152,6 @@ extern struct NifCollectionDefListItem *nif_collection_list;
 void sys_enable_core_periph_clocks(void);
 bool sys_lock_pin(GlobalContext *glb, uint32_t gpio_bank, uint16_t pin_num);
 
-static Context *port_driver_create_port(const char *port_name, GlobalContext *global, term opts);
 void port_driver_init_all(GlobalContext *global);
 void port_driver_destroy_all(GlobalContext *global);
 
@@ -162,5 +161,8 @@ void nif_collection_destroy_all(GlobalContext *global);
 
 void sys_init_icache(void);
 void sys_enable_flash_cache(void);
+void *_sbrk_r(struct _reent *, ptrdiff_t);
+// This function may be defined to relocate the heap.
+void local_heap_setup(uint8_t **start, uint8_t **end);
 
 #endif /* _STM_SYS_H_ */

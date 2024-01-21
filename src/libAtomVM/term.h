@@ -87,6 +87,12 @@ extern "C" {
 #define TUPLE_SIZE(elems) ((int) (elems + 1))
 #define CONS_SIZE 2
 #define REFC_BINARY_CONS_OFFSET 4
+#define LIST_SIZE(num_elements, element_size) ((num_elements) * ((element_size) + CONS_SIZE))
+#define TERM_MAP_SIZE(num_elements) (3 + 2 * (num_elements))
+#define TERM_MAP_SHARED_SIZE(num_elements) (2 + (num_elements))
+
+#define LIST_HEAD_INDEX 1
+#define LIST_TAIL_INDEX 0
 
 #define TERM_BINARY_SIZE_IS_HEAP(size) ((size) < REFC_BINARY_MIN)
 
@@ -323,7 +329,7 @@ static inline int term_is_movable_boxed(term t)
  * @param header the boxed term header.
  * @return the size of the boxed term that follows the header. 0 is returned if the boxed term is just the header.
  */
-static inline int term_get_size_from_boxed_header(term header)
+static inline size_t term_get_size_from_boxed_header(term header)
 {
     return header >> 6;
 }
@@ -336,7 +342,7 @@ static inline int term_get_size_from_boxed_header(term header)
  * @return size of given term.
  *
  */
-static inline int term_boxed_size(term t)
+static inline size_t term_boxed_size(term t)
 {
     /* boxed: 10 */
     TERM_DEBUG_ASSERT((t & 0x3) == 0x2);
@@ -868,7 +874,7 @@ static inline term term_from_local_process_id(uint32_t local_process_id)
  * @param size the intended binary size
  * @return true if the binary should be allocated in the process heap; false, otherwise.
  */
-static inline bool term_binary_size_is_heap_binary(uint32_t size)
+static inline bool term_binary_size_is_heap_binary(size_t size)
 {
     return size < REFC_BINARY_MIN;
 }
@@ -880,7 +886,7 @@ static inline bool term_binary_size_is_heap_binary(uint32_t size)
  * @param size the size in bytes
  * @return the count of terms
  */
-static inline int term_binary_data_size_in_terms(uint32_t size)
+static inline size_t term_binary_data_size_in_terms(size_t size)
 {
     if (term_binary_size_is_heap_binary(size)) {
 #if TERM_BYTES == 4
@@ -902,7 +908,7 @@ static inline int term_binary_data_size_in_terms(uint32_t size)
  * @param size the size of the binary (in bytes)
  * @return the size (in terms) of a binary of size-many bytes in the heap
  */
-static inline int term_binary_heap_size(uint32_t size)
+static inline size_t term_binary_heap_size(size_t size)
 {
     return term_binary_data_size_in_terms(size) + BINARY_HEADER_SIZE;
 }
@@ -973,10 +979,10 @@ static inline const char *term_binary_data(term t)
 * @param glb the global context as refc binaries are global
 * @return a term pointing to the boxed binary pointer.
 */
-static inline term term_create_uninitialized_binary(uint32_t size, Heap *heap, GlobalContext *glb)
+static inline term term_create_uninitialized_binary(size_t size, Heap *heap, GlobalContext *glb)
 {
     if (term_binary_size_is_heap_binary(size)) {
-        int size_in_terms = term_binary_data_size_in_terms(size);
+        size_t size_in_terms = term_binary_data_size_in_terms(size);
 
         term *boxed_value = memory_heap_alloc(heap, size_in_terms + 1);
         boxed_value[0] = (size_in_terms << 6) | TERM_BOXED_HEAP_BINARY;
@@ -998,7 +1004,7 @@ static inline term term_create_uninitialized_binary(uint32_t size, Heap *heap, G
  * @param glb the global context as refc binaries are global
  * @return a term pointing to the boxed binary pointer.
  */
-static inline term term_from_literal_binary(const void *data, uint32_t size, Heap *heap, GlobalContext *glb)
+static inline term term_from_literal_binary(const void *data, size_t size, Heap *heap, GlobalContext *glb)
 {
     term binary = term_create_uninitialized_binary(size, heap, glb);
     memcpy((void *) term_binary_data(binary), data, size);
@@ -1056,7 +1062,7 @@ static inline void term_set_refc_binary_data(term t, const void *data)
     boxed_value[3] = (term) data;
 }
 
-static inline term term_from_const_binary(const void *data, uint32_t size, Heap *heap, GlobalContext *glb)
+static inline term term_from_const_binary(const void *data, size_t size, Heap *heap, GlobalContext *glb)
 {
     term binary = term_alloc_refc_binary(size, true, heap, glb);
     term_set_refc_binary_data(binary, data);
@@ -1072,7 +1078,7 @@ static inline term term_from_const_binary(const void *data, uint32_t size, Heap 
 * @param glb the global context as refc binaries are global
 * @return a term pointing to the boxed binary pointer.
 */
-static inline term term_create_empty_binary(uint32_t size, Heap *heap, GlobalContext *glb)
+static inline term term_create_empty_binary(size_t size, Heap *heap, GlobalContext *glb)
 {
     term t = term_create_uninitialized_binary(size, heap, glb);
     memset((char *) term_binary_data(t), 0x00, size);
@@ -1291,7 +1297,7 @@ static inline term term_list_from_list_ptr(term *list_elem)
 static inline term term_get_list_head(term t)
 {
     term *list_ptr = term_get_list_ptr(t);
-    return list_ptr[1];
+    return list_ptr[LIST_HEAD_INDEX];
 }
 
 /**
@@ -1303,7 +1309,7 @@ static inline term term_get_list_head(term t)
 static inline term term_get_list_tail(term t)
 {
     term *list_ptr = term_get_list_ptr(t);
-    return *list_ptr;
+    return list_ptr[LIST_TAIL_INDEX];
 }
 
 /**
@@ -1315,7 +1321,7 @@ static inline term term_get_list_tail(term t)
  */
 MALLOC_LIKE static inline term *term_list_alloc(Heap *heap)
 {
-    return memory_heap_alloc(heap, 2);
+    return memory_heap_alloc(heap, CONS_SIZE);
 }
 
 /**
@@ -1590,14 +1596,14 @@ static inline size_t term_get_map_value_offset()
     return 2;
 }
 
-static inline int term_map_size_in_terms_maybe_shared(size_t num_entries, bool is_shared)
+static inline size_t term_map_size_in_terms_maybe_shared(size_t num_entries, bool is_shared)
 {
-    return 2 + (is_shared ? 0 : (1 + num_entries)) + num_entries;
+    return is_shared ? TERM_MAP_SHARED_SIZE(num_entries) : TERM_MAP_SIZE(num_entries);
 }
 
-static inline int term_map_size_in_terms(size_t num_entries)
+static inline size_t term_map_size_in_terms(size_t num_entries)
 {
-    return term_map_size_in_terms_maybe_shared(num_entries, false);
+    return TERM_MAP_SIZE(num_entries);
 }
 
 static inline term term_alloc_map_maybe_shared(avm_uint_t size, term keys, Heap *heap)

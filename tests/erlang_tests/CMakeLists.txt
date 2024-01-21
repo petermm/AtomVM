@@ -132,6 +132,7 @@ compile_erlang(test_list_processes)
 compile_erlang(test_tl)
 compile_erlang(test_list_to_atom)
 compile_erlang(test_list_to_existing_atom)
+compile_erlang(test_lists_reverse)
 compile_erlang(test_binary_to_atom)
 compile_erlang(test_binary_to_existing_atom)
 compile_erlang(test_atom_to_list)
@@ -485,6 +486,11 @@ compile_erlang(test_module_info)
 
 compile_erlang(int64_build_binary)
 
+compile_erlang(test_crypto_strong_rand_bytes)
+compile_erlang(test_atomvm_random)
+
+compile_erlang(float_decode)
+
 add_custom_target(erlang_test_modules DEPENDS
     code_load_files
 
@@ -577,6 +583,7 @@ add_custom_target(erlang_test_modules DEPENDS
     test_tl.beam
     test_list_to_atom.beam
     test_list_to_existing_atom.beam
+    test_lists_reverse.beam
     test_binary_to_atom.beam
     test_binary_to_existing_atom.beam
     test_atom_to_list.beam
@@ -933,4 +940,9 @@ add_custom_target(erlang_test_modules DEPENDS
     test_module_info.beam
 
     int64_build_binary.beam
+
+    test_crypto_strong_rand_bytes.beam
+    test_atomvm_random.beam
+
+    float_decode.beam
 )

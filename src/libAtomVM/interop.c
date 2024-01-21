@@ -20,6 +20,7 @@
 
 #include "interop.h"
 
+#include "atom_table.h"
 #include "bitstring.h"
 #include "defaultatoms.h"
 #include "tempstack.h"
@@ -139,15 +140,18 @@ char *interop_list_to_string(term list, int *ok)
 
 char *interop_atom_to_string(Context *ctx, term atom)
 {
+    GlobalContext *glb = ctx->global;
+
     int atom_index = term_to_atom_index(atom);
-    AtomString atom_string = (AtomString) valueshashtable_get_value(ctx->global->atoms_ids_table, atom_index, (unsigned long) NULL);
-    int len = atom_string_len(atom_string);
+
+    size_t len;
+    atom_ref_t atom_ref = atom_table_get_atom_ptr_and_len(glb->atom_table, atom_index, &len);
 
     char *str = malloc(len + 1);
     if (IS_NULL_PTR(str)) {
         return NULL;
     }
-    atom_string_to_c(atom_string, str, len + 1);
+    atom_table_write_cstring(glb->atom_table, atom_ref, len + 1, str);
 
     return str;
 }
@@ -610,4 +614,25 @@ term interop_kv_get_value_default(term kv, AtomString key, term default_value, G
     } else {
         return default_value;
     }
+}
+
+term interop_atom_term_select_atom(const AtomStringIntPair *table, int value, GlobalContext *global)
+{
+    for (int i = 0; table[i].as_val != NULL; i++) {
+        if (value == table[i].i_val) {
+            int global_atom_index = globalcontext_insert_atom(global, table[i].as_val);
+            return term_from_atom_index(global_atom_index);
+        }
+    }
+    return term_invalid_term();
+}
+
+term interop_chars_to_list(const char *chars, size_t len, Heap *heap)
+{
+    term ret = term_nil();
+    for (int i = (int) len - 1; i >= 0; --i) {
+        term c_term = term_from_int(chars[i]);
+        ret = term_list_prepend(c_term, ret, heap);
+    }
+    return ret;
 }
