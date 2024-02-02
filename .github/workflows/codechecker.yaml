@@ -1,0 +1,95 @@
+#
+#  Copyright 2024 Peter Madsen-Mygdal <petermm@gmail.com>
+#
+#  SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
+#
+
+name: "CodeChecker"
+
+on:
+  push:
+    paths-ignore:
+      - "src/platforms/esp32/**"
+      - "src/platforms/stm32/**"
+      - "libs/**"
+      - "doc/**"
+      - "LICENSES/**"
+      - "*.Md"
+      - "*.md"
+  pull_request:
+    paths-ignore:
+      - "src/platforms/esp32/**"
+      - "src/platforms/stm32/**"
+      - "libs/**"
+      - "doc/**"
+      - "LICENSES/**"
+      - "*.Md"
+      - "*.md"
+  # schedule:
+  #   - cron: "45 18 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref != 'refs/heads/master' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeChecker Analyze
+    runs-on: ubuntu-latest
+    env:
+      CC: gcc-13
+      CXX: g++-13
+      CC_ANALYZER_BIN: gcc:/usr/bin/g++-13
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["cpp"]
+
+    steps:
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: 25
+          elixir-version: 1.15
+      - name: "APT update"
+        run: sudo apt update -y
+
+      - name: "Install deps"
+        run: sudo apt install -y gcc-13 g++-13 cmake gperf zlib1g-dev ninja-build erlang libmbedtls-dev cppcheck valgrind
+
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Prepare Build"
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF
+
+      - uses: whisperity/codechecker-analysis-action@v1
+        id: codechecker
+        with:
+          build-command: "cd ${{ github.workspace }}/build; make"
+          store: ${{ github.event_name == 'push' }}
+          store-url: "https://atomvm-codechecker.fly.dev/atomvm"
+          store-username: ${{ secrets.CODECHECKER_STORE_USER }}
+          store-password: ${{ secrets.CODECHECKER_STORE_PASSWORD }}
+          diff: ${{ github.event_name == 'pull_request' }}
+          diff-url: "https://atomvm-codechecker.fly.dev/atomvm"
+          diff-username: ${{ secrets.CODECHECKER_STORE_USER }}
+          diff-password: ${{ secrets.CODECHECKER_STORE_PASSWORD }}
+        # Upload the results to the CI.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "CodeChecker Bug Reports"
+          path: ${{ steps.codechecker.outputs.result-html-dir }}
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.codechecker.outputs.warnings-in-diff == 'true' }}
+        with:
+          name: "New introduced results Bug Reports"
+          path: ${{ steps.codechecker.outputs.diff-html-dir }}
