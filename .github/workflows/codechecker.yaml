@@ -1,0 +1,119 @@
+#
+# Copyright 2024 Peter Madsen-Mygdal <petermm@gmail.com>
+#
+# SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
+#
+# CodeChecker-Action https://github.com/whisperity/CodeChecker-Action
+# for running
+# CodeChecker https://github.com/Ericsson/CodeChecker/
+#
+# Outputs html code analysis report in the GH action, available for download.
+#
+# Will optionally upload to a CodeChecker Web server
+# if the following GH _repository_ variable are set:
+#
+# CODECHECKER_STORE_PRODUCT_URI eg. https://server.com/product (NB no trailing slash)
+#
+# requires the following GH _repository_ secrets to be set
+# CODECHECKER_STORE_USER      user_name with PRODUCT_STORE and PRODUCT_VIEW permission
+# CODECHECKER_STORE_PASSWORD  password
+#
+
+name: "CodeChecker"
+
+on:
+  push:
+    paths-ignore:
+      - "libs/**"
+      - "doc/**"
+      - "LICENSES/**"
+      - "*.Md"
+      - "*.md"
+  pull_request:
+    paths-ignore:
+      - "libs/**"
+      - "doc/**"
+      - "LICENSES/**"
+      - "*.Md"
+      - "*.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref != 'refs/heads/master' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeChecker Analyze
+    runs-on: ubuntu-22.04
+    env:
+      CC: gcc-13
+      CXX: g++-13
+      CC_ANALYZER_BIN: gcc:/usr/bin/g++-13
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["cpp"]
+
+    steps:
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: 25
+          elixir-version: 1.15
+      - name: "APT update"
+        run: sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test && sudo apt update -y
+
+      - name: "Install deps"
+        run: sudo apt install -y gcc-13 g++-13 cmake gperf zlib1g-dev ninja-build erlang libmbedtls-dev cppcheck valgrind
+
+      - name: "Install rebar3"
+        run: |
+          set -eu
+          wget --no-verbose https://github.com/erlang/rebar3/releases/download/3.18.0/rebar3
+          chmod +x rebar3
+          sudo mv rebar3 /usr/local/bin/
+
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Prepare Build"
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF
+
+      - uses: whisperity/codechecker-analysis-action@v1
+        id: codechecker
+        with:
+          version: 6.23.1
+          ctu: true
+          build-command: "cd ${{ github.workspace }}/build; make"
+          store: ${{ github.event_name == 'push' && vars.CODECHECKER_STORE_PRODUCT_URI != '' }}
+          store-url: ${{ vars.CODECHECKER_STORE_PRODUCT_URI }}
+          store-username: ${{ secrets.CODECHECKER_STORE_USER }}
+          store-password: ${{ secrets.CODECHECKER_STORE_PASSWORD }}
+          diff: ${{ github.event_name == 'pull_request' && vars.CODECHECKER_STORE_PRODUCT_URI != '' }}
+          diff-url: ${{ vars.CODECHECKER_STORE_PRODUCT_URI }}
+          diff-username: ${{ secrets.CODECHECKER_STORE_USER }}
+          diff-password: ${{ secrets.CODECHECKER_STORE_PASSWORD }}
+
+      - name: Output URL if successfully stored
+        if: ${{ steps.codechecker.outputs.store-successful == 'true' }}
+        run: echo "[🚀 Analysis available here ->](${{vars.CODECHECKER_STORE_PRODUCT_URI}}/runs)" >> $GITHUB_STEP_SUMMARY
+
+        # Upload the results to the CI.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "CodeChecker Bug Reports"
+          path: ${{ steps.codechecker.outputs.result-html-dir }}
+
+        # Upload the results to the CI, if diff resulted in additional warnings.
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.codechecker.outputs.warnings-in-diff == 'true' }}
+        with:
+          name: "New introduced results Bug Reports"
+          path: ${{ steps.codechecker.outputs.diff-html-dir }}
