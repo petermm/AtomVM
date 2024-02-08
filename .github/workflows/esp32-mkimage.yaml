@@ -30,19 +30,19 @@ concurrency:
 
 jobs:
   esp32-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     container: espressif/idf:v${{ matrix.idf-version }}
 
     strategy:
       matrix:
         idf-version: ["5.1.2"]
-        cc: ["clang-10"]
-        cxx: ["clang++-10"]
-        cflags: ["-O3"]
+        cc: ["gcc-12"]
+        cxx: ["gcc++-12"]
+        cflags: ["-O2"]
         otp: ["24"]
         elixir_version: ["1.11"]
-        compiler_pkgs: ["clang-10"]
-        soc: ["esp32", "esp32c3", "esp32s2", "esp32s3", "esp32c6"]
+        compiler_pkgs: ["gcc-12"]
+        soc: ["esp32s3"]
 
     env:
       CC: ${{ matrix.cc }}
@@ -107,7 +107,7 @@ jobs:
         make
 
     - name: "Use release defaults"
-      if: startsWith(github.ref, 'refs/tags/')
+      #if: startsWith(github.ref, 'refs/tags/')
       shell: bash
       working-directory: ./src/platforms/esp32/
       run: |
