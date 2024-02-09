@@ -38,6 +38,7 @@ test_monotonic_time([Delay | Tail]) ->
     EndSystem = erlang:system_time(millisecond),
     Mono = EndMonotonic - BeginMonotonic,
     System = EndSystem - BeginSystem,
+    io:format("--~nMono: ~p~nSystem: ~p~n", [Mono, System]),
     true = Mono >= Delay,
     true = Mono + 10 > System,
     true = System + 10 > Mono,

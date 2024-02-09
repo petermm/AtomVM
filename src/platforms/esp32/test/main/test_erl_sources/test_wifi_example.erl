@@ -22,6 +22,21 @@
 
 -export([start/0]).
 
+% get() ->
+%     #{
+%         ap => [
+%             %% {ssid, "my_ap_ssid"},
+%             %% {psk, "my_ap_psk"},
+%             %% {ssid_hidden, false},
+%             %% {max_connections, 4}
+%         ],
+%         sta => [
+%             %% {dhcp_hostname, "my_device_name"},
+%             {ssid, "my_sta_ssid"},
+%             {psk, "my_sta_psk"}
+%         ]
+%     }.
+
 start() ->
     case verify_platform(atomvm:platform()) of
         ok ->
@@ -57,7 +72,7 @@ start_network() ->
     case network:start(Config) of
         {ok, _Pid} ->
             io:format("Network started.~n"),
-            timer:sleep(12000),
+            timer:sleep(10000),
             ok;
         Error ->
             Error
@@ -80,7 +95,7 @@ connected() ->
 
 got_ip(IpInfo) ->
     io:format("Got IP: ~p.~n", [IpInfo]),
-    spawn(fun loop/0).
+    loop().
 
 disconnected() ->
     io:format("STA disconnected.~n").
@@ -98,5 +113,4 @@ loop() ->
     io:format("Date: ~p/~p/~p ~p:~p:~p (~pms)~n", [
         Year, Month, Day, Hour, Minute, Second, erlang:system_time(millisecond)
     ]),
-    timer:sleep(200),
     loop().

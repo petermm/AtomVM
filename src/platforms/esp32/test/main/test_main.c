@@ -92,7 +92,7 @@ static esp_netif_t *eth_start(void)
         .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH
     };
     esp_netif_t *netif = esp_netif_new(&netif_config);
-    TEST_ASSERT(netif != NULL);
+    assert(netif);
     free(desc);
 
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
@@ -212,11 +212,10 @@ TEST_CASE("test_file", "[test_run]")
     sdmmc_card_print_info(stdout, card);
 
     term ret_value = avm_test_case("test_file.beam");
+    TEST_ASSERT(ret_value == OK_ATOM);
 
     esp_vfs_fat_sdcard_unmount(mount_point, card);
     ESP_LOGI(TAG, "Card unmounted");
-
-    TEST_ASSERT(ret_value == OK_ATOM);
 }
 #endif
 
@@ -464,10 +463,9 @@ TEST_CASE("test_select", "[test_run]")
     ESP_ERROR_CHECK(esp_vfs_register("/pipe", &pipefs, NULL));
 
     term ret_value = avm_test_case("test_select.beam");
+    TEST_ASSERT(ret_value == OK_ATOM);
 
     esp_vfs_unregister("/pipe");
-
-    TEST_ASSERT(ret_value == OK_ATOM);
 }
 
 TEST_CASE("test_time_and_processes", "[test_run]")
@@ -514,11 +512,10 @@ TEST_CASE("test_net", "[test_run]")
     }
 
     term ret_value = avm_test_case("test_net.beam");
+    TEST_ASSERT(ret_value == OK_ATOM);
 
     ESP_LOGI(TAG, "Stopping network\n");
     eth_stop(eth_netif);
-
-    TEST_ASSERT(ret_value == OK_ATOM);
 }
 
 TEST_CASE("test_socket", "[test_run]")
@@ -535,11 +532,10 @@ TEST_CASE("test_socket", "[test_run]")
     }
 
     term ret_value = avm_test_case("test_socket.beam");
+    TEST_ASSERT(term_to_int(ret_value) == 0);
 
     ESP_LOGI(TAG, "Stopping network\n");
     eth_stop(eth_netif);
-
-    TEST_ASSERT(term_to_int(ret_value) == 0);
 }
 
 TEST_CASE("test_ssl", "[test_run]")
@@ -556,11 +552,10 @@ TEST_CASE("test_ssl", "[test_run]")
     }
 
     term ret_value = avm_test_case("test_ssl.beam");
+    TEST_ASSERT(ret_value == OK_ATOM);
 
     ESP_LOGI(TAG, "Stopping network\n");
     eth_stop(eth_netif);
-
-    TEST_ASSERT(ret_value == OK_ATOM);
 }
 #endif
 
