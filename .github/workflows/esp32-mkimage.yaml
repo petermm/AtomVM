@@ -106,12 +106,12 @@ jobs:
       run: |
         make
 
-    - name: "Use release defaults"
-      #if: startsWith(github.ref, 'refs/tags/')
-      shell: bash
-      working-directory: ./src/platforms/esp32/
-      run: |
-        cp sdkconfig.release-defaults sdkconfig.defaults
+    # - name: "Use release defaults"
+    #   #if: startsWith(github.ref, 'refs/tags/')
+    #   shell: bash
+    #   working-directory: ./src/platforms/esp32/
+    #   run: |
+    #     cp sdkconfig.release-defaults sdkconfig.defaults
 
     - name: "Build ${{ matrix.soc }} with idf.py"
       shell: bash
