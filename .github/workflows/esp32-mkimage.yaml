@@ -80,9 +80,9 @@ jobs:
         uname -a
         echo "**libc version:**"
         ldd --version
-        echo "**C Compiler version:**"
-        $CC --version
-        $CXX --version
+        # echo "**C Compiler version:**"
+        # $CC --version
+        # $CXX --version
         echo "**Linker version:**"
         ld --version
         echo "**CMake version:**"
