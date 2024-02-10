@@ -35,7 +35,7 @@ jobs:
 
     strategy:
       matrix:
-        idf-version: ["5.1.2"]
+        idf-version: ["5.2-rc1"]
         # cc: ["gcc-12"]
         # cxx: ["gcc++-12"]
         cflags: ["-O2"]
@@ -49,7 +49,7 @@ jobs:
       CXX: ${{ matrix.cxx }}
       CFLAGS: ${{ matrix.cflags }}
       CXXFLAGS: ${{ matrix.cflags }}
-      ImageOS: "ubuntu20"
+      ImageOS: "ubuntu22"
 
     steps:
     - name: Checkout repo
