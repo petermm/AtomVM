@@ -41,7 +41,7 @@ jobs:
         cflags: ["-O2"]
         otp: ["24"]
         elixir_version: ["1.11"]
-        compiler_pkgs: ["gcc-12"]
+        compiler_pkgs: [""]
         soc: ["esp32s3"]
 
     env:
