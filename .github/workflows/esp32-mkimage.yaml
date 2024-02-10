@@ -36,12 +36,12 @@ jobs:
     strategy:
       matrix:
         idf-version: ["5.1.2"]
-        cc: ["gcc-12"]
-        cxx: ["gcc++-12"]
+        # cc: ["gcc-12"]
+        # cxx: ["gcc++-12"]
         cflags: ["-O2"]
         otp: ["24"]
         elixir_version: ["1.11"]
-        compiler_pkgs: [""]
+        compiler_pkgs: ["gcc"]
         soc: ["esp32s3"]
 
     env:
