@@ -42,7 +42,7 @@ jobs:
         otp: ["24"]
         elixir_version: ["1.11"]
         compiler_pkgs: ["gcc"]
-        soc: ["esp32s3"]
+        soc: ["esp32p4"]
 
     env:
       CC: ${{ matrix.cc }}
