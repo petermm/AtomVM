@@ -46,7 +46,7 @@ def test_atomvm_qemu(dut, redirect):
 # These tests are run on sim tests
 def test_atomvm_sim(dut, redirect):
      dut.expect('Got IP')
-     #dut.expect('Synchronized time with SNTP server')
+     dut.expect('Synchronized time with SNTP server')
 
      dut.expect_unity_test_output(timeout=180)
      assert len(dut.testsuite.testcases) > 0
