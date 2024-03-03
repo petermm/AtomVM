@@ -65,7 +65,7 @@ start_network() ->
             ]
         ]},
         {sntp, [
-            {host, "time.aws.com"},
+            {host, "time.cloudflare.com"},
             {synchronized, fun sntp_synchronized/1}
         ]}
     ],
@@ -113,5 +113,5 @@ loop() ->
     io:format("Date: ~p/~p/~p ~p:~p:~p (~pms)~n", [
         Year, Month, Day, Hour, Minute, Second, erlang:system_time(millisecond)
     ]),
-    timer:sleep(10),
+    timer:sleep(100),
     loop().
