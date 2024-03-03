@@ -95,7 +95,7 @@ connected() ->
 
 got_ip(IpInfo) ->
     io:format("Got IP: ~p.~n", [IpInfo]),
-    loop().
+    spawn(fun loop/0).
 
 disconnected() ->
     io:format("STA disconnected.~n").
