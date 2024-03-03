@@ -65,7 +65,7 @@ start_network() ->
             ]
         ]},
         {sntp, [
-            {host, "time-d-b.nist.gov"},
+            {host, "time.google.com"},
             {synchronized, fun sntp_synchronized/1}
         ]}
     ],
