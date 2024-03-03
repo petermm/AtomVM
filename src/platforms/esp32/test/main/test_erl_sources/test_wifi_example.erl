@@ -65,7 +65,7 @@ start_network() ->
             ]
         ]},
         {sntp, [
-            {host, "time.google.com"},
+            {host, "time1.google.com"},
             {synchronized, fun sntp_synchronized/1}
         ]}
     ],
