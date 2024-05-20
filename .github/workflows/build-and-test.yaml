@@ -44,7 +44,7 @@ jobs:
         cc: ["gcc-7", "gcc-8", "gcc-9", "gcc-10", "gcc-11", "gcc-12", "clang-10", "clang-11"]
         # cc: ["gcc-7", "gcc-8", "gcc-9", "gcc-10", "gcc-11", "gcc-12", "clang-10", "clang-11", "clang-12", "clang-13", "clang-14"]
         cflags: ["-O3"]
-        otp: ["21", "22", "23", "24", "25", "master"]
+        otp: ["21", "22", "23", "24", "25", "26", "27", "master"]
 
         exclude:
         # Ubuntu 22.04 with setup-beam only has OTP >= 24.2
