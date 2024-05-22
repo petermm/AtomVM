@@ -505,11 +505,12 @@ static void send_scan_error_reason(Context *ctx, term pid, term ref, term reason
 }
 
 // heap must be allocated and free'd by the caller
-static void send_scan_error_from_task_heap(GlobalContext *global, term pid, term reason, Heap *heap)
+static void send_scan_error_from_task_heap(GlobalContext *global, term pid, term reason, term ref, Heap *heap)
 {
     term error = port_heap_create_error_tuple(heap, reason);
     term scan_results_atom = make_atom(global, ATOM_STR("\xc", "scan_results"));
-    term msg = port_heap_create_tuple2(heap, scan_results_atom, error);
+    term ret = port_heap_create_tuple2(heap, scan_results_atom, error);
+    term msg = port_heap_create_tuple2(heap, ref, ret);
     port_send_message_from_task(global, pid, msg);
 }
 
@@ -556,8 +557,11 @@ static void send_scan_results(struct ScanClientData *data)
     } else {
         return_results = discovered;
     }
-    wifi_ap_record_t *ap_records = calloc(return_results, sizeof(wifi_ap_record_t));
-    if (IS_NULL_PTR(ap_records)) {
+    wifi_ap_record_t *ap_records = NULL;
+    if (return_results > 0) {
+        ap_records = calloc(return_results, sizeof(wifi_ap_record_t));
+    }
+    if ((return_results > 0) && IS_NULL_PTR(ap_records)) {
         esp_wifi_clear_ap_list();
 
         owned = take_scan_data_if_owner(ctx, ref_ticks);
@@ -578,7 +582,12 @@ static void send_scan_results(struct ScanClientData *data)
         return;
     }
 
-    err = esp_wifi_scan_get_ap_records(&num_results, ap_records);
+    if (return_results > 0) {
+        err = esp_wifi_scan_get_ap_records(&num_results, ap_records);
+    } else {
+        esp_wifi_clear_ap_list();
+        err = ESP_OK;
+    }
     if (UNLIKELY(err != ESP_OK)) {
         // the ap_list must be cleared on failures to prevent a memory leak
         esp_wifi_clear_ap_list();
