@@ -76,6 +76,9 @@ Callback functions can be specified by the following configuration parameters:
 * `{connected, fun(() -> term())}` A callback function which will be called when the device connects to the target network.
 * `{disconnected, fun(() -> term())}` A callback function which will be called when the device disconnects from the target network. If no callback function is provided the default behavior is to attempt to reconnect immediately. By providing a callback function the application can decide whether to reconnect, or connect to a new access point.
 * `{got_ip, fun((ip_info()) -> term())}` A callback function which will be called when the device obtains an IP address.  In this case, the IPv4 IP address, net mask, and gateway are provided as a parameter to the callback function.
+* `{scan_done, fun((scan_results() | {error, Reason :: term()}) -> term())}` A callback function which will be called once a network scan is
+completed, this allows for event-driven connection management, and prevents blocking the caller
+when requesting a scan of available wifi networks.
 
 ```{warning}
 IPv6 addresses are not yet supported in AtomVM.
@@ -112,8 +115,10 @@ gotIp(IpInfo) ->
     io:format("Got IP: ~p~n", [IpInfo]).
 
 disconnected() ->
-    io:format("Disconnected from AP, attempting to reconnect~n"),
-    network:sta_connect().
+    io:format("Disconnected from AP, starting scan~n"),
+    {ok, {Num, NetworkList}} = network:wifi_scan(),
+    % your reconnect logic here
+    ...
 ```
 
 In a typical application, the network should be configured and an IP address should be acquired first, before starting clients or services that have a dependency on the network.
@@ -138,9 +143,99 @@ case network:wait_for_sta(Config, 15000) of
 end
 ```
 
-To obtain the signal strength (in decibels) of the connection to the associated access point use [`network:sta_rssi/0`](./apidocs/erlang/eavmlib/network.md#sta_rssi0).
-
 ### STA (or AP+STA) mode functions
+
+Some functions are only available if the device is configured in STA or AP+STA mode.
+
+#### `sta_rssi`
+
+Once connected to an access point, the signal strength in decibel-milliwatts (dBm) of the
+connection to the associated access point may be obtained using
+[`network:sta_rssi/0`](./apidocs/erlang/eavmlib/network.md#sta_rssi0). The value returned as
+`{ok, Value}` will typically be a negative number, but in the
+presence of a powerful signal this can be a positive number. A level of 0 dBm corresponds to the
+power of 1 milliwatt. A 10 dBm decrease in level is equivalent to a ten-fold decrease in signal
+power.
+
+#### `wifi_scan`
+
+```{notice}
+This function is currently only supported on the ESP32 platform.
+```
+
+After the network has been configured for STA mode and started, as long as no connection has been
+initiated or associated, you may scan for available access points using
+[`network:wifi_scan/0`](./apidocs/erlang/eavmlib/network.md#wifi_scan0) or
+[`network:wifi_scan/1`](./apidocs/erlang/eavmlib/network.md#wifi_scan1).  Scanning for access
+points will temporarily inhibit other traffic on the access point network if it is in use, but
+should not cause any active connections to be dropped.  With no options, a default 'active' scan,
+with a per-channel dwell time of 120ms will be used and will return network details for up to 6
+access points.  The return value for the scan takes the form of a tuple consisting of
+`{ok, Results}`, where `Results = {FoundAPs, NetworkList}`. `FoundAPs` may be a number larger than
+the length of the NetworkList if more access points were discovered than the number of results
+requested.  The entries in the `NetworkList` take the form of a map with the keys `ssid` mapped to
+the network name, `rssi` for the dBm signal strength of the access point, `authmode` value is the
+authentication method used by the network, `bssid` (a.k.a MAC address) of the access point, and the
+`channel` key for the primary channel for the network.
+
+Example return results:
+```erlang
+{ok, {Num, Networks}} = network:wifi_scan(),
+io:format("network scan found ~p networks.~n", [Num]),
+lists:foreach(
+    fun(
+        _Network = #{ssid := SSID, rssi := DBm, authmode := Mode, bssid := BSSID, channel := Number}
+    ) ->
+        io:format(
+            "Network: ~p, BSSID: ~p, signal ~p dBm, Security: ~p, channel ~p~n",
+            [SSID, BSSID, DBm, Mode, Number]
+        )
+    end,
+    Networks
+).
+```
+
+To avoid blocking the caller for extended lengths of time, especially on 5 Ghz capable devices,
+a callback function may be configured in the network config. See
+[Station mode callbacks](#station-mode-callbacks).
+
+To minimize the risk of out-of-memory errors, this driver limits the maximum number of returned
+networks depending on the target and memory configuration:
+ESP32-C2 supports up to 10, ESP32-S2/ESP32-C61/ESP32-C5 up to 14, most other targets up to 20,
+and ESP32-P4 or PSRAM-enabled builds up to 64.
+
+The default scan is quite fast, and likely may not find all the available networks.  Scans are
+quite configurable with `active` (the default) and `passive` modes. Options should take the form of
+a proplist.  The per-channel scan time can be changed with the `dwell` key, the channel dwell time
+can be set for up to 1500 ms.  Passive scans are slower, as they always linger on each channel for
+the full dwell time. Passive mode can be used by simply adding `passive` to the configuration
+proplist. Keep in mind when choosing a dwell time that between each progressively scanned channel
+the device must return to the home channel for a short time (typically 30ms), but for scans with a
+dwell time of over 1000ms the home channel dwell time will increase to 60ms to help mitigate
+beacon-timeout events.  In some network configuration beacon timeout events may still occur, but
+should not lead to a dropped connection, and after the scan completes the device should receive the
+next beacon from the access point. The default of 6 access points in the returned `NetworkList` may
+be changed with the `results` key. By default hidden networks are ignored, but can be included in
+the results by adding `show_hidden` to the configuration.
+
+For example, to do a passive scan using an ESP32-C6, including hidden networks, using the longest
+allowed scan time and showing the maximum number of networks available use the following:
+
+```erlang
+{ok, Results} = network:wifi_scan([passive, {results, 20}, {dwell, 1500}, show_hidden]),
+```
+
+For convenience the default options used for `network:wifi_scan/0` may be configured along with the
+`sta_config()` used to start the network driver.  For the corresponding configuration keys consult
+the [`network:scan_options()`](./apidocs/erlang/eavmlib/network.md#scan-options) type definition.
+You may also perform a scan without starting the network with a configuration. This will use the
+configuration `[{sta, [managed]}]`, which uses the default `disconnected` event callback that will
+always attempt to reconnect to the last network. This makes future use of `network:wifi_scan/0,1`
+impossible, and `network:sta_disconnect/0` useless as the driver will immediately attempt to
+reconnect to the last network. This is mainly intended for quick testing purposes. For most
+applications that will use wifi scan results it is recommended to start the driver with a
+configuration that uses a custom callback function for `disconnected` events, so that the driver
+will remain idle and allow the use of scan results to decide if a connection should be made.
 
 #### `sta_status`
 
@@ -191,7 +286,7 @@ The `<ap-properties>` property list may contain the following entries:
 
 If the SSID is omitted in configuration, the SSID name `atomvm-<hexmac>` will be created, where `<hexmac>` is the hexadecimal representation of the factory-assigned MAC address of the device.  This name should be sufficiently unique to disambiguate it from other reachable ESP32 devices, but it may also be difficult to read or remember.
 
-If the password is omitted, then an _open network_ will be created, and a warning will be printed to the console.  Otherwise, the AP network will be started using WPA+WPA2 authentication.
+If the password is omitted, then an __open network__ will be created, and a warning will be printed to the console.  Otherwise, the AP network will be started using WPA+WPA2 authentication.
 
 If the channel is omitted the default chanel for esp32 is `1`. This setting is only used while a device is operation is AP mode only. If `ap_channel` is configured, it will be temporarily changed to match the associated access point if AP + STA mode is used and the station is associated with an access point. This is a hardware limitation due to the modem radio only being able to operate on a single channel (frequency) at a time.
 
