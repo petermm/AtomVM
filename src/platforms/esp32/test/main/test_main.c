@@ -499,7 +499,7 @@ TEST_CASE("test_rtc_slow", "[test_run]")
 }
 
 // Works C3 on local runs, but fails GH actions
-#if ESP_IDF_VERSION_MAJOR >= 5 && !CONFIG_IDF_TARGET_ESP32C3
+#if ESP_IDF_VERSION_MAJOR >= 5
 TEST_CASE("test_twdt", "[test_run]")
 {
     term ret_value = avm_test_case("test_twdt.beam");
