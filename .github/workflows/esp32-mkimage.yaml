@@ -158,3 +158,42 @@ jobs:
         files: |
           src/platforms/esp32/build/AtomVM-${{ matrix.soc }}-${{ github.ref_name }}.img
           src/platforms/esp32/build/AtomVM-${{ matrix.soc }}-${{ github.ref_name }}.img.sha256
+
+  create-manifest:
+    runs-on: ubuntu-latest
+    needs: esp32-release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Get version from Git tag or ref
+        run: |
+          # Get the latest tag or commit hash
+          VERSION=$(git describe --tags --always)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Generate manifest.json
+        run: |
+          # Load the version from the environment variable set in the previous step
+          VERSION=${{ env.VERSION }}
+
+          # Define the JSON structure using jq
+          jq -n --arg version "$VERSION" '
+            {
+              name: "AtomVM",
+              version: $version,
+              builds: [
+                {chipFamily: "ESP32", parts: [{path: "atomvm-esp32-image", offset: 4096}]},
+                {chipFamily: "ESP32-C2", parts: [{path: "atomvm-esp32c2-image", offset: 0}]},
+                {chipFamily: "ESP32-C3", parts: [{path: "atomvm-esp32c3-image", offset: 0}]},
+                {chipFamily: "ESP32-C6", parts: [{path: "atomvm-esp32c6-image", offset: 0}]},
+                {chipFamily: "ESP32-S2", parts: [{path: "atomvm-esp32s2-image", offset: 0}]},
+                {chipFamily: "ESP32-S3", parts: [{path: "atomvm-esp32s3-image", offset: 0}]},
+                {chipFamily: "ESP32-H2", parts: [{path: "atomvm-esp32h2-image", offset: 0}]}
+              ]
+            }' > manifest.json
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest.json
+          path: manifest.json
