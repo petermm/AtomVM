@@ -54,7 +54,7 @@ jobs:
         copyback: false
 
         prepare: |
-          pkg install -y curl cmake gperf erlang elixir mbedtls
+          pkg install -y curl cmake gperf erlang elixir rebar3 mbedtls
 
         run: |
           set -e
@@ -72,14 +72,6 @@ jobs:
           cmake --version
           echo "**hw.ncpu:**"
           sysctl -n hw.ncpu
-
-          echo "%%"
-          echo "%% Installing rebar3 ..."
-          echo "%%"
-          curl -s -o rebar3 https://github.com/erlang/rebar3/releases/download/3.24.0/rebar3
-          chmod +x rebar3
-          ./rebar3 local install
-          export PATH=${PATH}:${HOME}/.cache/rebar3/bin
 
           echo "%%"
           echo "%% Running CMake ..."
