@@ -109,7 +109,7 @@ jobs:
       - uses: whisperity/codechecker-analysis-action@v1
         id: codechecker
         with:
-          version: 6.25.0-rc1
+          version: 6.24.4
           ctu: true
           build-command: "cd ${{ github.workspace }}/build; make"
           store: ${{ github.event_name == 'push' && vars.CODECHECKER_STORE_PRODUCT_URI != '' }}
