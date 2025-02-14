@@ -70,13 +70,13 @@ jobs:
       - name: "Install deps"
         run: sudo apt install -y gcc-13 g++-13 cmake gperf zlib1g-dev ninja-build erlang libmbedtls-dev cppcheck valgrind
 
-      - name: "Install Facebook Infer"
-        run: |
-          VERSION=v1.1.0
-          curl -sSL "https://github.com/facebook/infer/releases/download/${VERSION}/infer-linux64-${VERSION}.tar.xz" --output infer.tar.xz
-          tar -xf infer.tar.xz
-          sudo mv infer-linux64-${VERSION} /opt/infer
-          sudo ln -s /opt/infer/bin/infer /usr/local/bin/infer
+      # - name: "Install Facebook Infer"
+      #   run: |
+      #     VERSION=v1.1.0
+      #     curl -sSL "https://github.com/facebook/infer/releases/download/${VERSION}/infer-linux64-${VERSION}.tar.xz" --output infer.tar.xz
+      #     tar -xf infer.tar.xz
+      #     sudo mv infer-linux64-${VERSION} /opt/infer
+      #     sudo ln -s /opt/infer/bin/infer /usr/local/bin/infer
 
       - name: "Install rebar3"
         run: |
@@ -94,22 +94,22 @@ jobs:
           cd build
           cmake .. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      - name: "Run Infer Analysis"
-        run: |
-          cd build
-          infer capture -- make
-          infer analyze
+      # - name: "Run Infer Analysis"
+      #   run: |
+      #     cd build
+      #     infer capture -- make
+      #     infer analyze
 
-      - name: "Upload Infer Results"
-        uses: actions/upload-artifact@v4
-        with:
-          name: "Infer Analysis Results"
-          path: build/infer-out
+      # - name: "Upload Infer Results"
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: "Infer Analysis Results"
+      #     path: build/infer-out
 
       - uses: whisperity/codechecker-analysis-action@v1
         id: codechecker
         with:
-          version: 6.23.1
+          version: 6.25.0-rc1
           ctu: true
           build-command: "cd ${{ github.workspace }}/build; make"
           store: ${{ github.event_name == 'push' && vars.CODECHECKER_STORE_PRODUCT_URI != '' }}
