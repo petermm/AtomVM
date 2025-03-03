@@ -38,7 +38,7 @@ jobs:
       matrix:
         esp-idf-target: ["esp32", "esp32c3"]
         idf-version:
-         - 'v5.0.7'
+         - 'v5.0.8'
          - 'v5.1.5'
          - 'v5.2.3'
          - 'v5.3.2'
@@ -46,7 +46,7 @@ jobs:
 
         exclude:
         - esp-idf-target: "esp32c3"
-          idf-version: 'v5.0.7'
+          idf-version: 'v5.0.8'
         - esp-idf-target: "esp32c3"
           idf-version: 'v5.1.5'
     steps:
