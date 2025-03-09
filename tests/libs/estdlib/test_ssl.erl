@@ -49,6 +49,7 @@ is_ssl_available() ->
 
 test_ssl() ->
     ok = ssl:start(),
+    ok = test_print_client_capabilities(),
     ok = test_start_twice(),
     ok = test_connect_close(),
     ok = test_connect_error(),
@@ -56,6 +57,29 @@ test_ssl() ->
     ok = test_send_recv_zero(),
     ok = ssl:stop(),
     ok.
+
+test_print_client_capabilities() ->
+    {ok, SSLSocket} = ssl:connect("www.howsmyssl.com", 443, [
+        {verify, verify_none}, {active, false}, {binary, true}
+    ]),
+    UserAgent = erlang:system_info(machine),
+    ok = ssl:send(SSLSocket, [
+        <<"GET /a/check HTTP/1.1\r\nHost: www.howsmyssl.com\r\nUser-Agent: ">>,
+        UserAgent,
+        <<"\r\n\r\n">>
+    ]),
+    ok = recv_helper(SSLSocket, 0),
+    ok = ssl:close(SSLSocket),
+    ok.
+
+recv_helper(SSLSocket, Bytes) ->
+    case ssl:recv(SSLSocket, Bytes) of
+        {ok, Data} ->
+            io:format("~s~n", [Data]),
+            recv_helper(SSLSocket, 0);
+        {error, _Reason} ->
+            ok
+    end.
 
 test_start_twice() ->
     ok = ssl:start().

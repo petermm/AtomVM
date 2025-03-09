@@ -14,6 +14,7 @@ with nodejs and emscripten)
 - Added memory info in `out_of_memory` crash logs to help developers fix memory issues.
 - Added documentation and function specs for uart driver
 - Added `uart:read/2` with a timeout parameter.
+- Lift TLS 1.2 limit for requests with verify_none, for newer MbedTLS versions.
 
 ### Fixed
 
