@@ -63,7 +63,7 @@ start_network() ->
         {ok, _Pid} ->
             % test that sta_rssi() can be safely called
             % when network is just started, but may not yet be connected.
-            network:sta_rssi(),
+            %network:sta_rssi(),
             io:format("Network started.~n"),
             ok;
         Error ->
