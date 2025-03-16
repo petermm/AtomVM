@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        board: ["pico", "pico_w"]
+        board: ["pico"]
 
     steps:
     - name: Checkout repo
@@ -46,7 +46,7 @@ jobs:
       run: sudo apt update
 
     - name: "Install deps"
-      run: sudo apt install -y cmake gperf ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib erlang-base erlang-dialyzer
+      run: sudo apt install -y cmake gperf ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib erlang-base erlang-dialyzer rebar3
 
     - name: Build
       shell: bash
@@ -87,7 +87,6 @@ jobs:
         npx tsx run-tests.ts ../build.nosmp/tests/rp2040_tests.uf2 ../build.nosmp/tests/test_erl_sources/rp2040_test_modules.uf2
 
     - name: Build atomvmlib.uf2
-      if: startsWith(github.ref, 'refs/tags/')
       shell: bash
       run: |
         set -euo pipefail
@@ -96,8 +95,12 @@ jobs:
         cmake ..
         make atomvmlib.uf2
 
+    - name: Install uf2tool
+      shell: bash
+      run: |
+        rebar3 global install uf2tool
+
     - name: Rename and write sha256sum
-      if: startsWith(github.ref, 'refs/tags/')
       shell: bash
       run: |
         pushd src/platforms/rp2040/build
@@ -109,7 +112,17 @@ jobs:
         ATOMVMLIB_FILE=atomvmlib-${{ github.ref_name }}.uf2
         mv atomvmlib.uf2 "${ATOMVMLIB_FILE}"
         sha256sum "${ATOMVMLIB_FILE}" > "${ATOMVMLIB_FILE}.sha256"
+        COMBINED_ATOMVM_UF2=AtomVM-combined-${{ matrix.board }}-${{ github.ref_name }}.uf2
+        uf2tool join -o "${COMBINED_ATOMVM_UF2}" "src/${ATOMVM_UF2}" "${ATOMVMLIB_FILE}"
+        sha256sum "${COMBINED_ATOMVM_UF2}" > "${COMBINED_ATOMVM_UF2}.sha256"
         popd
+
+    - name: "Upload ${{ matrix.board }} artifacts"
+      uses: actions/upload-artifact@v4
+      with:
+        name: AtomVM-combined-${{ matrix.board }}-${{ github.ref_name }}.uf2
+        path: ./src/src/platforms/rp2040/build/AtomVM-combined-${{ matrix.board }}-${{ github.ref_name }}.uf2
+        if-no-files-found: error
 
     - name: Release
       uses: softprops/action-gh-release@v1
