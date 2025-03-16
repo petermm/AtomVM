@@ -125,7 +125,7 @@ jobs:
         mv atomvmlib.uf2 "${ATOMVMLIB_FILE}"
         sha256sum "${ATOMVMLIB_FILE}" > "${ATOMVMLIB_FILE}.sha256"
         COMBINED_ATOMVM_UF2=AtomVM-combined-${{ matrix.board }}-${{ github.ref_name }}.uf2
-        uf2tool join -o "${COMBINED_ATOMVM_UF2}" "src/${ATOMVM_UF2}" "${ATOMVMLIB_FILE}"
+        uf2tool join -o "${COMBINED_ATOMVM_UF2}" "src/platforms/rp2040/build/src/${ATOMVM_UF2}" "${ATOMVMLIB_FILE}"
         sha256sum "${COMBINED_ATOMVM_UF2}" > "${COMBINED_ATOMVM_UF2}.sha256"
         popd
 
@@ -133,7 +133,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: AtomVM-combined-${{ matrix.board }}-${{ github.ref_name }}.uf2
-        path: ./src/src/platforms/rp2040/build/AtomVM-combined-${{ matrix.board }}-${{ github.ref_name }}.uf2
+        path: ./build/libs/AtomVM-combined-${{ matrix.board }}-${{ github.ref_name }}.uf2
         if-no-files-found: error
 
     - name: Release
