@@ -98,7 +98,19 @@ jobs:
     - name: Install uf2tool
       shell: bash
       run: |
-        rebar3 global install uf2tool
+        mkdir -p /tmp/uf2tool_install && cd /tmp/uf2tool_install
+        echo '{deps, [{uf2tool}]}.' > rebar.config
+        rebar3 get-deps
+        TOOL_PATH=$(find _build -name "uf2tool" -type f -executable | head -1)
+        if [ -n "$TOOL_PATH" ]; then
+          sudo cp "$TOOL_PATH" /usr/local/bin/
+        else
+          # If executable not found, try building it
+          echo '{escript_main_app, uf2tool}.' >> rebar.config
+          rebar3 escriptize
+          sudo cp _build/default/bin/uf2tool /usr/local/bin/ || echo "Failed to build uf2tool"
+        fi
+        which uf2tool || echo "uf2tool not found in PATH"
 
     - name: Rename and write sha256sum
       shell: bash
