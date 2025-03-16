@@ -99,7 +99,7 @@ jobs:
       shell: bash
       run: |
         mkdir -p /tmp/uf2tool_install && cd /tmp/uf2tool_install
-        echo '{deps, [{uf2tool}]}.' > rebar.config
+        echo '{deps, [{uf2tool, "1.1.0"}]}.' > rebar.config
         rebar3 get-deps
         TOOL_PATH=$(find _build -name "uf2tool" -type f -executable | head -1)
         if [ -n "$TOOL_PATH" ]; then
