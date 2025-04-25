@@ -85,7 +85,7 @@ ensure_epmd("BEAM") ->
     _ = os:cmd("epmd -daemon"),
     ok;
 ensure_epmd("ATOM") ->
-    {ok, _, Fd} = atomvm:subprocess("/bin/sh", ["sh", "-c", "epmd -daemon"], undefined, [stdout]),
+    {ok, _, Fd} = atomvm:subprocess("/bin/sh", ["sh", "-c", "epmd -daemon 1>&2"], undefined, [stdout]),
     ok = atomvm:posix_close(Fd),
     ok.
 
