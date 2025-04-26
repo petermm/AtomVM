@@ -303,7 +303,7 @@ jobs:
     # Setup
     - name: "Install deps for containers"
       if: matrix.container != ''
-      run: apt-get update && apt-get install -y --no-install-recommends sudo unzip git tzdata
+      run: apt-get update && apt-get install -y --no-install-recommends sudo unzip git tzdata build-essential libssl-dev
 
     - name: "Add i386 architecture"
       if: matrix.arch == 'i386'
