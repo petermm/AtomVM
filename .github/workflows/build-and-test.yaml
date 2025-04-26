@@ -36,6 +36,9 @@ jobs:
   build-and-test:
     runs-on: ${{ matrix.os || 'ubuntu-24.04' }}
     container: ${{ matrix.container }}
+    defaults:
+      run:
+        shell: bash
     strategy:
 
       fail-fast: false
@@ -298,13 +301,12 @@ jobs:
       CXXFLAGS: ${{ matrix.cflags }}
       DEBIAN_FRONTEND: noninteractive
       TZ: "Etc/UTC"
-      SHELL: "/bin/bash"
 
     steps:
     # Setup
     - name: "Install deps for containers"
       if: matrix.container != ''
-      run: apt-get update && apt-get install -y --no-install-recommends sudo unzip git tzdata build-essential libssl-dev locales && locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+      run: apt-get update && apt-get install -y --no-install-recommends sudo unzip git tzdata build-essential libssl-dev locales bash && locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 
     - name: "Add i386 architecture"
       if: matrix.arch == 'i386'
