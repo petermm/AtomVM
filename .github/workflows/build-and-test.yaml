@@ -301,6 +301,8 @@ jobs:
       CXXFLAGS: ${{ matrix.cflags }}
       DEBIAN_FRONTEND: noninteractive
       TZ: "Etc/UTC"
+      LANG: "en_US.UTF-8"
+      LC_ALL: "en_US.UTF-8"
 
     steps:
     # Setup
