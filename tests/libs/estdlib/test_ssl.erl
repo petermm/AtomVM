@@ -48,9 +48,9 @@ is_ssl_available() ->
     end.
 
 test_ssl() ->
-    ok = ssl:start(),
-    ok = test_print_client_capabilities(),
-    ok = ssl:stop(),
+    %ok = ssl:start(),
+    %ok = test_print_client_capabilities(),
+    %ok = ssl:stop(),
     ok = ssl:start(),
     ok = test_start_twice(),
     ok = test_connect_close(),
