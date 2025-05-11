@@ -23,6 +23,9 @@
 
 start() ->
     % start SSL
+    ok = ssl:start(),
+    ok = test_print_client_capabilities(),
+    ok = ssl:stop(),
     Entropy = ssl:nif_entropy_init(),
     CtrDrbg = ssl:nif_ctr_drbg_init(),
     ok = ssl:nif_ctr_drbg_seed(CtrDrbg, Entropy, <<"AtomVM">>),
@@ -58,6 +61,29 @@ start() ->
     ok = close_notify_loop(SSLContext, Socket),
     ok = socket:close(Socket),
     ok.
+
+test_print_client_capabilities() ->
+    {ok, SSLSocket} = ssl:connect("check-tls.akamai.io", 443, [
+        {verify, verify_none}, {active, false}, {binary, true}
+    ]),
+    UserAgent = erlang:system_info(machine),
+    ok = ssl:send(SSLSocket, [
+        <<"GET /v1/tlsinfo.json HTTP/1.1\r\nHost: check-tls.akamai.io\r\nUser-Agent: ">>,
+        UserAgent,
+        <<"\r\n\r\n">>
+    ]),
+    ok = recv_helper(SSLSocket, 0),
+    ok = ssl:close(SSLSocket),
+    ok.
+
+recv_helper(SSLSocket, Bytes) ->
+    case ssl:recv(SSLSocket, Bytes) of
+        {ok, Data} ->
+            io:format("~s~n", [Data]),
+            recv_helper(SSLSocket, 0);
+        {error, _Reason} ->
+            ok
+    end.
 
 handshake_loop(SSLContext, Socket) ->
     case ssl:nif_handshake_step(SSLContext) of
