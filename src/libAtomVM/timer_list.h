@@ -44,6 +44,7 @@ struct TimerListItem
 {
     uint64_t expiry_time;
     struct ListHead head;
+    uint32_t timeout_generation;
 };
 
 static inline void timer_list_init(struct TimerList *tw)
@@ -68,10 +69,13 @@ static inline void timer_list_insert(struct TimerList *tw, struct TimerListItem 
 
 static inline void timer_list_remove(struct TimerList *tw, struct TimerListItem *item)
 {
-    if (item->head.next != &item->head) {
+    // Safety check: only remove if item is actually in a list and timer count is positive
+    if (item->head.next != &item->head && tw->timers > 0) {
         tw->timers--;
         list_remove(&item->head);
         list_init(&item->head);
+        // Clear the timeout generation to mark this timer as invalid
+        item->timeout_generation = 0;
     }
 }
 
@@ -85,10 +89,11 @@ static inline int timer_list_timers_count(const struct TimerList *tw)
     return tw->timers;
 }
 
-static inline void timer_list_item_init(struct TimerListItem *it, uint64_t expiry)
+static inline void timer_list_item_init(struct TimerListItem *it, uint64_t expiry, uint32_t generation)
 {
     list_init(&it->head);
     it->expiry_time = expiry;
+    it->timeout_generation = generation;
 }
 
 /**

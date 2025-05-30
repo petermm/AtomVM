@@ -444,8 +444,21 @@ void scheduler_stop_all(GlobalContext *global)
 static void scheduler_timeout_callback(struct TimerListItem *it)
 {
     Context *ctx = GET_LIST_ENTRY(it, Context, timer_list_head);
-    context_update_flags(ctx, ~WaitingTimeout, WaitingTimeoutExpired);
-    scheduler_make_ready(ctx);
+    
+    // Check if this timeout callback is still valid by comparing generations
+    uint32_t current_generation = atomic_load(&ctx->timeout_generation);
+    if (it->timeout_generation != current_generation) {
+        // This is a stale timeout callback, ignore it
+        return;
+    }
+    
+    // Only process timeout if the context is still waiting for timeout
+    if (context_get_flags(ctx, WaitingTimeout)) {
+        // Increment generation to mark this timeout as processed
+        atomic_fetch_add(&ctx->timeout_generation, 1);
+        context_update_flags(ctx, ~WaitingTimeout, WaitingTimeoutExpired);
+        scheduler_make_ready(ctx);
+    }
 }
 
 void scheduler_set_timeout(Context *ctx, avm_int64_t timeout)
@@ -454,10 +467,13 @@ void scheduler_set_timeout(Context *ctx, avm_int64_t timeout)
     uint64_t native_now = sys_monotonic_time_u64();
     uint64_t expiry = native_now + sys_monotonic_time_ms_to_u64(timeout);
 
+    // Increment timeout generation to invalidate any pending callbacks
+    uint32_t current_generation = atomic_fetch_add(&ctx->timeout_generation, 1) + 1;
+    
     context_update_flags(ctx, ~NoFlags, WaitingTimeout);
     struct TimerList *tw = &glb->timer_list;
     struct TimerListItem *twi = &ctx->timer_list_head;
-    timer_list_item_init(twi, expiry);
+    timer_list_item_init(twi, expiry, current_generation);
 
     SMP_SPINLOCK_LOCK(&glb->timer_spinlock);
     timer_list_insert(tw, twi);
@@ -487,5 +503,8 @@ void scheduler_cancel_timeout(Context *ctx)
     timer_list_remove(tw, &ctx->timer_list_head);
     SMP_SPINLOCK_UNLOCK(&glb->timer_spinlock);
 
+    // Increment generation to invalidate any pending timeout callbacks
+    atomic_fetch_add(&ctx->timeout_generation, 1);
+    
     context_update_flags(ctx, ~(WaitingTimeout | WaitingTimeoutExpired), NoFlags);
 }

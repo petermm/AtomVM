@@ -95,7 +95,7 @@ Context *context_new(GlobalContext *glb)
 
     ctx->leader = 0;
 
-    timer_list_item_init(&ctx->timer_list_head, 0);
+    timer_list_item_init(&ctx->timer_list_head, 0, 0);
 
     list_init(&ctx->monitors_head);
 
@@ -109,6 +109,8 @@ Context *context_new(GlobalContext *glb)
 #endif
 
     ctx->flags = NoFlags;
+    ctx->timeout_generation = 0;
+
     ctx->platform_data = NULL;
 
     ctx->group_leader = term_from_local_process_id(INVALID_PROCESS_ID);

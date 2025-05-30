@@ -134,6 +134,9 @@ struct Context
 #endif
 
     enum ContextFlags ATOMIC flags;
+    
+    // Timeout generation counter to prevent stale timeout callbacks
+    ATOMIC uint32_t timeout_generation;
 
     void *platform_data;
 
