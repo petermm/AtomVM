@@ -39,18 +39,20 @@
 #define ATOMIC_COMPARE_EXCHANGE_WEAK_INT(object, expected, desired) \
     smp_atomic_compare_exchange_weak_int((void *) object, (void *) expected, (uint64_t) desired, sizeof(desired))
 
-#ifndef AVM_NO_SMP
+#define atomic_load(object) \
+    smp_atomic_load((void *) object, sizeof(*(object)))
+
+#define atomic_fetch_add(object, operand) \
+    smp_atomic_fetch_add((void *) object, (uint64_t) operand, sizeof(*(object)))
+
 static critical_section_t atomic_cas_section;
-#endif
 
 /**
  * @brief Initialize structures of atomic functions
  */
 static inline void atomic_init()
 {
-#ifndef AVM_NO_SMP
     critical_section_init(&atomic_cas_section);
-#endif
 }
 
 /**
@@ -58,18 +60,14 @@ static inline void atomic_init()
  */
 static inline void atomic_free()
 {
-#ifndef AVM_NO_SMP
     critical_section_deinit(&atomic_cas_section);
-#endif
 }
 
 static inline bool smp_atomic_compare_exchange_weak_ptr(void **object, void **expected, void *desired)
 {
-#ifndef AVM_NO_SMP
+    // Use critical_section_t for both SMP and non-SMP to avoid disabling
+    // mission-critical interrupts (GPIO, UART, etc.)
     critical_section_enter_blocking(&atomic_cas_section);
-#else
-    uint32_t save = save_and_disable_interrupts();
-#endif
 
     bool result;
     result = *object == *expected;
@@ -78,21 +76,15 @@ static inline bool smp_atomic_compare_exchange_weak_ptr(void **object, void **ex
     } else {
         *expected = *object;
     }
-#ifndef AVM_NO_SMP
     critical_section_exit(&atomic_cas_section);
-#else
-    restore_interrupts(save);
-#endif
     return result;
 }
 
 static inline bool smp_atomic_compare_exchange_weak_int(void *object, void *expected, uint64_t desired, size_t desired_len)
 {
-#ifndef AVM_NO_SMP
+    // Use critical_section_t for both SMP and non-SMP to avoid disabling
+    // mission-critical interrupts (GPIO, UART, etc.)
     critical_section_enter_blocking(&atomic_cas_section);
-#else
-    uint32_t save = save_and_disable_interrupts();
-#endif
 
     bool result;
     switch (desired_len) {
@@ -142,11 +134,85 @@ static inline bool smp_atomic_compare_exchange_weak_int(void *object, void *expe
         }
     }
 
-#ifndef AVM_NO_SMP
     critical_section_exit(&atomic_cas_section);
-#else
-    restore_interrupts(save);
-#endif
+    return result;
+}
+
+static inline uint64_t smp_atomic_load(void *object, size_t object_len)
+{
+    // Use critical_section_t for both SMP and non-SMP to avoid disabling
+    // mission-critical interrupts (GPIO, UART, etc.)
+    critical_section_enter_blocking(&atomic_cas_section);
+
+    uint64_t result;
+    switch (object_len) {
+        case sizeof(uint64_t): {
+            uint64_t *object_ptr = (uint64_t *) object;
+            result = *object_ptr;
+            break;
+        }
+        case sizeof(uint32_t): {
+            uint32_t *object_ptr = (uint32_t *) object;
+            result = *object_ptr;
+            break;
+        }
+        case sizeof(uint16_t): {
+            uint16_t *object_ptr = (uint16_t *) object;
+            result = *object_ptr;
+            break;
+        }
+        case sizeof(uint8_t): {
+            uint8_t *object_ptr = (uint8_t *) object;
+            result = *object_ptr;
+            break;
+        }
+        default:
+            result = 0;
+            break;
+    }
+
+    critical_section_exit(&atomic_cas_section);
+    return result;
+}
+
+static inline uint64_t smp_atomic_fetch_add(void *object, uint64_t operand, size_t object_len)
+{
+    // Use critical_section_t for both SMP and non-SMP to avoid disabling
+    // mission-critical interrupts (GPIO, UART, etc.)
+    critical_section_enter_blocking(&atomic_cas_section);
+
+    uint64_t result;
+    switch (object_len) {
+        case sizeof(uint64_t): {
+            uint64_t *object_ptr = (uint64_t *) object;
+            result = *object_ptr;
+            *object_ptr += operand;
+            break;
+        }
+        case sizeof(uint32_t): {
+            uint32_t *object_ptr = (uint32_t *) object;
+            result = *object_ptr;
+            *object_ptr += operand;
+            break;
+        }
+        case sizeof(uint16_t): {
+            uint16_t *object_ptr = (uint16_t *) object;
+            result = *object_ptr;
+            *object_ptr += operand;
+            break;
+        }
+        case sizeof(uint8_t): {
+            uint8_t *object_ptr = (uint8_t *) object;
+            result = *object_ptr;
+            *object_ptr += operand;
+            break;
+        }
+        default:
+            result = 0;
+            break;
+    }
+
+    critical_section_exit(&atomic_cas_section);
     return result;
 }
 

@@ -2614,7 +2614,7 @@ schedule_in:
                             }
                         }
 
-                        int local_process_id;
+                        int local_process_id = 0;
                         if (term_is_local_pid_or_port(recipient_term)) {
                             local_process_id = term_to_local_process_id(recipient_term);
                         } else {
