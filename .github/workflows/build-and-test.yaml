@@ -320,7 +320,7 @@ jobs:
       with:
         submodules: 'recursive'
 
-    - uses: erlef/setup-beam@v1
+    - uses: erlef/setup-beam@refs/pull/348/head
       with:
         otp-version: ${{ matrix.otp }}
         elixir-version: ${{ matrix.elixir_version }}
