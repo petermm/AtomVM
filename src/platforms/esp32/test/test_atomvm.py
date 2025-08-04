@@ -48,7 +48,7 @@ def pytest_generate_tests(metafunc):
         )
 
 def test_atomvm(dut, redirect):
-     dut.expect_unity_test_output(timeout=180)
-     assert len(dut.testsuite.testcases) > 0
-     assert dut.testsuite.attrs['failures'] == 0
-     assert dut.testsuite.attrs['errors'] == 0
+    dut.expect_unity_test_output(timeout=180)
+    assert len(dut.testsuite.testcases) > 0
+    assert dut.testsuite.attrs['failures'] == 0
+    assert dut.testsuite.attrs['errors'] == 0
