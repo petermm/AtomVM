@@ -156,13 +156,20 @@ term avm_test_case(const char *test_module)
     ctx->leader = 1;
 
     ESP_LOGI(TAG, "Running start/0 from %s...\n", test_module);
+    // ESP-IDF logging goes to stderr, flush it
+    fflush(stderr);
 
     context_execute_loop(ctx, mod, "start", 0);
     term ret_value = ctx->x[0];
 
+    // Ensure all output from Erlang io:format is flushed
+    fflush(stdout);
+    fflush(stderr);
+
     fprintf(stdout, "AtomVM finished with return value: ");
     term_display(stdout, ret_value, ctx);
     fprintf(stdout, "\n");
+    fflush(stdout);
 
     context_destroy(ctx);
 
