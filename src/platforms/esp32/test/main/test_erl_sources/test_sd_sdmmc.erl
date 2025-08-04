@@ -39,13 +39,7 @@ start() ->
 
 mount_sd_sdmmc() ->
     % Mount SD card using SDMMC
-    MountOpts = [
-        {format_if_mount_failed, true},
-        {max_files, 5},
-        {allocation_unit_size, 16 * 1024}
-    ],
-    
-    case esp:mount("sdmmc", "/sdcard", fat, MountOpts) of
+    case esp:mount("sdmmc", "/sdcard", fat, []) of
         {ok, MountedRef} ->
             io:format("SDMMC mount successful~n"),
             {ok, MountedRef};

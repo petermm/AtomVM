@@ -39,12 +39,15 @@ start() ->
     end.
 
 mount_sd_spi() ->
-    % SPI configuration matching the C code in test_main.c
+    % SPI configuration matching the test_main.c configuration
     SPIConfig = [
         {bus_config, [
-            {miso, 19},
             {mosi, 23},
+            {miso, 19},
             {sclk, 18},
+            {quadwp, -1},
+            {quadhd, -1},
+            {max_transfer_sz, 4000},
             {peripheral, "spi2"}
         ]}
     ],
@@ -55,10 +58,7 @@ mount_sd_spi() ->
             % Mount SD card using SDSPI
             MountOpts = [
                 {spi_host, SPI},
-                {cs, 5},
-                {format_if_mount_failed, true},
-                {max_files, 5},
-                {allocation_unit_size, 16 * 1024}
+                {cs, 5}
             ],
             
             case esp:mount("sdspi", "/sdcard", fat, MountOpts) of
