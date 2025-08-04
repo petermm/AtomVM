@@ -159,17 +159,42 @@ term avm_test_case(const char *test_module)
     // ESP-IDF logging goes to stderr, flush it
     fflush(stderr);
 
+    // Add a small delay to ensure logging is processed
+    vTaskDelay(pdMS_TO_TICKS(50));
+
     context_execute_loop(ctx, mod, "start", 0);
     term ret_value = ctx->x[0];
 
-    // Ensure all output from Erlang io:format is flushed
+    // Force immediate output flush and add delay for processing
     fflush(stdout);
+    fflush(stderr);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Log the return value using ESP_LOGI for immediate visibility
+    ESP_LOGI(TAG, "AtomVM execution completed");
     fflush(stderr);
 
     fprintf(stdout, "AtomVM finished with return value: ");
     term_display(stdout, ret_value, ctx);
     fprintf(stdout, "\n");
     fflush(stdout);
+
+    // Additional debugging: check if return value is OK_ATOM
+    if (ret_value == OK_ATOM) {
+        ESP_LOGI(TAG, "Test returned OK_ATOM (success)");
+    } else {
+        ESP_LOGE(TAG, "Test did NOT return OK_ATOM - this will cause test failure");
+        // Try to display the actual return value in logs
+        if (term_is_atom(ret_value)) {
+            int atom_index = term_to_atom_index(ret_value);
+            ESP_LOGE(TAG, "Return value is atom with index: %d", atom_index);
+        } else if (term_is_integer(ret_value)) {
+            ESP_LOGE(TAG, "Return value is integer: %ld", term_to_int(ret_value));
+        } else {
+            ESP_LOGE(TAG, "Return value is neither atom nor integer");
+        }
+    }
+    fflush(stderr);
 
     context_destroy(ctx);
 
