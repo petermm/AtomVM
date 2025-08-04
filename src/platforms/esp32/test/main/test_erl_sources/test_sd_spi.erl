@@ -26,19 +26,30 @@
 -import(esp, [mount/4, umount/1]).
 
 start() ->
+    io:format("=== Starting SDSPI Test ===~n"),
     % Mount SD card using SDSPI interface
     case mount_sd_spi() of
         {ok, MountedRef} ->
+            io:format("SDSPI mount successful, proceeding with file tests~n"),
             % Run the test_file module tests on the mounted SD card
             Result = test_file:start(),
+            io:format("File tests completed with result: ~p~n", [Result]),
             % Unmount the SD card
-            ok = unmount_sd_spi(MountedRef),
-            Result;
+            case unmount_sd_spi(MountedRef) of
+                ok ->
+                    io:format("SDSPI test completed successfully~n"),
+                    Result;
+                Error ->
+                    io:format("Failed to unmount SD card: ~p~n", [Error]),
+                    Error
+            end;
         Error ->
+            io:format("SDSPI test failed during mount: ~p~n", [Error]),
             Error
     end.
 
 mount_sd_spi() ->
+    io:format("Starting SDSPI mount process~n"),
     % SPI configuration matching the test_main.c configuration
     SPIConfig = [
         {bus_config, [
@@ -51,26 +62,29 @@ mount_sd_spi() ->
             {peripheral, "spi2"}
         ]}
     ],
+    io:format("SPI configuration: ~p~n", [SPIConfig]),
     
     % Open SPI bus
     case spi:open(SPIConfig) of
         {ok, SPI} ->
+            io:format("SPI bus opened successfully, handle=~p~n", [SPI]),
             % Mount SD card using SDSPI
             MountOpts = [
                 {spi_host, SPI},
                 {cs, 5}
             ],
+            io:format("Mount options: ~p~n", [MountOpts]),
             
             case esp:mount("sdspi", "/sdcard", fat, MountOpts) of
                 {ok, MountedRef} ->
-                    io:format("SDSPI mount successful~n"),
+                    io:format("SDSPI mount successful, ref=~p~n", [MountedRef]),
                     {ok, MountedRef};
                 Error ->
-                    io:format("SDSPI mount failed: ~p~n", [Error]),
+                    io:format("SDSPI mount failed with error: ~p~n", [Error]),
                     Error
             end;
         Error ->
-            io:format("SPI bus initialization failed: ~p~n", [Error]),
+            io:format("SPI bus initialization failed with error: ~p~n", [Error]),
             Error
     end.
 

@@ -25,26 +25,38 @@
 -import(esp, [mount/4, umount/1]).
 
 start() ->
+    io:format("=== Starting SDMMC Test ===~n"),
     % Mount SD card using SDMMC interface
     case mount_sd_sdmmc() of
         {ok, MountedRef} ->
+            io:format("SDMMC mount successful, proceeding with file tests~n"),
             % Run the test_file module tests on the mounted SD card
             Result = test_file:start(),
+            io:format("File tests completed with result: ~p~n", [Result]),
             % Unmount the SD card
-            ok = unmount_sd_sdmmc(MountedRef),
-            Result;
+            case unmount_sd_sdmmc(MountedRef) of
+                ok ->
+                    io:format("SDMMC test completed successfully~n"),
+                    Result;
+                Error ->
+                    io:format("Failed to unmount SD card: ~p~n", [Error]),
+                    Error
+            end;
         Error ->
+            io:format("SDMMC test failed during mount: ~p~n", [Error]),
             Error
     end.
 
 mount_sd_sdmmc() ->
+    io:format("Starting SDMMC mount process~n"),
+    io:format("Mount parameters: interface=sdmmc, path=/sdcard, type=fat, opts=[]~n"),
     % Mount SD card using SDMMC
     case esp:mount("sdmmc", "/sdcard", fat, []) of
         {ok, MountedRef} ->
-            io:format("SDMMC mount successful~n"),
+            io:format("SDMMC mount successful, ref=~p~n", [MountedRef]),
             {ok, MountedRef};
         Error ->
-            io:format("SDMMC mount failed: ~p~n", [Error]),
+            io:format("SDMMC mount failed with error: ~p~n", [Error]),
             Error
     end.
 
