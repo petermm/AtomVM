@@ -183,109 +183,19 @@ TEST_CASE("test_esp_partition", "[test_run]")
 // SDMMC works all esp-idf versions for esp32 - still no support c3.
 // only run in QEMU (eg. OPENETH configured)
 #if !CONFIG_IDF_TARGET_ESP32C3 && CONFIG_ETH_USE_OPENETH
-TEST_CASE("test_file", "[test_run]")
+TEST_CASE("test_sd_sdmmc", "[test_run]")
 {
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = true,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024
-    };
-    sdmmc_card_t *card;
-    const char mount_point[] = "/sdcard";
-    ESP_LOGI(TAG, "Initializing SD card");
-
-    ESP_LOGI(TAG, "Using SDMMC peripheral");
-    // By default, SD card frequency is initialized to SDMMC_FREQ_DEFAULT (20MHz)
-    // For setting a specific frequency, use host.max_freq_khz (range 400kHz - 40MHz for SDMMC)
-    // Example: for fixed frequency of 10MHz, use host.max_freq_khz = 10000;
-    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-
-    // This initializes the slot without card detect (CD) and write protect (WP) signals.
-    // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
-    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-
-    ESP_LOGI(TAG, "Mounting filesystem");
-    // With qemu, this logs "sdmmc_req: sdmmc_host_wait_for_event returned 0x107" twice with v4.4.4, but it eventually succeeds.
-    // See: https://github.com/espressif/qemu/issues/38
-    esp_err_t ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
-
-    TEST_ASSERT(ret == ESP_OK);
-
-    sdmmc_card_print_info(stdout, card);
-
-    term ret_value = avm_test_case("test_file.beam");
-
-    esp_vfs_fat_sdcard_unmount(mount_point, card);
-    ESP_LOGI(TAG, "Card unmounted");
-
+    term ret_value = avm_test_case("test_sd_sdmmc.beam");
     TEST_ASSERT(ret_value == OK_ATOM);
 }
 #endif
 
 // SPI SD CARD, is configured for esp32 simulator in diagram.esp32.json
 #if (!CONFIG_ETH_USE_OPENETH && CONFIG_IDF_TARGET_ESP32)
-TEST_CASE("test_file", "[test_run]")
+TEST_CASE("test_sd_spi", "[test_run]")
 {
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = true,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024
-    };
-    sdmmc_card_t *card;
-    const char mount_point[] = "/sdcard";
-    ESP_LOGI(TAG, "Initializing SD card");
-
-    ESP_LOGI(TAG, "Using SDSPI peripheral");
-    // By default, SD card frequency is initialized to SDMMC_FREQ_DEFAULT (20MHz)
-    // For setting a specific frequency, use host.max_freq_khz (range 400kHz - 40MHz for SDMMC)
-    // Example: for fixed frequency of 10MHz, use host.max_freq_khz = 10000;
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-
-    // This initializes the slot without card detect (CD) and write protect (WP) signals.
-    // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
-    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-
-    ESP_LOGI(TAG, "Mounting filesystem");
-
-#if SOC_SPI_PERIPH_NUM > 2
-    host.slot = SPI3_HOST;
-#elif SOC_SPI_PERIPH_NUM <= 2
-    host.slot = SPI2_HOST;
-#else
-    host.slot = SPI2_HOST;
-#endif
-
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = 23,
-        .miso_io_num = 19,
-        .sclk_io_num = 18,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000
-    };
-    esp_err_t ret2 = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret2 != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize bus.");
-        return;
-    }
-
-    // This initializes the slot without card detect (CD) and write protect (WP) signals.
-    // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
-    slot_config.gpio_cs = 5;
-    slot_config.host_id = host.slot;
-
-    ESP_LOGI(TAG, "Mounting filesystem");
-    esp_err_t ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &card);
-
-    TEST_ASSERT(ret == ESP_OK);
-
-    sdmmc_card_print_info(stdout, card);
-
-    term ret_value = avm_test_case("test_file.beam");
+    term ret_value = avm_test_case("test_sd_spi.beam");
     TEST_ASSERT(ret_value == OK_ATOM);
-
-    esp_vfs_fat_sdcard_unmount(mount_point, card);
-    ESP_LOGI(TAG, "Card unmounted");
 }
 #endif
 
