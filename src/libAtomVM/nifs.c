@@ -127,6 +127,7 @@ static term nif_erlang_float_to_list(Context *ctx, int argc, term argv[]);
 static term nif_erlang_list_to_binary_1(Context *ctx, int argc, term argv[]);
 static term nif_erlang_list_to_integer(Context *ctx, int argc, term argv[]);
 static term nif_erlang_list_to_float_1(Context *ctx, int argc, term argv[]);
+static term nif_erlang_monotonic_time_0(Context *ctx, int argc, term argv[]);
 static term nif_erlang_monotonic_time_1(Context *ctx, int argc, term argv[]);
 static term nif_erlang_iolist_size_1(Context *ctx, int argc, term argv[]);
 static term nif_erlang_iolist_to_binary_1(Context *ctx, int argc, term argv[]);
@@ -499,7 +500,13 @@ static const struct Nif concat_nif =
     .nif_ptr = nif_erlang_concat_2
 };
 
-static const struct Nif monotonic_time_nif =
+static const struct Nif monotonic_time_0_nif =
+{
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erlang_monotonic_time_0
+};
+
+static const struct Nif monotonic_time_1_nif =
 {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_erlang_monotonic_time_1
@@ -1624,6 +1631,18 @@ term nif_erlang_make_ref_0(Context *ctx, int argc, term argv[])
     uint64_t ref_ticks = globalcontext_get_ref_ticks(ctx->global);
 
     return term_from_ref_ticks(ref_ticks, &ctx->heap);
+}
+
+term nif_erlang_monotonic_time_0(Context *ctx, int argc, term argv[])
+{
+    UNUSED(argc);
+    UNUSED(argv);
+
+    struct timespec ts;
+    sys_monotonic_time(&ts);
+
+    // Return nanoseconds as the native unit
+    return make_maybe_boxed_int64(ctx, ((int64_t) ts.tv_sec) * 1000000000UL + ts.tv_nsec);
 }
 
 term nif_erlang_monotonic_time_1(Context *ctx, int argc, term argv[])

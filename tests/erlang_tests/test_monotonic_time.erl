@@ -23,14 +23,24 @@
 -export([start/0]).
 
 start() ->
+    % Test monotonic_time/1 with millisecond
     T1 = erlang:monotonic_time(millisecond),
     receive
     after 1 -> ok
     end,
     T2 = erlang:monotonic_time(millisecond),
-    test_diff(T2 - T1).
-
-test_diff(X) when is_integer(X) andalso X >= 0 ->
-    1;
-test_diff(X) when X < 0 ->
-    0.
+    Diff1 = T2 - T1,
+    
+    % Test monotonic_time/0 (native nanoseconds)
+    T3 = erlang:monotonic_time(),
+    receive
+    after 1 -> ok
+    end,
+    T4 = erlang:monotonic_time(),
+    Diff2 = T4 - T3,
+    
+    % Both tests must pass: millisecond diff >= 0, nanosecond diff >= 1000
+    case {is_integer(Diff1) andalso Diff1 >= 0, is_integer(Diff2) andalso Diff2 >= 1000} of
+        {true, true} -> 1;
+        _ -> 0
+    end.
