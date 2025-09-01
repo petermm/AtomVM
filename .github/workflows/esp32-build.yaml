@@ -48,7 +48,7 @@ jobs:
         esp-idf-target: ["esp32", "esp32c3", "esp32p4"]
         language: ["cpp"]
         idf-version:
-          - "v5.5"
+          - "v5.5.1"
 
         exclude:
           - esp-idf-target: "esp32c3"
