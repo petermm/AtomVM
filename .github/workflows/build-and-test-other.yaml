@@ -100,12 +100,6 @@ jobs:
           cflags: "-mcpu=cortex-a7 -mfloat-abi=hard -O2 -mthumb -mthumb-interwork -D_FILE_OFFSET_BITS=64"
           cmake_opts: "-DAVM_WARNINGS_ARE_ERRORS=ON"
 
-        - arch: "arm64v8"
-          platform: "arm64/v8"
-          tag: "bookworm"
-          cflags: "-O2"
-          cmake_opts: "-DAVM_WARNINGS_ARE_ERRORS=ON"
-
         # Required for testing big endian archs
         - arch: "s390x"
           platform: "s390x"
