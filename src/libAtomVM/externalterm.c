@@ -536,7 +536,13 @@ static term parse_external_terms(const uint8_t *external_term_buf, size_t *eterm
                 uint64_t intvalue;
                 double doublevalue;
             } v;
-            v.intvalue = READ_64_UNALIGNED(external_term_buf + 1);
+            // Read IEEE 754 double from big-endian BEAM format
+            // Don't use READ_64_UNALIGNED as it corrupts float bit patterns
+            const uint8_t *buf = external_term_buf + 1;
+            v.intvalue = ((uint64_t)buf[0] << 56) | ((uint64_t)buf[1] << 48) |
+                        ((uint64_t)buf[2] << 40) | ((uint64_t)buf[3] << 32) |
+                        ((uint64_t)buf[4] << 24) | ((uint64_t)buf[5] << 16) |
+                        ((uint64_t)buf[6] << 8)  | ((uint64_t)buf[7]);
 
             *eterm_size = NEW_FLOAT_EXT_SIZE;
             return term_from_float(v.doublevalue, heap);
