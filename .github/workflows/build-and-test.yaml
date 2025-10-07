@@ -60,6 +60,7 @@ jobs:
             cxx: "c++"
             cflags: ""
             otp: "28"
+            rebar3_version: "3.25.0"
             cmake_opts_other: "-DCMAKE_C_FLAGS='-frounding-math -march=armv8-a' -DCMAKE_CXX_FLAGS='-frounding-math -march=armv8-a'"
 
     env:
