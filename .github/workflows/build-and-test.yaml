@@ -52,6 +52,8 @@ jobs:
           #include <string.h>
           #include <stdalign.h>
           #include <stdlib.h>
+          #include <fenv.h>
+          #include <float.h>
 
           // NEW_FLOAT_EXT tag from BEAM format
           #define NEW_FLOAT_EXT 70
@@ -237,6 +239,242 @@ jobs:
 
 
 
+          // Test for ARM64 Linux-specific precision bug
+          void test_precision_around_minus_2_5() {
+              printf("\n========================================\n");
+              printf("ARM64 LINUX PRECISION BUG INVESTIGATION\n");
+              printf("========================================\n");
+              
+              // Test exact -2.5 and values very close to it
+              double test_values[] = {
+                  -2.5,
+                  -2.5000000000000004,  // slightly more negative
+                  -2.4999999999999996,  // slightly less negative
+                  -2.4999999999999991,  // even less negative
+                  -2.5000000000000009,  // even more negative
+              };
+              
+              printf("Testing values around -2.5:\n");
+              for (int i = 0; i < 5; i++) {
+                  double val = test_values[i];
+                  uint64_t bits;
+                  memcpy(&bits, &val, sizeof(bits));
+                  
+                  printf("Value: %.17g\n", val);
+                  printf("  Bits: 0x%016llX\n", (unsigned long long)bits);
+                  printf("  llround(): %lld\n", llround(val));
+                  printf("  round(): %.1f\n", round(val));
+                  printf("  Expected for -2.5: -3\n");
+                  
+                  if (fabs(val + 2.5) < 1e-15) {
+                      if (llround(val) == -2) {
+                          printf("  🐛 BUG: round(-2.5) = -2 (should be -3)\n");
+                      } else if (llround(val) == -3) {
+                          printf("  ✅ CORRECT: round(-2.5) = -3\n");
+                      }
+                  }
+                  printf("\n");
+              }
+          }
+          
+          // Test compiler and math library differences
+          void test_compiler_math_library_differences() {
+              printf("\n========================================\n");
+              printf("COMPILER AND MATH LIBRARY ANALYSIS\n");
+              printf("========================================\n");
+              
+              printf("Compiler information:\n");
+              #ifdef __GNUC__
+                  #ifdef __clang__
+                      printf("Compiler: Clang %d.%d.%d\n", __clang_major__, __clang_minor__, __clang_patchlevel__);
+                  #else
+                      printf("Compiler: GCC %d.%d.%d\n", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+                  #endif
+              #endif
+              
+              printf("Target: %s\n", 
+              #ifdef __aarch64__
+                  "ARM64"
+              #elif defined(__x86_64__)
+                  "x86_64"
+              #elif defined(__i386__)
+                  "x86"
+              #else
+                  "Unknown"
+              #endif
+              );
+              
+              printf("OS: %s\n",
+              #ifdef __linux__
+                  "Linux"
+              #elif defined(__APPLE__)
+                  "macOS"
+              #elif defined(_WIN32)
+                  "Windows"
+              #else
+                  "Unknown"
+              #endif
+              );
+              
+              // Test math library version/implementation
+              printf("\nMath library tests:\n");
+              printf("Math library: %s\n",
+              #ifdef __GLIBC__
+                  "glibc"
+              #else
+                  "system/other"
+              #endif
+              );
+              
+              #ifdef __GLIBC__
+                  printf("glibc version: %d.%d\n", __GLIBC__, __GLIBC_MINOR__);
+              #endif
+              
+              // Test specific problematic values
+              printf("\nTesting problematic values:\n");
+              double problematic_values[] = {
+                  -2.5, -1.5, -0.5, 0.5, 1.5, 2.5,
+                  -3.5, -4.5, 3.5, 4.5
+              };
+              
+              for (int i = 0; i < 10; i++) {
+                  double val = problematic_values[i];
+                  long long result = llround(val);
+                  printf("llround(%.1f) = %lld", val, result);
+                  
+                  // Check if this is the expected "round half away from zero" behavior
+                  long long expected = (val >= 0) ? (long long)(val + 0.5) : (long long)(val - 0.5);
+                  if (result != expected) {
+                      printf(" ❌ (expected %lld)", expected);
+                  } else {
+                      printf(" ✅");
+                  }
+                  printf("\n");
+              }
+          }
+          
+          // Test BEAM parsing precision issues
+          void test_beam_parsing_precision_issues() {
+              printf("\n========================================\n");
+              printf("BEAM PARSING PRECISION INVESTIGATION\n");
+              printf("========================================\n");
+              
+              // Test the exact BEAM bytes for -2.5
+              uint8_t beam_bytes[] = {NEW_FLOAT_EXT, 0xC0, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+              
+              printf("BEAM bytes for -2.5: ");
+              for (int i = 0; i < 9; i++) {
+                  printf("0x%02X ", beam_bytes[i]);
+              }
+              printf("\n");
+              
+              // Parse using different methods and check precision
+              uint64_t ieee754_bits = READ_64_IEEE754_FIXED(beam_bytes + 1);
+              double parsed_value;
+              memcpy(&parsed_value, &ieee754_bits, sizeof(parsed_value));
+              
+              printf("\nParsed value analysis:\n");
+              printf("IEEE 754 bits: 0x%016llX\n", (unsigned long long)ieee754_bits);
+              printf("Parsed double: %.17g\n", parsed_value);
+              printf("Exact -2.5 bits: 0xC004000000000000\n");
+              printf("Bits match: %s\n", (ieee754_bits == 0xC004000000000000ULL) ? "YES" : "NO");
+              
+              // Test if the issue is in the parsing or in the rounding
+              if (ieee754_bits == 0xC004000000000000ULL) {
+                  printf("✅ Parsing is correct, issue must be in math library\n");
+              } else {
+                  printf("❌ Parsing error detected!\n");
+                  printf("Expected: 0xC004000000000000\n");
+                  printf("Got:      0x%016llX\n", (unsigned long long)ieee754_bits);
+              }
+              
+              // Test various representations of -2.5
+              printf("\nTesting different -2.5 representations:\n");
+              
+              // Direct assignment
+              double direct = -2.5;
+              uint64_t direct_bits;
+              memcpy(&direct_bits, &direct, sizeof(direct_bits));
+              printf("Direct assignment: %.17g (0x%016llX) -> llround = %lld\n", 
+                     direct, (unsigned long long)direct_bits, llround(direct));
+              
+              // From BEAM parsing
+              printf("From BEAM parsing: %.17g (0x%016llX) -> llround = %lld\n", 
+                     parsed_value, (unsigned long long)ieee754_bits, llround(parsed_value));
+              
+              // Test if they're exactly equal
+              printf("Values exactly equal: %s\n", (direct == parsed_value) ? "YES" : "NO");
+              printf("Bits exactly equal: %s\n", (direct_bits == ieee754_bits) ? "YES" : "NO");
+              
+              // Test with different compiler optimizations
+              volatile double volatile_direct = -2.5;
+              volatile double volatile_parsed = parsed_value;
+              printf("Volatile direct: %.17g -> llround = %lld\n", volatile_direct, llround(volatile_direct));
+              printf("Volatile parsed: %.17g -> llround = %lld\n", volatile_parsed, llround(volatile_parsed));
+          }
+          
+          // Test system-specific floating point behavior
+          void test_system_floating_point_behavior() {
+              printf("\n========================================\n");
+              printf("SYSTEM FLOATING POINT BEHAVIOR\n");
+              printf("========================================\n");
+              
+              printf("System information:\n");
+              printf("sizeof(double): %zu\n", sizeof(double));
+              printf("sizeof(long double): %zu\n", sizeof(long double));
+              
+              // Test FPU rounding mode
+              printf("Current rounding mode: ");
+              switch (fegetround()) {
+                  case FE_TONEAREST: printf("FE_TONEAREST\n"); break;
+                  case FE_DOWNWARD: printf("FE_DOWNWARD\n"); break;
+                  case FE_UPWARD: printf("FE_UPWARD\n"); break;
+                  case FE_TOWARDZERO: printf("FE_TOWARDZERO\n"); break;
+                  default: printf("Unknown\n"); break;
+              }
+              
+              // Test floating point constants
+              printf("\nFloating point constants:\n");
+              printf("DBL_EPSILON: %.17g\n", DBL_EPSILON);
+              printf("DBL_MANT_DIG: %d\n", DBL_MANT_DIG);
+              printf("DBL_DIG: %d\n", DBL_DIG);
+              
+              // Test math library functions
+              printf("\nMath library tests:\n");
+              double test_val = -2.5;
+              printf("Input: %.17g\n", test_val);
+              printf("round(): %.17g\n", round(test_val));
+              printf("llround(): %lld\n", llround(test_val));
+              printf("lround(): %ld\n", lround(test_val));
+              printf("rint(): %.17g\n", rint(test_val));
+              printf("llrint(): %lld\n", llrint(test_val));
+              printf("nearbyint(): %.17g\n", nearbyint(test_val));
+              
+              // Test with different precisions
+              printf("\nPrecision tests:\n");
+              float f_val = -2.5f;
+              printf("float -2.5: %.17g -> llround = %lld\n", (double)f_val, llround(f_val));
+              
+              long double ld_val = -2.5L;
+              printf("long double -2.5: %.17Lg -> llround = %lld\n", ld_val, llround(ld_val));
+              
+              // Test different rounding modes
+              printf("\nTesting different rounding modes:\n");
+              int original_mode = fegetround();
+              
+              int modes[] = {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO};
+              const char* mode_names[] = {"FE_TONEAREST", "FE_DOWNWARD", "FE_UPWARD", "FE_TOWARDZERO"};
+              
+              for (int i = 0; i < 4; i++) {
+                  if (fesetround(modes[i]) == 0) {
+                      printf("Mode %s: llround(-2.5) = %lld\n", mode_names[i], llround(-2.5));
+                  }
+              }
+              
+              // Restore original mode
+              fesetround(original_mode);
+          }
+
           int main() {
               printf("=== COMPREHENSIVE ARM64 FLOAT ENDIANNESS BUG ANALYSIS ===\n");
               
@@ -268,6 +506,10 @@ jobs:
               test_beam_file_parsing_simulation();
               test_memory_alignment_scenarios();
               test_compiler_and_optimization_differences();
+              test_precision_around_minus_2_5();
+              test_compiler_math_library_differences();
+              test_beam_parsing_precision_issues();
+              test_system_floating_point_behavior();
               
               // FINAL COMPREHENSIVE SUMMARY
               printf("\n========================================\n");
