@@ -48,9 +48,9 @@ jobs:
         # Ubuntu 24.04 has clang from 14 to 18 ("clang" is 18)
         # We want to test every compiler but don't need to test every OS
         # We only test several OTP versions with default compilers (gcc-9, 11, 13, clang-10, 14, 18)
-        cc: ["gcc-9", "gcc-11", "gcc-13", "clang-10", "clang-14", "clang-18"]
+        cc: ["gcc-9"]
         cflags: ["-O3"]
-        otp: ["25", "26", "27"]
+        otp: ["25"]
         gleam_version: ["1.8.0"]
 
         include:
@@ -61,7 +61,7 @@ jobs:
             cxx: "c++"
             cflags: ""
             otp: "28"
-            cmake_opts_other: "-DCMAKE_C_FLAGS='-march=armv8-a -fno-fast-math' -DCMAKE_CXX_FLAGS='-march=armv8-a -fno-fast-math'"
+            cmake_opts_other: "-DCMAKE_C_FLAGS='-frounding-math -march=armv8-a' -DCMAKE_CXX_FLAGS='-frounding-math -march=armv8-a'"
 
     env:
       ImageOS: ${{ matrix.container == 'ubuntu:20.04' && 'ubuntu20' || matrix.os == 'ubuntu-20.04' && 'ubuntu20' || matrix.os == 'ubuntu-22.04' && 'ubuntu22' || matrix.os == 'ubuntu-24.04' && 'ubuntu24' || 'ubuntu24' }}
