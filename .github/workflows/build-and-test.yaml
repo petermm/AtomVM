@@ -56,7 +56,6 @@ jobs:
         include:
           # arm64 build
           - os: "ubuntu-24.04-arm"
-            container: "elixir:otp-28"
             cc: "cc"
             cxx: "c++"
             cflags: ""
