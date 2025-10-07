@@ -1,8 +1,4 @@
 name: llround Bug Test
-on:
-  push:
-    branches:
-      - main
 
 jobs:
   hello:
