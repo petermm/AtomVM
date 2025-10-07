@@ -37,15 +37,48 @@ jobs:
     runs-on: ubuntu-24.04-arm
 
     steps:
-      - name: Test llround(-2.5) and ARM64 rounding behavior
+      - name: Test AtomVM float representation and rounding behavior
         run: |
-          cat << 'EOF' > test_llround.c
+          cat << 'EOF' > test_atomvm_float_repr.c
           #include <stdio.h>
           #include <math.h>
           #include <fenv.h>
+          #include <stdint.h>
+          #include <string.h>
+
+          // Mimic AtomVM's float type definitions
+          #ifdef AVM_USE_SINGLE_PRECISION
+          typedef float avm_float_t;
+          #define AVM_FLOAT_FMT "%f"
+          #else
+          typedef double avm_float_t;
+          #define AVM_FLOAT_FMT "%lf"
+          #endif
+
+          void print_float_bits(float f) {
+              uint32_t bits;
+              memcpy(&bits, &f, sizeof(bits));
+              printf("float bits: 0x%08X = ", bits);
+              for (int i = 31; i >= 0; i--) {
+                  printf("%d", (bits >> i) & 1);
+                  if (i == 31 || i == 23) printf(" ");
+              }
+              printf("\n");
+          }
+
+          void print_double_bits(double d) {
+              uint64_t bits;
+              memcpy(&bits, &d, sizeof(bits));
+              printf("double bits: 0x%016llX = ", (unsigned long long)bits);
+              for (int i = 63; i >= 0; i--) {
+                  printf("%d", (int)((bits >> i) & 1));
+                  if (i == 63 || i == 52) printf(" ");
+              }
+              printf("\n");
+          }
 
           int main() {
-              printf("=== ARM64 Rounding Behavior Test ===\n");
+              printf("=== AtomVM Float Representation Test ===\n");
               printf("Architecture: %s\n", 
                      #ifdef __aarch64__
                      "ARM64"
@@ -56,56 +89,106 @@ jobs:
                      #endif
               );
               
-              // Test current rounding mode
-              int rounding_mode = fegetround();
-              printf("Current rounding mode: ");
-              switch(rounding_mode) {
-                  case FE_TONEAREST: printf("FE_TONEAREST\n"); break;
-                  case FE_DOWNWARD: printf("FE_DOWNWARD\n"); break;
-                  case FE_UPWARD: printf("FE_UPWARD\n"); break;
-                  case FE_TOWARDZERO: printf("FE_TOWARDZERO\n"); break;
-                  default: printf("Unknown (%d)\n", rounding_mode); break;
-              }
+              printf("sizeof(float) = %zu, sizeof(double) = %zu\n", 
+                     sizeof(float), sizeof(double));
               
-              // Test various problematic values
+              #ifdef AVM_USE_SINGLE_PRECISION
+              printf("AVM_USE_SINGLE_PRECISION is defined\n");
+              printf("avm_float_t = float (%zu bytes)\n", sizeof(avm_float_t));
+              #else
+              printf("AVM_USE_SINGLE_PRECISION is NOT defined\n");
+              printf("avm_float_t = double (%zu bytes)\n", sizeof(avm_float_t));
+              #endif
+              
+              // Test the problematic value -2.5
+              printf("\n=== Testing -2.5 representation ===\n");
+              
+              float f_val = -2.5f;
+              double d_val = -2.5;
+              avm_float_t avm_val = -2.5;
+              
+              printf("float -2.5f:\n");
+              printf("  value: %.17g\n", f_val);
+              print_float_bits(f_val);
+              printf("  llroundf(-2.5f) = %lld\n", llroundf(f_val));
+              
+              printf("\ndouble -2.5:\n");
+              printf("  value: %.17g\n", d_val);
+              print_double_bits(d_val);
+              printf("  llround(-2.5) = %lld\n", llround(d_val));
+              
+              printf("\navm_float_t -2.5:\n");
+              printf("  value: " AVM_FLOAT_FMT "\n", avm_val);
+              #ifdef AVM_USE_SINGLE_PRECISION
+              print_float_bits(avm_val);
+              printf("  llroundf(avm_val) = %lld\n", llroundf(avm_val));
+              #else
+              print_double_bits(avm_val);
+              printf("  llround(avm_val) = %lld\n", llround(avm_val));
+              #endif
+              
+              // Test precision loss scenarios
+              printf("\n=== Testing precision scenarios ===\n");
+              
+              // Test values that might have precision issues
               double test_values[] = {-2.5, -1.5, -0.5, 0.5, 1.5, 2.5};
               int num_values = sizeof(test_values) / sizeof(test_values[0]);
               
-              printf("\n=== Double precision tests ===\n");
               for (int i = 0; i < num_values; i++) {
-                  double value = test_values[i];
-                  long long result = llround(value);
-                  printf("llround(%.1f) = %lld\n", value, result);
+                  double d = test_values[i];
+                  float f = (float)d;
+                  avm_float_t avm = (avm_float_t)d;
+                  
+                  printf("\nValue %.1f:\n", d);
+                  printf("  double: %.17g -> llround = %lld\n", d, llround(d));
+                  printf("  float:  %.17g -> llroundf = %lld\n", f, llroundf(f));
+                  printf("  avm_float_t: " AVM_FLOAT_FMT " -> ", avm);
+                  #ifdef AVM_USE_SINGLE_PRECISION
+                  printf("llroundf = %lld\n", llroundf(avm));
+                  #else
+                  printf("llround = %lld\n", llround(avm));
+                  #endif
+                  
+                  // Check if there's any difference in representation
+                  if (f != d) {
+                      printf("  *** Precision difference detected! ***\n");
+                      print_double_bits(d);
+                      print_float_bits(f);
+                  }
               }
               
-              printf("\n=== Single precision tests ===\n");
-              for (int i = 0; i < num_values; i++) {
-                  float value = (float)test_values[i];
-                  long long result = llroundf(value);
-                  printf("llroundf(%.1f) = %lld\n", value, result);
+              // Test edge cases that might cause issues
+              printf("\n=== Testing edge cases ===\n");
+              
+              // Test values very close to -2.5
+              double edge_cases[] = {
+                  -2.5000000000000004,  // slightly less than -2.5
+                  -2.4999999999999996,  // slightly more than -2.5
+                  -2.5,                 // exact -2.5
+              };
+              
+              for (int i = 0; i < 3; i++) {
+                  double d = edge_cases[i];
+                  float f = (float)d;
+                  
+                  printf("\nEdge case %.17g:\n", d);
+                  printf("  as double: llround = %lld\n", llround(d));
+                  printf("  as float:  llroundf = %lld (%.17g)\n", llroundf(f), f);
+                  
+                  if (f != d) {
+                      printf("  *** Conversion changed value! ***\n");
+                  }
               }
-              
-              // Test with different rounding modes
-              printf("\n=== Testing -2.5 with different rounding modes ===\n");
-              double test_val = -2.5;
-              
-              fesetround(FE_TONEAREST);
-              printf("FE_TONEAREST: llround(-2.5) = %lld\n", llround(test_val));
-              
-              fesetround(FE_DOWNWARD);
-              printf("FE_DOWNWARD:  llround(-2.5) = %lld\n", llround(test_val));
-              
-              fesetround(FE_UPWARD);
-              printf("FE_UPWARD:    llround(-2.5) = %lld\n", llround(test_val));
-              
-              fesetround(FE_TOWARDZERO);
-              printf("FE_TOWARDZERO: llround(-2.5) = %lld\n", llround(test_val));
-              
-              // Reset to default
-              fesetround(FE_TONEAREST);
               
               return 0;
           }
           EOF
-          gcc test_llround.c -o test_llround -lm
-          ./test_llround
+          
+          # Test with default (double precision)
+          echo "=== Testing with double precision (default) ==="
+          gcc test_atomvm_float_repr.c -o test_atomvm_float_repr -lm
+          ./test_atomvm_float_repr
+          
+          echo -e "\n=== Testing with single precision (AVM_USE_SINGLE_PRECISION) ==="
+          gcc -DAVM_USE_SINGLE_PRECISION test_atomvm_float_repr.c -o test_atomvm_float_repr_single -lm
+          ./test_atomvm_float_repr_single
