@@ -1,7 +1,39 @@
-name: llround Bug Test
+#
+#  Copyright 2017-2022 Davide Bettio <davide@uninstall.it>
+#
+#  SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
+#
+
+name: Build and Test
+
+on:
+  push:
+    paths-ignore:
+      - "src/platforms/emscripten/**"
+      - "src/platforms/esp32/**"
+      - "src/platforms/rp2/**"
+      - "src/platforms/stm32/**"
+      - "doc/**"
+      - "LICENSES/**"
+      - "*.Md"
+      - "*.md"
+  pull_request:
+    paths-ignore:
+      - "src/platforms/emscripten/**"
+      - "src/platforms/esp32/**"
+      - "src/platforms/rp2/**"
+      - "src/platforms/stm32/**"
+      - "doc/**"
+      - "LICENSES/**"
+      - "*.Md"
+      - "*.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref != 'refs/heads/main' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
-  hello:
+  build-and-test:
     runs-on: ubuntu-24.04-arm
 
     steps:
