@@ -37,16 +37,73 @@ jobs:
     runs-on: ubuntu-24.04-arm
 
     steps:
-      - name: Test llround(-2.5)
+      - name: Test llround(-2.5) and ARM64 rounding behavior
         run: |
           cat << 'EOF' > test_llround.c
           #include <stdio.h>
           #include <math.h>
+          #include <fenv.h>
 
           int main() {
-              double value = -2.5;
-              long long result = llround(value);
-              printf("llround(-2.5) = %lld\n", result);
+              printf("=== ARM64 Rounding Behavior Test ===\n");
+              printf("Architecture: %s\n", 
+                     #ifdef __aarch64__
+                     "ARM64"
+                     #elif defined(__x86_64__)
+                     "x86_64"
+                     #else
+                     "Unknown"
+                     #endif
+              );
+              
+              // Test current rounding mode
+              int rounding_mode = fegetround();
+              printf("Current rounding mode: ");
+              switch(rounding_mode) {
+                  case FE_TONEAREST: printf("FE_TONEAREST\n"); break;
+                  case FE_DOWNWARD: printf("FE_DOWNWARD\n"); break;
+                  case FE_UPWARD: printf("FE_UPWARD\n"); break;
+                  case FE_TOWARDZERO: printf("FE_TOWARDZERO\n"); break;
+                  default: printf("Unknown (%d)\n", rounding_mode); break;
+              }
+              
+              // Test various problematic values
+              double test_values[] = {-2.5, -1.5, -0.5, 0.5, 1.5, 2.5};
+              int num_values = sizeof(test_values) / sizeof(test_values[0]);
+              
+              printf("\n=== Double precision tests ===\n");
+              for (int i = 0; i < num_values; i++) {
+                  double value = test_values[i];
+                  long long result = llround(value);
+                  printf("llround(%.1f) = %lld\n", value, result);
+              }
+              
+              printf("\n=== Single precision tests ===\n");
+              for (int i = 0; i < num_values; i++) {
+                  float value = (float)test_values[i];
+                  long long result = llroundf(value);
+                  printf("llroundf(%.1f) = %lld\n", value, result);
+              }
+              
+              // Test with different rounding modes
+              printf("\n=== Testing -2.5 with different rounding modes ===\n");
+              double test_val = -2.5;
+              
+              fesetround(FE_TONEAREST);
+              printf("FE_TONEAREST: llround(-2.5) = %lld\n", llround(test_val));
+              
+              fesetround(FE_DOWNWARD);
+              printf("FE_DOWNWARD:  llround(-2.5) = %lld\n", llround(test_val));
+              
+              fesetround(FE_UPWARD);
+              printf("FE_UPWARD:    llround(-2.5) = %lld\n", llround(test_val));
+              
+              fesetround(FE_TOWARDZERO);
+              printf("FE_TOWARDZERO: llround(-2.5) = %lld\n", llround(test_val));
+              
+              // Reset to default
+              fesetround(FE_TONEAREST);
+              
               return 0;
           }
           EOF
