@@ -57,7 +57,7 @@ jobs:
           # arm64 build
           - os: "ubuntu-24.04-arm"
             rebar3_version: "3.25.0"
-            cflags: "-O3 -march=native -mcpu=native"
+            cflags: "-O3 -march=armv8-a -mcpu=cortex-a76"
             otp: "28.1"
             cc: "clang-18"
             cxx: "clang++-18"
