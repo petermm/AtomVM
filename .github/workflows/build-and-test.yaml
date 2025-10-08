@@ -57,7 +57,7 @@ jobs:
           # arm64 build
           - os: "ubuntu-24.04-arm"
             rebar3_version: "3.25.0"
-            cflags: ["-O3"]
+            cflags: "-O3"
             otp: "28.1"
             cc: "gcc-14"
             cxx: "g++-14"
