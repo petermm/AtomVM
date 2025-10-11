@@ -299,6 +299,7 @@ jobs:
           elixir_version: "1.17"
           rebar3_version: "3.24.0"
           cmake_opts_other: "-DAVM_DISABLE_JIT=OFF"
+          jit_target_arch: "x86_64"
 
         # arm64 builds
         - os: "ubuntu-24.04-arm"
@@ -392,7 +393,7 @@ jobs:
       id: cache
       with:
         path: 'build/tests/**/*.beam'
-        key: ${{ matrix.otp }}-${{ hashFiles('**/build-and-test.yaml', 'tests/**/*.erl') }}
+        key: ${{ matrix.otp }}-${{ hashFiles('**/build-and-test.yaml', 'tests/**/*.erl') }}-${{ matrix.jit_target_arch }}
 
     - name: "Build: run cmake"
       working-directory: build
