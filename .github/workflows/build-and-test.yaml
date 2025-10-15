@@ -179,21 +179,21 @@ jobs:
         working-directory: build
         run: |
           ulimit -c unlimited
-          valgrind --error-exitcode=1 ./tests/test-enif
+          valgrind --track-fds=yes --error-exitcode=1 ./tests/test-enif
           ./tests/test-enif
 
       - name: "Test: test-heap"
         working-directory: build
         run: |
           ulimit -c unlimited
-          valgrind --error-exitcode=1 ./tests/test-heap
+          valgrind --track-fds=yes --error-exitcode=1 ./tests/test-heap
           ./tests/test-heap
 
       - name: "Test: test-mailbox"
         working-directory: build
         run: |
           ulimit -c unlimited
-          valgrind --error-exitcode=1 ./tests/test-mailbox
+          valgrind --track-fds=yes --error-exitcode=1 ./tests/test-mailbox
           ./tests/test-mailbox
 
       - name: "Test: test-structs"
@@ -217,7 +217,7 @@ jobs:
         working-directory: build
         run: |
           ulimit -c unlimited
-          valgrind --error-exitcode=1 ./src/AtomVM ./tests/libs/estdlib/test_estdlib.avm
+          valgrind --track-fds=yes --error-exitcode=1 ./src/AtomVM ./tests/libs/estdlib/test_estdlib.avm
           ./src/AtomVM ./tests/libs/estdlib/test_estdlib.avm
 
       - name: "Test: test_eavmlib.avm"
@@ -225,7 +225,7 @@ jobs:
         working-directory: build
         run: |
           ulimit -c unlimited
-          valgrind --error-exitcode=1 ./src/AtomVM ./tests/libs/eavmlib/test_eavmlib.avm
+          valgrind --track-fds=yes --error-exitcode=1 ./src/AtomVM ./tests/libs/eavmlib/test_eavmlib.avm
           ./src/AtomVM ./tests/libs/eavmlib/test_eavmlib.avm
 
       - name: "Test: test_jit.avm"
