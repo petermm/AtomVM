@@ -247,8 +247,14 @@ Module *sys_load_module_from_file(GlobalContext *global, const char *path)
 {
     UNUSED(global);
     UNUSED(path);
-    // TODO
     return NULL;
+}
+
+void sys_free_module_platform_data(void *module_platform_data)
+{
+    // STM32 platform doesn't use file descriptors for module loading
+    // so no cleanup is needed
+    UNUSED(module_platform_data);
 }
 
 Context *sys_create_port(GlobalContext *glb, const char *driver_name, term opts)

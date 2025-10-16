@@ -296,6 +296,16 @@ void sys_free_platform(GlobalContext *global);
  */
 ModuleNativeEntryPoint sys_map_native_code(const uint8_t *native_code, size_t size, size_t offset);
 
+/**
+ * @brief Free platform-specific module data.
+ *
+ * @details This function frees platform-specific data associated with a module,
+ * such as MappedFile structures on Unix platforms. This ensures proper cleanup
+ * of file descriptors and memory mappings when a module is destroyed.
+ * @param module_platform_data pointer to platform-specific module data
+ */
+void sys_free_module_platform_data(void *module_platform_data);
+
 #ifdef __cplusplus
 }
 #endif

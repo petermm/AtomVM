@@ -485,6 +485,14 @@ Module *sys_load_module_from_file(GlobalContext *global, const char *path)
     return new_module;
 }
 
+void sys_free_module_platform_data(void *module_platform_data)
+{
+    if (module_platform_data) {
+        MappedFile *mapped_file = (MappedFile *) module_platform_data;
+        mapped_file_close(mapped_file);
+    }
+}
+
 Context *sys_create_port(GlobalContext *glb, const char *driver_name, term opts)
 {
     if (!strcmp(driver_name, "socket")) {

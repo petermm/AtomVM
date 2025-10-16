@@ -465,6 +465,10 @@ COLD_FUNC void module_destroy(Module *module)
     if (module->free_literals_data) {
         free(module->literals_data);
     }
+    // Clean up platform-specific data (e.g., MappedFile for Unix platforms)
+    if (module->module_platform_data) {
+        sys_free_module_platform_data(module->module_platform_data);
+    }
 #ifndef AVM_NO_SMP
     smp_mutex_destroy(module->mutex);
 #endif

@@ -421,6 +421,13 @@ Module *sys_load_module_from_file(GlobalContext *global, const char *path)
     return NULL;
 }
 
+void sys_free_module_platform_data(void *module_platform_data)
+{
+    // ESP32 platform doesn't use file descriptors for module loading
+    // so no cleanup is needed
+    UNUSED(module_platform_data);
+}
+
 // This function allows to use AtomVM as a component on ESP32 and customize it
 __attribute__((weak)) Context *sys_create_port_fallback(const char *driver_name, GlobalContext *global, term opts)
 {
