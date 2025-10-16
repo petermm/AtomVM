@@ -58,6 +58,9 @@ void test_memory_ensure_free(void)
     memory_size = memory_heap_memory_size(&ctx->heap);
     assert(res == MEMORY_GC_OK);
     assert(memory_size == 0);
+
+    context_destroy(ctx);
+    globalcontext_destroy(glb);
 }
 
 void test_gc_ref_count(void)
@@ -106,6 +109,9 @@ void test_gc_ref_count(void)
 
     refc_binaries = synclist_nolock(&glb->refc_binaries);
     assert(list_is_empty(refc_binaries));
+
+    context_destroy(ctx);
+    globalcontext_destroy(glb);
 }
 
 int main(int argc, char **argv)
