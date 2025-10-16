@@ -191,6 +191,7 @@ void socket_driver_delete_data(void *data)
     SocketDriverData *socket_data = (SocketDriverData *) data;
     if (socket_data && socket_data->sockfd != -1) {
         close(socket_data->sockfd);
+        socket_data->sockfd = -1;  // Mark as closed to prevent double-close
     }
     free(data);
 }
@@ -499,10 +500,13 @@ term socket_driver_do_init(Context *ctx, term params)
 void socket_driver_do_close(Context *ctx)
 {
     SocketDriverData *socket_data = (SocketDriverData *) ctx->platform_data;
-    if (close(socket_data->sockfd) == -1) {
-        TRACE("socket_driver|socket_driver_do_close: close failed");
-    } else {
-        TRACE("socket_driver|socket_driver_do_close: closed socket\n");
+    if (socket_data->sockfd != -1) {
+        if (close(socket_data->sockfd) == -1) {
+            TRACE("socket_driver|socket_driver_do_close: close failed");
+        } else {
+            TRACE("socket_driver|socket_driver_do_close: closed socket\n");
+        }
+        socket_data->sockfd = -1;  // Mark as closed to prevent double-close
     }
 }
 
