@@ -46,6 +46,9 @@
 #endif
 #endif
 
+// Forward declarations for socket driver
+extern void socket_driver_delete_data(void *data);
+
 #define IMPL_EXECUTE_LOOP
 #include "opcodesswitch.h"
 #undef IMPL_EXECUTE_LOOP
@@ -286,7 +289,19 @@ void context_destroy(Context *ctx)
     // globalcontext_get_process_lock before accessing platform_data.
     // Here, the context can no longer be acquired with
     // globalcontext_get_process_lock, so it's safe to free the pointer.
-    free(ctx->platform_data);
+    if (context_is_port_driver(ctx) && ctx->platform_data != NULL) {
+        // Check if this is a socket driver by examining the platform_data structure
+        // Socket drivers have a SocketDriverData structure with sockfd as first field
+        int *sockfd_ptr = (int *)ctx->platform_data;
+        if (*sockfd_ptr >= 0) {
+            // This appears to be a socket driver - use proper cleanup
+            socket_driver_delete_data(ctx->platform_data);
+        } else {
+            free(ctx->platform_data);
+        }
+    } else {
+        free(ctx->platform_data);
+    }
 
     ets_delete_owned_tables(&ctx->global->ets, ctx->process_id, ctx->global);
 

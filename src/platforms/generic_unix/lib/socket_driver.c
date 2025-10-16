@@ -188,6 +188,10 @@ void *socket_driver_create_data(void)
 
 void socket_driver_delete_data(void *data)
 {
+    SocketDriverData *socket_data = (SocketDriverData *) data;
+    if (socket_data && socket_data->sockfd != -1) {
+        close(socket_data->sockfd);
+    }
     free(data);
 }
 
