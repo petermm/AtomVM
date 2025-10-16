@@ -27,6 +27,9 @@
 void *socket_driver_create_data(void);
 void socket_driver_delete_data(void *data);
 
+// Native handler function for socket drivers
+NativeHandlerResult socket_consume_mailbox(Context *ctx);
+
 term socket_driver_do_init(Context *ctx, term params);
 term socket_driver_do_send(Context *ctx, term buffer);
 term socket_driver_do_sendto(Context *ctx, term dest_address, term dest_port, term buffer);

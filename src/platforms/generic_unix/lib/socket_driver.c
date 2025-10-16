@@ -110,7 +110,7 @@ static EventListener *active_recv_callback(GlobalContext *glb, EventListener *li
 static EventListener *passive_recv_callback(GlobalContext *glb, EventListener *listener);
 static EventListener *active_recvfrom_callback(GlobalContext *glb, EventListener *listener);
 static EventListener *passive_recvfrom_callback(GlobalContext *glb, EventListener *listener);
-static NativeHandlerResult socket_consume_mailbox(Context *ctx);
+// socket_consume_mailbox is now declared in socket_driver.h
 
 static inline term create_socket_wrapper(term pid, const char *moniker_atom, const char *module_atom, Heap *heap, GlobalContext *global)
 {
@@ -1122,7 +1122,7 @@ void socket_driver_do_accept(Context *ctx, term pid, term ref, term timeout)
     socket_data->passive_listener = listener;
 }
 
-static NativeHandlerResult socket_consume_mailbox(Context *ctx)
+NativeHandlerResult socket_consume_mailbox(Context *ctx)
 {
     TRACE("START socket_consume_mailbox\n");
     if (UNLIKELY(ctx->native_handler != socket_consume_mailbox)) {
