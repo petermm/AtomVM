@@ -104,7 +104,7 @@ jobs:
         cmake .. -G Ninja -DPICO_BOARD=${{ matrix.board }} -DAVM_DISABLE_SMP=1
         cmake --build . --target=rp2_tests
 
-    - name: Run tests with rp2040js
+    - name: Run tests with rp2040js (no SMP)
       if: matrix.board != 'pico2'
       shell: bash
       working-directory: ./src/platforms/rp2/tests
