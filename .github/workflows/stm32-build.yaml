@@ -14,6 +14,8 @@ on:
       - 'CMakeModules/**'
       - 'src/platforms/stm32/**'
       - 'src/libAtomVM/**'
+      - '!.github/workflows/*'
+      - '.github/workflows/stm32-build.yaml'
   pull_request:
     paths:
       - '.github/workflows/stm32-build.yaml'
@@ -21,6 +23,8 @@ on:
       - 'CMakeModules/**'
       - 'src/platforms/stm32/**'
       - 'src/libAtomVM/**'
+      - '!.github/workflows/*'
+      - '.github/workflows/stm32-build.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref != 'refs/heads/main' && github.ref || github.run_id }}

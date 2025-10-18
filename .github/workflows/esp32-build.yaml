@@ -17,6 +17,8 @@ on:
       - 'src/platforms/esp32/**/**'
       - 'src/libAtomVM/**'
       - 'tools/packbeam/**'
+      - '!.github/workflows/*'
+      - '.github/workflows/esp32-build.yaml'
   pull_request:
     paths:
       - '.github/workflows/esp32-build.yaml'
@@ -27,6 +29,8 @@ on:
       - 'src/platforms/esp32/**/**'
       - 'src/libAtomVM/**'
       - 'tools/packbeam/**'
+      - '!.github/workflows/*'
+      - '.github/workflows/esp32-build.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref != 'refs/heads/main' && github.ref || github.run_id }}

@@ -16,6 +16,8 @@ on:
       - 'src/platforms/rp2/**'
       - 'src/platforms/esp32/test/main/test_erl_sources/test_crypto.erl'
       - 'src/libAtomVM/**'
+      - '!.github/workflows/*'
+      - '.github/workflows/pico-build.yaml'
   pull_request:
     paths:
       - '.github/workflows/pico-build.yaml'
@@ -25,6 +27,8 @@ on:
       - 'src/platforms/rp2/**'
       - 'src/platforms/esp32/test/main/test_erl_sources/test_crypto.erl'
       - 'src/libAtomVM/**'
+      - '!.github/workflows/*'
+      - '.github/workflows/pico-build.yaml'
 
 permissions:
   actions: read
