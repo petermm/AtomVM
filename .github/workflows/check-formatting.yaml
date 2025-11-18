@@ -79,3 +79,15 @@ jobs:
       run: |
         cd libs/exavmlib/
         mix format --check-formatted
+
+  yaml-format-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # use npx prettier --write '.github/**/*.{yml,yaml}' in root AtomVM directory to format
+      - name: "Check github yaml formatting with prettier"
+        if: success() || failure()
+        run: |
+          npm install prettier
+          npx prettier --check '.github/**/*.{yml,yaml}'
