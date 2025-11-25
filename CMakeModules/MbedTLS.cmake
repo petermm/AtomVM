@@ -76,7 +76,7 @@ else()
     # MbedTLS 3.x is installed as a CMake package
     find_package(MbedTLS QUIET)
     if (MbedTLS_FOUND)
-        message(STATUS "Found MbedTLS package ${MbedTLS_FOUND}")
+        message(STATUS "Found MbedTLS package version ${MbedTLS_VERSION}")
 
         if (AVM_STATIC_MBEDTLS)
             message(FATAL_ERROR "AVM_STATIC_MBEDTLS not supported with MbedTLS cmake package")
