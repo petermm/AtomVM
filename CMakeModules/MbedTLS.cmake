@@ -35,11 +35,16 @@
 
 option(AVM_STATIC_MBEDTLS "Static link Mbed-TLS." OFF)
 
-# Add Homebrew paths for mbedtls@3 on macOS
-# Use PREPEND to ensure mbedtls@3 is found first, even if mbedtls@4 is installed
-# This must be done before checking MBEDTLS_ROOT_DIR to ensure it applies in all cases
-if (APPLE)
-    list(PREPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/mbedtls@3" "/usr/local/opt/mbedtls@3")
+# On macOS, explicitly set MBEDTLS_ROOT_DIR to ensure we use mbedtls@3
+# This bypasses find_package and avoids header conflicts when both mbedtls@3 and mbedtls@4 are installed
+if (APPLE AND NOT MBEDTLS_ROOT_DIR)
+    foreach(prefix "/opt/homebrew" "/usr/local")
+        if (EXISTS "${prefix}/opt/mbedtls@3/include/mbedtls/version.h")
+            set(MBEDTLS_ROOT_DIR "${prefix}/opt/mbedtls@3")
+            message(STATUS "Setting MBEDTLS_ROOT_DIR to ${MBEDTLS_ROOT_DIR}")
+            break()
+        endif()
+    endforeach()
 endif()
 
 if (MBEDTLS_ROOT_DIR)
@@ -74,7 +79,7 @@ if (MBEDTLS_ROOT_DIR)
     )
 else()
     # MbedTLS 3.x is installed as a CMake package
-    find_package(MbedTLS QUIET)
+    find_package(MbedTLS 3 QUIET)
     if (MbedTLS_FOUND)
         message(STATUS "Found MbedTLS package version ${MbedTLS_VERSION}")
 
