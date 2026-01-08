@@ -746,6 +746,12 @@ static term nif_socket_close(Context *ctx, int argc, term argv[])
         if (rsrc_obj->selecting_process_id != INVALID_PROCESS_ID) {
             // Save process id as socket_stop may be called by enif_select.
             int32_t selecting_process_id = rsrc_obj->selecting_process_id;
+
+            if (LIKELY(enif_demonitor_process(erl_nif_env_from_context(ctx), rsrc_obj, &rsrc_obj->selecting_process_monitor) == 0)) {
+                struct RefcBinary *rsrc_refc = refc_binary_from_data(rsrc_obj);
+                refc_binary_decrement_refcount(rsrc_refc, ctx->global);
+            }
+            rsrc_obj->selecting_process_id = INVALID_PROCESS_ID;
             // Another process is selecting, therefore ref_count >= 2
             // 1. this caller's context heap (parameter to close)
             // 2. select
