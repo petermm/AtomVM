@@ -801,7 +801,6 @@ static term nif_socket_close(Context *ctx, int argc, term argv[])
             rsrc_obj->udp_pcb = NULL;
         }
         rsrc_obj->socket_state = SocketStateClosed;
-        // The resource should not go away until all callbacks are processed.
         enif_keep_resource(rsrc_obj);
         struct LWIPEvent event;
         event.handler = finalize_close_hander;
@@ -809,9 +808,8 @@ static term nif_socket_close(Context *ctx, int argc, term argv[])
         otp_socket_lwip_enqueue(&event);
     }
 
-#endif
-
     SMP_RWLOCK_UNLOCK(rsrc_obj->socket_lock);
+#endif
 
     return OK_ATOM;
 }
