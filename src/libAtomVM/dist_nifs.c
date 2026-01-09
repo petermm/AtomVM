@@ -117,13 +117,19 @@ static void dist_connection_dtor(ErlNifEnv *caller_env, void *obj)
     struct ListHead *remote_monitors = synclist_wrlock(&conn_obj->remote_monitors);
     struct ListHead *item;
     struct ListHead *tmp;
+    struct ListHead to_demonitor;
+    list_init(&to_demonitor);
     MUTABLE_LIST_FOR_EACH (item, tmp, remote_monitors) {
+        list_remove(item);
+        list_append(&to_demonitor, item);
+    }
+    synclist_unlock(&conn_obj->remote_monitors);
+    MUTABLE_LIST_FOR_EACH (item, tmp, &to_demonitor) {
         struct RemoteMonitor *remote_monitor = GET_LIST_ENTRY(item, struct RemoteMonitor, head);
         enif_demonitor_process(caller_env, conn_obj, &remote_monitor->process_monitor);
         list_remove(item);
         free(item);
     }
-    synclist_unlock(&conn_obj->remote_monitors);
     synclist_destroy(&conn_obj->remote_monitors);
     struct ListHead *pending_packets = synclist_wrlock(&conn_obj->pending_packets);
     MUTABLE_LIST_FOR_EACH (item, tmp, pending_packets) {
@@ -531,6 +537,7 @@ static term nif_erlang_dist_ctrl_put_data(Context *ctx, int argc, term argv[])
             term monitor_ref = term_get_tuple_element(control, 3);
             uint8_t ref_len = term_get_external_reference_len(monitor_ref);
             const uint32_t *ref_words = term_get_external_reference_words(monitor_ref);
+            struct RemoteMonitor *found_monitor = NULL;
             struct ListHead *remote_monitors = synclist_wrlock(&conn_obj->remote_monitors);
             struct ListHead *item;
             LIST_FOR_EACH (item, remote_monitors) {
@@ -538,13 +545,16 @@ static term nif_erlang_dist_ctrl_put_data(Context *ctx, int argc, term argv[])
                 if (remote_monitor->target_proc == target_proc
                     && remote_monitor->ref_len == ref_len
                     && memcmp(remote_monitor->ref_words, ref_words, ref_len * sizeof(uint32_t)) == 0) {
-                    enif_demonitor_process(erl_nif_env_from_context(ctx), conn_obj, &remote_monitor->process_monitor);
                     list_remove(item);
-                    free(remote_monitor);
+                    found_monitor = remote_monitor;
                     break;
                 }
             }
             synclist_unlock(&conn_obj->remote_monitors);
+            if (found_monitor) {
+                enif_demonitor_process(erl_nif_env_from_context(ctx), conn_obj, &found_monitor->process_monitor);
+                free(found_monitor);
+            }
             break;
         }
         case OPERATION_SEND_SENDER: {
