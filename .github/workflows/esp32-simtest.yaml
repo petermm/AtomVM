@@ -99,7 +99,7 @@ jobs:
         # CI now uses chip revision 3 that is currently only available in release-v5.5 branch
         include:
           - esp-idf-target: "esp32p4"
-            idf-version: "release-v5.5"
+            idf-version: "v5.5.2"
 
     steps:
       - name: Checkout repo

@@ -319,14 +319,11 @@ TEST_CASE("test_md5", "[test_run]")
     TEST_ASSERT(ret_value == OK_ATOM);
 }
 
-// Full crypto suite not yet supported on ESP32-P4 simulator.
-#if !CONFIG_IDF_TARGET_ESP32P4 && !CONFIG_IDF_TARGET_ESP32C5
 TEST_CASE("test_crypto", "[test_run]")
 {
     term ret_value = avm_test_case("test_crypto.beam");
     TEST_ASSERT(ret_value == OK_ATOM);
 }
-#endif
 
 TEST_CASE("test_monotonic_time", "[test_run]")
 {
@@ -335,14 +332,11 @@ TEST_CASE("test_monotonic_time", "[test_run]")
 }
 
 #if !CONFIG_IDF_TARGET_ESP32C3 && CONFIG_ETH_USE_OPENETH
-// this test is failing on v5.0.7 due to some kind of problem with atomvm:posix_open
-#if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0))
 TEST_CASE("test_mount", "[test_run]")
 {
     term ret_value = avm_test_case("test_mount.beam");
     TEST_ASSERT(ret_value == OK_ATOM);
 }
-#endif
 #endif
 
 struct pipefs_global_ctx
@@ -613,7 +607,7 @@ TEST_CASE("test_wifi_example", "[test_run]")
 #endif
 
 // Works C3 on local runs, but fails GH actions
-#if (ESP_IDF_VERSION_MAJOR >= 5 && !CONFIG_IDF_TARGET_ESP32C3) || (ESP_IDF_VERSION_MAJOR >= 5 && !CONFIG_ETH_USE_OPENETH)
+#if !CONFIG_IDF_TARGET_ESP32C3
 TEST_CASE("test_twdt", "[test_run]")
 {
     term ret_value = avm_test_case("test_twdt.beam");
