@@ -59,6 +59,14 @@ idf_component_register(
     ${OPTIONAL_WHOLE_ARCHIVE}
 )
 
+# Add esp_driver_dac conditionally, pre 6.0 versions access it through the "driver" component
+# CONFIG_* are not available before the idf_component_register call
+if(CONFIG_AVM_ENABLE_DAC_NIF)
+    if(IDF_VERSION_MAJOR GREATER_EQUAL 6 OR (IDF_VERSION_MAJOR EQUAL 5 AND IDF_VERSION_MINOR GREATER_EQUAL 3))
+        target_link_libraries(${COMPONENT_LIB} PRIVATE idf::esp_driver_dac)
+    endif()
+endif()
+
 if (IDF_VERSION_MAJOR EQUAL 4)
     idf_build_set_property(
         LINK_OPTIONS "-Wl,--whole-archive ${CMAKE_CURRENT_BINARY_DIR}/lib${COMPONENT_NAME}.a -Wl,--no-whole-archive"
