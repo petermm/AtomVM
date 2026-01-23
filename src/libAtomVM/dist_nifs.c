@@ -111,9 +111,11 @@ struct DistConnection
 static void dist_connection_dtor(ErlNifEnv *caller_env, void *obj)
 {
     struct DistConnection *conn_obj = (struct DistConnection *) obj;
+
     if (conn_obj->connection_process_id != INVALID_PROCESS_ID) {
         enif_demonitor_process(caller_env, conn_obj, &conn_obj->connection_process_monitor);
     }
+
     struct ListHead *remote_monitors = synclist_wrlock(&conn_obj->remote_monitors);
     struct ListHead *item;
     struct ListHead *tmp;
@@ -121,17 +123,20 @@ static void dist_connection_dtor(ErlNifEnv *caller_env, void *obj)
         struct RemoteMonitor *remote_monitor = GET_LIST_ENTRY(item, struct RemoteMonitor, head);
         enif_demonitor_process(caller_env, conn_obj, &remote_monitor->process_monitor);
         list_remove(item);
-        free(item);
+        free(remote_monitor);
     }
     synclist_unlock(&conn_obj->remote_monitors);
     synclist_destroy(&conn_obj->remote_monitors);
+
     struct ListHead *pending_packets = synclist_wrlock(&conn_obj->pending_packets);
     MUTABLE_LIST_FOR_EACH (item, tmp, pending_packets) {
+        struct DistributionPacket *packet = GET_LIST_ENTRY(item, struct DistributionPacket, head);
         list_remove(item);
-        free(item);
+        free(packet);
     }
     synclist_unlock(&conn_obj->pending_packets);
     synclist_destroy(&conn_obj->pending_packets);
+
     synclist_remove(&caller_env->global->dist_connections, &conn_obj->head);
 }
 
