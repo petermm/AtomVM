@@ -35,6 +35,16 @@
 
 option(AVM_STATIC_MBEDTLS "Static link Mbed-TLS." OFF)
 
+if (APPLE AND NOT MBEDTLS_ROOT_DIR)
+    set(_MBEDTLS_BREW_PREFIXES "/opt/homebrew/opt/mbedtls@3" "/usr/local/opt/mbedtls@3")
+    foreach(_MBEDTLS_BREW_PREFIX IN LISTS _MBEDTLS_BREW_PREFIXES)
+        if (EXISTS "${_MBEDTLS_BREW_PREFIX}/include/mbedtls/version.h")
+            set(MBEDTLS_ROOT_DIR "${_MBEDTLS_BREW_PREFIX}")
+            break()
+        endif()
+    endforeach()
+endif()
+
 if (MBEDTLS_ROOT_DIR)
     set(MbedTLS_FOUND TRUE)
     if (NOT MBEDTLS_LIBRARIES_DIR)

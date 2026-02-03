@@ -96,17 +96,14 @@ jobs:
       run: |
         # Detect Homebrew prefix (Apple Silicon vs Intel)
         if [ -d "/opt/homebrew/opt/mbedtls@3" ]; then
-          MBEDTLS_PREFIX="/opt/homebrew/opt/mbedtls@3"
+          MBEDTLS_ROOT_DIR="/opt/homebrew/opt/mbedtls@3"
         elif [ -d "/usr/local/opt/mbedtls@3" ]; then
-          MBEDTLS_PREFIX="/usr/local/opt/mbedtls@3"
+          MBEDTLS_ROOT_DIR="/usr/local/opt/mbedtls@3"
         else
           echo "Error: mbedtls@3 not found in expected locations"
           exit 1
         fi
-        echo "MBEDTLS_PREFIX=${MBEDTLS_PREFIX}" >> $GITHUB_ENV
-        echo "LDFLAGS=-L${MBEDTLS_PREFIX}/lib" >> $GITHUB_ENV
-        echo "CPPFLAGS=-I${MBEDTLS_PREFIX}/include" >> $GITHUB_ENV
-        echo "PKG_CONFIG_PATH=${MBEDTLS_PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
+        echo "MBEDTLS_ROOT_DIR=${MBEDTLS_ROOT_DIR}" >> $GITHUB_ENV
 
     # Builder info
     - name: "System info"
@@ -127,7 +124,7 @@ jobs:
       working-directory: build
       run: |
         export PATH="/usr/local/opt/erlang@${{ matrix.otp }}/bin:/opt/homebrew/opt/erlang@${{ matrix.otp }}/bin:$PATH"
-        cmake -DAVM_WARNINGS_ARE_ERRORS=ON ${MBEDTLS_PREFIX:+-DCMAKE_PREFIX_PATH="$MBEDTLS_PREFIX"} ${{ matrix.cmake_opts_other }} -G Ninja ..
+        cmake -DAVM_WARNINGS_ARE_ERRORS=ON -DMBEDTLS_ROOT_DIR="$MBEDTLS_ROOT_DIR" ${{ matrix.cmake_opts_other }} -G Ninja ..
 
     - name: "Build: run ninja"
       working-directory: build
