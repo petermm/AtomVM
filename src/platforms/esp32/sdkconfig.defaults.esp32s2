@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: AtomVM Contributors
+#
+
+CONFIG_USE_USB_SERIAL=y

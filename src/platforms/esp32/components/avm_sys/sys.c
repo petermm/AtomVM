@@ -878,3 +878,25 @@ ModuleNativeEntryPoint sys_map_native_code(const uint8_t *native_code, size_t si
     return (ModuleNativeEntryPoint) addr;
 }
 #endif
+
+#ifdef CONFIG_USE_USB_SERIAL
+#include "tinyusb_default_config.h"
+#include "tinyusb.h"
+#include "tinyusb_cdc_acm.h"
+#include "tinyusb_console.h"
+
+void esp32_sys_init_usb_serial(void)
+{
+    ESP_LOGI(TAG, "USB initialization");
+
+    tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
+
+    tinyusb_config_cdcacm_t acm_cfg = { 0 };
+    ESP_ERROR_CHECK(tinyusb_cdcacm_init(&acm_cfg));
+
+    tinyusb_console_init(TINYUSB_CDC_ACM_0);
+
+    ESP_LOGI(TAG, "USB initialization: done.");
+}
+#endif

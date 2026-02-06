@@ -50,7 +50,7 @@ jobs:
         elixir_version: ["1.17"]
         rebar3_version: ["3.24.0"]
         compiler_pkgs: ["clang-14"]
-        soc: ["esp32", "esp32c2", "esp32c3", "esp32s2", "esp32s3", "esp32c5", "esp32c6", "esp32c61", "esp32h2", "esp32p4", "esp32p4_pre", "esp32p4_c6", "esp32p4_pre_c6"]
+        soc: ["esp32", "esp32c2", "esp32c3", "esp32s2", "esp32s2_no_cdc", "esp32s3", "esp32c5", "esp32c6", "esp32c61", "esp32h2", "esp32p4", "esp32p4_pre", "esp32p4_c6", "esp32p4_pre_c6"]
         flavor: ["", "-elixir"]
 
     env:
@@ -121,7 +121,7 @@ jobs:
         make
 
     - name: "Set SOC target"
-      run: echo "SOC_TARGET=${{ startsWith(matrix.soc, 'esp32p4') && 'esp32p4' || matrix.soc }}" >> $GITHUB_ENV
+      run: echo "SOC_TARGET=${{ startsWith(matrix.soc, 'esp32p4') && 'esp32p4' || startsWith(matrix.soc, 'esp32s2') && 'esp32s2' || matrix.soc }}" >> $GITHUB_ENV
 
     - name: "Use release defaults"
       if: startsWith(github.ref, 'refs/tags/')
@@ -136,6 +136,13 @@ jobs:
       working-directory: ./src/platforms/esp32/
       run: |
         cp sdkconfig.defaults.${{ matrix.soc }} sdkconfig.defaults.esp32p4
+
+    - name: "Enable USB serial for esp32s2_no_cdc"
+      if: matrix.soc == 'esp32s2_no_cdc'
+      shell: bash
+      working-directory: ./src/platforms/esp32/
+      run: |
+        rm sdkconfig.defaults.esp32s2
 
     - name: "Handle esp32p4 c6 variants - add wifi_remote component"
       if: matrix.soc == 'esp32p4_c6' || matrix.soc == 'esp32p4_pre_c6'

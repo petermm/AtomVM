@@ -91,6 +91,10 @@ extern QueueSetHandle_t event_set;
 extern QueueHandle_t event_queue;
 void esp32_sys_queue_init();
 
+#ifdef CONFIG_USE_USB_SERIAL
+void esp32_sys_init_usb_serial(void);
+#endif
+
 void socket_init(Context *ctx, term opts);
 
 term esp_err_to_term(GlobalContext *glb, esp_err_t status);

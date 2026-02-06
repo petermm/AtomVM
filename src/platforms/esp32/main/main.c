@@ -37,16 +37,6 @@
 #include <term.h>
 #include <utils.h>
 
-// before enabling this:
-// idf.py add-dependency esp_tinyusb
-// and enable USE_USB_SERIAL in menu config
-#ifdef CONFIG_USE_USB_SERIAL
-void init_usb_serial(void);
-#include "tinyusb.h"
-#include "tusb_cdc_acm.h"
-#include "tusb_console.h"
-#endif
-
 #include "esp32_sys.h"
 
 #define TAG "AtomVM"
@@ -71,7 +61,7 @@ void app_main()
     esp32_sys_queue_init();
 
 #ifdef CONFIG_USE_USB_SERIAL
-    init_usb_serial();
+    esp32_sys_init_usb_serial();
 #endif
 
     fprintf(stdout, "%s", ATOMVM_BANNER);
@@ -144,32 +134,3 @@ void app_main()
     }
 }
 
-#ifdef CONFIG_USE_USB_SERIAL
-void init_usb_serial()
-{
-    /* Setting TinyUSB up */
-    ESP_LOGI(TAG, "USB initialization");
-
-    const tinyusb_config_t tusb_cfg = {
-        .device_descriptor = NULL,
-        .string_descriptor = NULL,
-        .external_phy = false, // In the most cases you need to use a `false` value
-#if (TUD_OPT_HIGH_SPEED)
-        .fs_configuration_descriptor = NULL,
-        .hs_configuration_descriptor = NULL,
-        .qualifier_descriptor = NULL,
-#else
-        .configuration_descriptor = NULL,
-#endif // TUD_OPT_HIGH_SPEED
-    };
-
-    ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
-
-    tinyusb_config_cdcacm_t acm_cfg = { 0 }; // the configuration uses default values
-    ESP_ERROR_CHECK(tusb_cdc_acm_init(&acm_cfg));
-
-    esp_tusb_init_console(TINYUSB_CDC_ACM_0); // log to usb
-
-    ESP_LOGI(TAG, "USB initialization: done.");
-}
-#endif
