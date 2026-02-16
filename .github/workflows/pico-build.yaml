@@ -165,7 +165,7 @@ jobs:
           mkdir build
           cd build
           cmake .. -G Ninja -DPICO_BOARD=${{ matrix.board }} ${{ matrix.platform }} ${{ matrix.jit }}
-          ninja
+          ninja AtomVM
 
       - name: "Perform CodeQL Analysis"
         uses: github/codeql-action/analyze@v4
