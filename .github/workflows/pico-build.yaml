@@ -49,8 +49,16 @@ jobs:
         run: |
           sudo apt install -y \
               cmake doxygen gperf ninja-build gcc-arm-none-eabi \
-              libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib \
-              erlang-base erlang-dev erlang-dialyzer erlang-eunit rebar3
+              libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.1"
+          rebar3-version: "3.24.0"
+          hexpm-mirrors: |
+            https://builds.hex.pm
+            https://repo.hex.pm
+            https://cdn.jsdelivr.net/hex
 
       - name: Build atomvmlib-pico.uf2/atomvmlib-pico2.uf2
         shell: bash
@@ -94,14 +102,14 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # - uses: erlef/setup-beam@v1
-      #   with:
-      #     otp-version: "28.1"
-      #     rebar3-version: "3.24.0"
-      #     hexpm-mirrors: |
-      #       https://builds.hex.pm
-      #       https://repo.hex.pm
-      #       https://cdn.jsdelivr.net/hex
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.1"
+          rebar3-version: "3.24.0"
+          hexpm-mirrors: |
+            https://builds.hex.pm
+            https://repo.hex.pm
+            https://cdn.jsdelivr.net/hex
 
       - name: Set and escape ref name
         shell: bash
