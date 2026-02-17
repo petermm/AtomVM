@@ -437,12 +437,12 @@ term dist_monitor(struct DistConnection *conn_obj, term from_pid, term target_pr
     monitor->ref_len = term_get_external_reference_len(monitor_ref);
     memcpy(monitor->ref_words, term_get_external_reference_words(monitor_ref), sizeof(uint32_t) * monitor->ref_len);
     if (target_process_id) {
-        synclist_append(&conn_obj->remote_monitors, &monitor->head);
         ErlNifPid target_process_pid = target_process_id;
         if (UNLIKELY(enif_monitor_process(erl_nif_env_from_context(ctx), conn_obj, &target_process_pid, &monitor->process_monitor) != 0)) {
-            synclist_remove(&conn_obj->remote_monitors, &monitor->head);
             dist_enqueue_monitor_exit_message(monitor, NOPROC_ATOM, conn_obj, ctx->global);
             free(monitor);
+        } else {
+            synclist_append(&conn_obj->remote_monitors, &monitor->head);
         }
     } else {
         dist_enqueue_monitor_exit_message(monitor, NOPROC_ATOM, conn_obj, ctx->global);
