@@ -691,15 +691,13 @@ static term dist_get_net_kernel_and_create_connection(struct DistConnection **co
     // Ensure net_kernel process can be found to autoconnect
     term net_kernel_proc = globalcontext_get_registered_process(ctx->global, NET_KERNEL_ATOM_INDEX);
     if (UNLIKELY(!term_is_local_pid(net_kernel_proc))) {
-        synclist_unlock(&ctx->global->dist_connections);
-        RAISE_ERROR(NOPROC_ATOM);
+        return term_invalid_term();
     }
 
     // Create a resource object
     struct DistConnection *new_conn_obj = enif_alloc_resource(ctx->global->dist_connection_resource_type, sizeof(struct DistConnection));
     if (IS_NULL_PTR(new_conn_obj)) {
-        synclist_unlock(&ctx->global->dist_connections);
-        RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+        return term_invalid_term();
     }
     *conn_obj = new_conn_obj;
     new_conn_obj->node_atom_index = node_atom_index;
@@ -752,7 +750,7 @@ term dist_send_message(term target, term payload, Context *ctx)
     }
 
     // Search for dhandle.
-    struct ListHead *dist_connections = synclist_rdlock(&ctx->global->dist_connections);
+    struct ListHead *dist_connections = synclist_wrlock(&ctx->global->dist_connections);
     struct ListHead *item;
     LIST_FOR_EACH (item, dist_connections) {
         struct DistConnection *dist_connection = GET_LIST_ENTRY(item, struct DistConnection, head);
@@ -778,7 +776,7 @@ term dist_send_message(term target, term payload, Context *ctx)
     term net_kernel_proc = dist_get_net_kernel_and_create_connection(&new_conn_obj, node_atom_index, dist_connections, ctx);
     if (UNLIKELY(term_is_invalid_term(net_kernel_proc))) {
         synclist_unlock(&ctx->global->dist_connections);
-        return term_invalid_term();
+        RAISE_ERROR(NOPROC_ATOM);
     }
 
     // Enqueue message
@@ -840,7 +838,7 @@ term dist_send_link(term from_pid, term to_pid, Context *ctx)
     uint32_t node_creation = term_get_external_node_creation(to_pid);
 
     // Search for dhandle.
-    struct ListHead *dist_connections = synclist_rdlock(&ctx->global->dist_connections);
+    struct ListHead *dist_connections = synclist_wrlock(&ctx->global->dist_connections);
     struct ListHead *item;
     LIST_FOR_EACH (item, dist_connections) {
         struct DistConnection *dist_connection = GET_LIST_ENTRY(item, struct DistConnection, head);
@@ -861,7 +859,7 @@ term dist_send_link(term from_pid, term to_pid, Context *ctx)
     term net_kernel_proc = dist_get_net_kernel_and_create_connection(&new_conn_obj, node_atom_index, dist_connections, ctx);
     if (UNLIKELY(term_is_invalid_term(net_kernel_proc))) {
         synclist_unlock(&ctx->global->dist_connections);
-        return term_invalid_term();
+        RAISE_ERROR(NOPROC_ATOM);
     }
 
     // Enqueue message
