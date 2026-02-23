@@ -594,6 +594,9 @@ static void maybe_set_sntp(term sntp_config, GlobalContext *global)
         char *host = interop_term_to_string(interop_kv_get_value(sntp_config, host_atom, global), &ok);
         if (LIKELY(ok)) {
             // do not free(sntp)
+            if (esp_sntp_enabled()) {
+                esp_sntp_stop();
+            }
             esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
             esp_sntp_setservername(0, host);
             sntp_set_time_sync_notification_cb(time_sync_notification_cb);

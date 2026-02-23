@@ -708,8 +708,8 @@ update_config(OldConfig, NewConfig) ->
 
 %% @private
 update_opts(OldOpts, NewOpts) ->
-    Old = maps:from_list(OldOpts),
-    New = maps:from_list(NewOpts),
+    Old = maps:from_list(proplists:unfold(OldOpts)),
+    New = maps:from_list(proplists:unfold(NewOpts)),
     NewMap = maps:merge(Old, New),
     proplists:from_map(NewMap).
 
