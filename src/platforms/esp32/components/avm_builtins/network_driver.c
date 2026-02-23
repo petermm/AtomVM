@@ -116,6 +116,7 @@ struct ClientData
     uint32_t port_process_id;
     uint32_t owner_process_id;
     uint64_t ref_ticks;
+    bool managed;
 };
 
 static inline term make_atom(GlobalContext *global, AtomString atom_str)
@@ -278,7 +279,9 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 
             case WIFI_EVENT_STA_START: {
                 ESP_LOGI(TAG, "WIFI_EVENT_STA_START received.");
-                esp_wifi_connect();
+                if (!data->managed) {
+                    esp_wifi_connect();
+                }
                 break;
             }
 
@@ -681,6 +684,7 @@ static void start_network(Context *ctx, term pid, term ref, term config)
     data->port_process_id = ctx->process_id;
     data->owner_process_id = term_to_local_process_id(pid);
     data->ref_ticks = term_to_ref_ticks(ref);
+    data->managed = roaming;
 
     esp_err_t err;
 
@@ -835,6 +839,10 @@ static void start_network(Context *ctx, term pid, term ref, term config)
 
 static void stop_network(Context *ctx)
 {
+
+    // Stop sntp (ignore OK, or not configured error)
+    esp_sntp_stop();
+
     // Stop unregister event callbacks so they dont trigger during shutdown.
     esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
     esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
@@ -855,9 +863,6 @@ static void stop_network(Context *ctx)
     // Stop and deinit the WiFi driver, these only return OK, or not init error (fine to ignore).
     esp_wifi_stop();
     esp_wifi_deinit();
-
-    // Stop sntp (ignore OK, or not configured error)
-    esp_sntp_stop();
 
     // Destroy existing netif interfaces
     if (ap_wifi_interface != NULL) {
