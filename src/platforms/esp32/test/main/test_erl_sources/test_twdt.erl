@@ -19,6 +19,7 @@
 %
 
 -module(test_twdt).
+
 -export([start/0]).
 
 start() ->
@@ -33,42 +34,48 @@ test_reconfigure() ->
             esp:task_wdt_reconfigure(config),
             fail
         catch
-            error:badarg -> ok
+            error:badarg ->
+                ok
         end,
     ok =
         try
             esp:task_wdt_reconfigure({-1, 0, false}),
             fail
         catch
-            error:badarg -> ok
+            error:badarg ->
+                ok
         end,
     ok =
         try
             esp:task_wdt_reconfigure({0, 0, false}),
             fail
         catch
-            error:badarg -> ok
+            error:badarg ->
+                ok
         end,
     ok =
         try
             esp:task_wdt_reconfigure({5000, -1, false}),
             fail
         catch
-            error:badarg -> ok
+            error:badarg ->
+                ok
         end,
     ok =
         try
             esp:task_wdt_reconfigure({5000, 512, false}),
             fail
         catch
-            error:badarg -> ok
+            error:badarg ->
+                ok
         end,
     ok =
         try
             esp:task_wdt_reconfigure({5000, 0, 0}),
             fail
         catch
-            error:badarg -> ok
+            error:badarg ->
+                ok
         end,
     ok = esp:task_wdt_reconfigure({5000, 0, false}),
     ok.
@@ -79,15 +86,16 @@ test_user() ->
             esp:task_wdt_add_user(42),
             fail
         catch
-            error:badarg -> ok
+            error:badarg ->
+                ok
         end,
     {ok, Handle} = esp:task_wdt_add_user(<<"42">>),
-    io:format("Reconfigure to 100ms\n"),
-    ok = esp:task_wdt_reconfigure({100, 0, false}),
+    io:format("Reconfigure to 1000ms\n"),
+    ok = esp:task_wdt_reconfigure({1000, 0, false}),
     io:format("Reset now\n"),
     ok = esp:task_wdt_reset_user(Handle),
-    io:format("Wait 150ms\n"),
-    timer:sleep(150),
+    io:format("Wait 1200ms\n"),
+    timer:sleep(1200),
     io:format("Reset again\n"),
     ok = esp:task_wdt_reset_user(Handle),
     ok = esp:task_wdt_delete_user(Handle),
