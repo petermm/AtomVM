@@ -47,7 +47,6 @@ jobs:
       matrix:
         esp-idf-target: ["esp32", "esp32c3"]
         idf-version:
-         - 'v5.1.6'
          - 'v5.2.6'
          - 'v5.3.4'
          - 'v5.4.3'
