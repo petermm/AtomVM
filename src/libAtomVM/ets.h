@@ -86,6 +86,7 @@ EtsStatus ets_lookup_element_maybe_gc(term name_or_ref, term key, size_t index, 
 EtsStatus ets_member(term name_or_ref, term key, Context *ctx);
 EtsStatus ets_insert(term name_or_ref, term entry, bool as_new, Context *ctx);
 EtsStatus ets_update_counter_maybe_gc(term name_or_ref, term key, term op, term default_tuple, term *ret, Context *ctx);
+EtsStatus ets_take_maybe_gc(term name_or_ref, term key, term *ret, Context *ctx);
 EtsStatus ets_delete(term name_or_ref, term key, Context *ctx);
 EtsStatus ets_delete_table(term name_or_ref, Context *ctx);
 

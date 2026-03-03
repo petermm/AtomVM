@@ -225,8 +225,9 @@ static term nif_ets_lookup_element(Context *ctx, int argc, term argv[]);
 static term nif_ets_member(Context *ctx, int argc, term argv[]);
 static term nif_ets_insert(Context *ctx, int argc, term argv[]);
 static term nif_ets_insert_new(Context *ctx, int argc, term argv[]);
-static term nif_ets_delete(Context *ctx, int argc, term argv[]);
 static term nif_ets_update_counter(Context *ctx, int argc, term argv[]);
+static term nif_ets_take(Context *ctx, int argc, term argv[]);
+static term nif_ets_delete(Context *ctx, int argc, term argv[]);
 static term nif_erlang_pid_to_list(Context *ctx, int argc, term argv[]);
 static term nif_erlang_port_to_list(Context *ctx, int argc, term argv[]);
 static term nif_erlang_ref_to_list(Context *ctx, int argc, term argv[]);
@@ -751,14 +752,19 @@ static const struct Nif ets_member_nif = {
     .nif_ptr = nif_ets_member
 };
 
-static const struct Nif ets_delete_nif = {
-    .base.type = NIFFunctionType,
-    .nif_ptr = nif_ets_delete
-};
-
 static const struct Nif ets_update_counter_nif = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_ets_update_counter
+};
+
+static const struct Nif ets_take_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_ets_take
+};
+
+static const struct Nif ets_delete_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_ets_delete
 };
 
 static const struct Nif atomvm_add_avm_pack_binary_nif = {
@@ -3962,6 +3968,34 @@ static term nif_ets_update_counter(Context *ctx, int argc, term argv[])
             RAISE_ERROR(OUT_OF_MEMORY_ATOM);
         case EtsOverflow:
             RAISE_ERROR(OVERFLOW_ATOM);
+        default:
+            // unreachable
+            AVM_ABORT();
+    }
+}
+
+static term nif_ets_take(Context *ctx, int argc, term argv[])
+{
+    assert(argc == 2);
+
+    term name_or_ref = argv[0];
+    term key = argv[1];
+
+    VALIDATE_VALUE(name_or_ref, is_ets_table_id);
+
+    term ret = term_invalid_term();
+
+    EtsStatus result = ets_take_maybe_gc(name_or_ref, key, &ret, ctx);
+
+    switch (result) {
+        case EtsOk:
+            return ret;
+        case EtsTupleNotExists:
+            return term_nil();
+        case EtsBadAccess:
+            RAISE_ERROR(BADARG_ATOM);
+        case EtsAllocationError:
+            RAISE_ERROR(OUT_OF_MEMORY_ATOM);
         default:
             // unreachable
             AVM_ABORT();
