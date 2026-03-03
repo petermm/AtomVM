@@ -221,6 +221,7 @@ static term nif_erlang_throw(Context *ctx, int argc, term argv[]);
 static term nif_erlang_raise(Context *ctx, int argc, term argv[]);
 static term nif_ets_new(Context *ctx, int argc, term argv[]);
 static term nif_ets_insert(Context *ctx, int argc, term argv[]);
+static term nif_ets_insert_new(Context *ctx, int argc, term argv[]);
 static term nif_ets_lookup(Context *ctx, int argc, term argv[]);
 static term nif_ets_lookup_element(Context *ctx, int argc, term argv[]);
 static term nif_ets_delete(Context *ctx, int argc, term argv[]);
@@ -727,6 +728,11 @@ static const struct Nif ets_new_nif = {
 static const struct Nif ets_insert_nif = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_ets_insert
+};
+
+static const struct Nif ets_insert_new_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_ets_insert_new
 };
 
 static const struct Nif ets_lookup_nif = {
@@ -3771,177 +3777,258 @@ static term nif_erlang_raise(Context *ctx, int argc, term argv[])
 
 static term nif_ets_new(Context *ctx, int argc, term argv[])
 {
-    UNUSED(argc);
+    assert(argc == 2);
 
     term name = argv[0];
-    VALIDATE_VALUE(name, term_is_atom);
-
     term options = argv[1];
+
+    VALIDATE_VALUE(name, term_is_atom);
     VALIDATE_VALUE(options, term_is_list);
 
     term is_named = interop_kv_get_value_default(options, ATOM_STR("\xB", "named_table"), FALSE_ATOM, ctx->global);
     term keypos = interop_kv_get_value_default(options, ATOM_STR("\x6", "keypos"), term_from_int(1), ctx->global);
 
-    if (term_to_int(keypos) < 1) {
-        RAISE_ERROR(BADARG_ATOM);
-    }
+    VALIDATE_VALUE(keypos, term_is_pos_int);
+
+    size_t key_index = term_to_int(keypos) - 1;
 
     term private = interop_kv_get_value(options, ATOM_STR("\x7", "private"), ctx->global);
     term public = interop_kv_get_value(options, ATOM_STR("\x6", "public"), ctx->global);
 
-    EtsAccessType access = EtsAccessProtected;
+    // NOTE: If multiple accesses are specified, the precedence is: public > private > protected
+    EtsTableAccess access = EtsTableAccessProtected;
     if (!term_is_invalid_term(private)) {
-        access = EtsAccessPrivate;
-    } else if (!term_is_invalid_term(public)) {
-        access = EtsAccessPublic;
+        access = EtsTableAccessPrivate;
+    }
+    if (!term_is_invalid_term(public)) {
+        access = EtsTableAccessPublic;
+    }
+
+    term bag = interop_kv_get_value(options, ATOM_STR("\x3", "bag"), ctx->global);
+    term duplicate_bag = interop_kv_get_value(options, ATOM_STR("\xd", "duplicate_bag"), ctx->global);
+
+    // NOTE: If multiple table types are specified, the precedence is: duplicate_bag > bag > set
+    EtsTableType type = EtsTableSet;
+    if (!term_is_invalid_term(bag)) {
+        type = EtsTableBag;
+    }
+    if (!term_is_invalid_term(duplicate_bag)) {
+        type = EtsTableDuplicateBag;
     }
 
     term table = term_invalid_term();
-    EtsErrorCode result = ets_create_table_maybe_gc(name, is_named == TRUE_ATOM, EtsTableSet, access, term_to_int(keypos) - 1, &table, ctx);
+
+    EtsStatus result = ets_create_table_maybe_gc(
+        name,
+        is_named == TRUE_ATOM,
+        type,
+        access,
+        key_index,
+        &table,
+        ctx);
+
     switch (result) {
         case EtsOk:
             return table;
-        case EtsTableNameInUse:
+        case EtsTableNameExists:
             RAISE_ERROR(BADARG_ATOM);
-        case EtsAllocationFailure:
+        case EtsAllocationError:
             RAISE_ERROR(OUT_OF_MEMORY_ATOM);
         default:
+            // unreachable
             AVM_ABORT();
     }
 }
 
 static inline bool is_ets_table_id(term t)
 {
-    return term_is_local_reference(t) || term_is_atom(t);
+    return term_is_reference(t) || term_is_atom(t);
 }
 
 static term nif_ets_insert(Context *ctx, int argc, term argv[])
 {
-    UNUSED(argc);
+    assert(argc == 2);
 
-    term ref = argv[0];
-    VALIDATE_VALUE(ref, is_ets_table_id);
-
+    term name_or_ref = argv[0];
     term entry = argv[1];
 
-    EtsErrorCode result = ets_insert(ref, entry, ctx);
+    VALIDATE_VALUE(name_or_ref, is_ets_table_id);
+
+    EtsStatus result = ets_insert(name_or_ref, entry, false, ctx);
+
     switch (result) {
         case EtsOk:
             return TRUE_ATOM;
         case EtsBadAccess:
         case EtsBadEntry:
             RAISE_ERROR(BADARG_ATOM);
-        case EtsAllocationFailure:
+        case EtsAllocationError:
             RAISE_ERROR(OUT_OF_MEMORY_ATOM);
         default:
+            // unreachable
+            AVM_ABORT();
+    }
+}
+
+static term nif_ets_insert_new(Context *ctx, int argc, term argv[])
+{
+    assert(argc == 2);
+
+    term name_or_ref = argv[0];
+    term entry = argv[1];
+
+    VALIDATE_VALUE(name_or_ref, is_ets_table_id);
+
+    EtsStatus result = ets_insert(name_or_ref, entry, true, ctx);
+
+    switch (result) {
+        case EtsOk:
+            return TRUE_ATOM;
+        case EtsKeyExists:
+            return FALSE_ATOM;
+        case EtsBadAccess:
+        case EtsBadEntry:
+            RAISE_ERROR(BADARG_ATOM);
+        case EtsAllocationError:
+            RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+        default:
+            // unreachable
             AVM_ABORT();
     }
 }
 
 static term nif_ets_lookup(Context *ctx, int argc, term argv[])
 {
-    UNUSED(argc);
+    assert(argc == 2);
 
-    term ref = argv[0];
-    VALIDATE_VALUE(ref, is_ets_table_id);
-
+    term name_or_ref = argv[0];
     term key = argv[1];
 
-    term ret = term_invalid_term();
-    EtsErrorCode result = ets_lookup_maybe_gc(ref, key, &ret, ctx);
-    switch (result) {
-        case EtsOk:
-            return ret;
-        case EtsBadAccess:
-            RAISE_ERROR(BADARG_ATOM);
-        case EtsAllocationFailure:
-            RAISE_ERROR(OUT_OF_MEMORY_ATOM);
-        default:
-            AVM_ABORT();
-    }
-}
-
-static term nif_ets_lookup_element(Context *ctx, int argc, term argv[])
-{
-    UNUSED(argc);
-
-    term ref = argv[0];
-    VALIDATE_VALUE(ref, is_ets_table_id);
-
-    term key = argv[1];
-    term pos = argv[2];
-    VALIDATE_VALUE(pos, term_is_integer);
+    VALIDATE_VALUE(name_or_ref, is_ets_table_id);
 
     term ret = term_invalid_term();
-    EtsErrorCode result = ets_lookup_element_maybe_gc(ref, key, term_to_int(pos), &ret, ctx);
-    switch (result) {
-        case EtsOk:
-            return ret;
-        case EtsEntryNotFound:
-        case EtsBadPosition:
-        case EtsBadAccess:
-            RAISE_ERROR(BADARG_ATOM);
-        case EtsAllocationFailure:
-            RAISE_ERROR(OUT_OF_MEMORY_ATOM);
-        default:
-            AVM_ABORT();
-    }
-}
 
-static term nif_ets_delete(Context *ctx, int argc, term argv[])
-{
-    term ref = argv[0];
-    VALIDATE_VALUE(ref, is_ets_table_id);
-    term ret = term_invalid_term();
-    EtsErrorCode result;
-    if (argc == 2) {
-        term key = argv[1];
-        result = ets_delete(ref, key, &ret, ctx);
-    } else {
-        result = ets_drop_table(ref, &ret, ctx);
-    }
+    EtsStatus result = ets_lookup_maybe_gc(name_or_ref, key, &ret, ctx);
 
     switch (result) {
         case EtsOk:
             return ret;
+        case EtsTupleNotExists:
+            return term_nil();
         case EtsBadAccess:
             RAISE_ERROR(BADARG_ATOM);
-        case EtsAllocationFailure:
+        case EtsAllocationError:
             RAISE_ERROR(OUT_OF_MEMORY_ATOM);
         default:
+            // unreachable
             AVM_ABORT();
     }
 }
 
 static term nif_ets_update_counter(Context *ctx, int argc, term argv[])
 {
-    term ref = argv[0];
-    VALIDATE_VALUE(ref, is_ets_table_id);
+    assert(argc == 3 || argc == 4);
 
+    term name_or_ref = argv[0];
     term key = argv[1];
     term operation = argv[2];
-    term default_value;
+
+    VALIDATE_VALUE(name_or_ref, is_ets_table_id);
+
+    term default_tuple = term_invalid_term();
     if (argc == 4) {
-        default_value = argv[3];
-        VALIDATE_VALUE(default_value, term_is_tuple);
-        term_put_tuple_element(default_value, 0, key);
-    } else {
-        default_value = term_invalid_term();
+        default_tuple = argv[3];
+        VALIDATE_VALUE(default_tuple, term_is_tuple);
     }
-    term ret;
-    EtsErrorCode result = ets_update_counter_maybe_gc(ref, key, operation, default_value, &ret, ctx);
+
+    term ret = term_invalid_term();
+
+    EtsStatus result = ets_update_counter_maybe_gc(name_or_ref, key, operation, default_tuple, &ret, ctx);
+
     switch (result) {
         case EtsOk:
             return ret;
         case EtsBadAccess:
         case EtsBadEntry:
+        case EtsTupleNotExists:
             RAISE_ERROR(BADARG_ATOM);
-        case EtsAllocationFailure:
+        case EtsAllocationError:
             RAISE_ERROR(OUT_OF_MEMORY_ATOM);
         case EtsOverflow:
             RAISE_ERROR(OVERFLOW_ATOM);
         default:
-            UNREACHABLE();
+            // unreachable
+            AVM_ABORT();
+    }
+}
+
+static term nif_ets_lookup_element(Context *ctx, int argc, term argv[])
+{
+    assert(argc == 3 || argc == 4);
+
+    term name_or_ref = argv[0];
+    term key = argv[1];
+    term pos = argv[2];
+
+    VALIDATE_VALUE(name_or_ref, is_ets_table_id);
+    VALIDATE_VALUE(pos, term_is_pos_int);
+
+    size_t index = term_to_int(pos) - 1;
+
+    term default_value = term_invalid_term();
+    if (argc == 4) {
+        default_value = argv[3];
+    }
+
+    term ret = term_invalid_term();
+
+    EtsStatus result = ets_lookup_element_maybe_gc(name_or_ref, key, index, &ret, ctx);
+
+    switch (result) {
+        case EtsOk:
+            return ret;
+        case EtsTupleNotExists:
+            if (!term_is_invalid_term(default_value)) {
+                return default_value;
+            }
+            RAISE_ERROR(BADARG_ATOM);
+        case EtsBadAccess:
+        case EtsBadIndex:
+            RAISE_ERROR(BADARG_ATOM);
+        case EtsAllocationError:
+            RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+        default:
+            // unreachable
+            AVM_ABORT();
+    }
+}
+
+static term nif_ets_delete(Context *ctx, int argc, term argv[])
+{
+    assert(argc == 1 || argc == 2);
+
+    term name_or_ref = argv[0];
+
+    VALIDATE_VALUE(name_or_ref, is_ets_table_id);
+
+    EtsStatus result;
+
+    if (argc == 1) {
+        result = ets_delete_table(name_or_ref, ctx);
+    } else {
+        result = ets_delete(name_or_ref, argv[1], ctx);
+    }
+
+    switch (result) {
+        case EtsOk:
+            return TRUE_ATOM;
+        case EtsBadAccess:
+            RAISE_ERROR(BADARG_ATOM);
+        case EtsAllocationError:
+            RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+        default:
+            // unreachable
+            AVM_ABORT();
     }
 }
 
