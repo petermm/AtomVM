@@ -245,6 +245,30 @@ EtsStatus ets_lookup_element_maybe_gc(term name_or_ref, term key, size_t index, 
     return result;
 }
 
+EtsStatus ets_member(term name_or_ref, term key, Context *ctx)
+{
+    struct EtsTable *table = get_table(
+        &ctx->global->ets,
+        name_or_ref,
+        ctx->process_id,
+        TableAccessRead);
+
+    if (table == NULL) {
+        return EtsBadAccess;
+    }
+
+    size_t count;
+    EtsStatus result = ets_multimap_lookup(table->multimap, key, NULL, &count, ctx->global);
+
+    if (result == EtsOk && count == 0) {
+        result = EtsTupleNotExists;
+    }
+
+    SMP_UNLOCK(table);
+
+    return result;
+}
+
 EtsStatus ets_insert(term name_or_ref, term entry, bool as_new, Context *ctx)
 {
     struct EtsTable *table = get_table(
