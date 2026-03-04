@@ -106,6 +106,7 @@ static EtsStatus lookup_or_default(
     Heap *ret_heap,
     term *ret,
     Context *ctx);
+static EtsStatus apply_spec(term tuple, term spec, size_t key_index);
 static EtsStatus apply_op(term tuple, term opt, avm_int_t *ret, size_t key_index);
 
 void ets_init(Ets *ets)
@@ -291,6 +292,63 @@ EtsStatus ets_insert(term name_or_ref, term entry, bool as_new, Context *ctx)
 
     SMP_UNLOCK(table);
 
+    return result;
+}
+
+EtsStatus ets_update_element(
+    term name_or_ref,
+    term key,
+    term element_spec,
+    term default_tuple,
+    Context *ctx)
+{
+    struct EtsTable *table = get_table(
+        &ctx->global->ets,
+        name_or_ref,
+        ctx->process_id,
+        TableAccessWrite);
+
+    if (table == NULL) {
+        return EtsBadAccess;
+    }
+
+    Heap insert_heap;
+    term insert_tuple;
+    EtsStatus result = lookup_or_default(table, key, default_tuple, &insert_heap, &insert_tuple, ctx);
+    if (result != EtsOk) {
+        SMP_UNLOCK(table);
+        return result;
+    }
+
+    if (term_is_tuple(element_spec)) {
+        result = apply_spec(insert_tuple, element_spec, table->key_index);
+        if (result != EtsOk) {
+            goto cleanup;
+        }
+    } else if (term_is_list(element_spec)) {
+        for (term iter = element_spec; !term_is_nil(iter); iter = term_get_list_tail(iter)) {
+            if (!term_is_list(iter)) {
+                result = EtsBadEntry;
+                goto cleanup;
+            }
+
+            term spec = term_get_list_head(iter);
+
+            result = apply_spec(insert_tuple, spec, table->key_index);
+            if (result != EtsOk) {
+                goto cleanup;
+            }
+        }
+    } else {
+        result = EtsBadEntry;
+        goto cleanup;
+    }
+
+    result = ets_multimap_insert(table->multimap, &insert_tuple, 1, ctx->global);
+
+cleanup:
+    memory_destroy_heap(&insert_heap, ctx->global);
+    SMP_UNLOCK(table);
     return result;
 }
 
@@ -823,6 +881,34 @@ static EtsStatus lookup_or_default(
     } else {
         free(tuple);
     }
+
+    return EtsOk;
+}
+
+static EtsStatus apply_spec(term tuple, term spec, size_t key_index)
+{
+    if (!term_is_tuple(spec) || term_get_tuple_arity(spec) != 2) {
+        return EtsBadEntry;
+    }
+
+    term pos = term_get_tuple_element(spec, 0);
+    term value = term_get_tuple_element(spec, 1);
+
+    if (!term_is_integer(pos)) {
+        return EtsBadEntry;
+    }
+
+    avm_int_t index = term_to_int(pos) - 1;
+
+    if (index < 0 || index >= term_get_tuple_arity(tuple)) {
+        return EtsBadEntry;
+    }
+
+    if ((size_t) index == key_index) {
+        return EtsBadEntry;
+    }
+
+    term_put_tuple_element(tuple, (uint32_t) index, value);
 
     return EtsOk;
 }
