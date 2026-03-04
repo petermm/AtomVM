@@ -90,6 +90,7 @@ EtsStatus ets_update_counter_maybe_gc(term name_or_ref, term key, term op, term 
 EtsStatus ets_take_maybe_gc(term name_or_ref, term key, term *ret, Context *ctx);
 EtsStatus ets_delete(term name_or_ref, term key, Context *ctx);
 EtsStatus ets_delete_table(term name_or_ref, Context *ctx);
+EtsStatus ets_delete_object(term name_or_ref, term tuple, Context *ctx);
 
 #ifdef __cplusplus
 }
