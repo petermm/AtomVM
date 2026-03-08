@@ -135,6 +135,7 @@ struct ClientData
     uint32_t owner_process_id;
     uint64_t ref_ticks;
     bool managed;
+    char *sntp_host;
 };
 
 struct ScanClientData
@@ -176,6 +177,7 @@ static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_inter
         esp_netif_destroy_default_wifi(sta_wifi_interface);
     }
 
+    free(data->sntp_host);
     free(data);
 }
 
@@ -922,15 +924,21 @@ static void time_sync_notification_cb(struct timeval *tv)
     }
 }
 
-static void maybe_set_sntp(term sntp_config, GlobalContext *global)
+static void maybe_set_sntp(term sntp_config, struct ClientData *data, GlobalContext *global)
 {
     if (!term_is_invalid_term(sntp_config) && !term_is_invalid_term(interop_kv_get_value(sntp_config, host_atom, global))) {
         int ok;
         char *host = interop_term_to_string(interop_kv_get_value(sntp_config, host_atom, global), &ok);
         if (LIKELY(ok)) {
-            // do not free(sntp)
             if (esp_sntp_enabled()) {
                 esp_sntp_stop();
+            }
+            if (!IS_NULL_PTR(data)) {
+                free(data->sntp_host);
+                data->sntp_host = host;
+                host = data->sntp_host;
+            } else {
+                ESP_LOGW(TAG, "SNTP configured without client session state; host ownership cannot be tracked");
             }
             esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
             esp_sntp_setservername(0, host);
@@ -1030,6 +1038,7 @@ static void start_network(Context *ctx, term pid, term ref, term config)
     data->owner_process_id = term_to_local_process_id(pid);
     data->ref_ticks = term_to_ref_ticks(ref);
     data->managed = roaming;
+    data->sntp_host = NULL;
     ctx->platform_data = data;
 
     if ((sta_wifi_config != NULL) || (roaming)) {
@@ -1162,7 +1171,7 @@ static void start_network(Context *ctx, term pid, term ref, term config)
     //
     // Set up simple NTP, if configured
     //
-    maybe_set_sntp(interop_kv_get_value(config, sntp_atom, ctx->global), ctx->global);
+    maybe_set_sntp(interop_kv_get_value(config, sntp_atom, ctx->global), data, ctx->global);
 
     //
     // Set the DHCP hostname, if STA mode is enabled
@@ -1334,7 +1343,7 @@ static void sta_connect(Context *ctx, term pid, term ref, term config)
     //
     // Set up simple NTP, if configured
     //
-    maybe_set_sntp(interop_kv_get_value(config, sntp_atom, ctx->global), ctx->global);
+    maybe_set_sntp(interop_kv_get_value(config, sntp_atom, ctx->global), ctx->platform_data, ctx->global);
 
     if (UNLIKELY(memory_ensure_free(ctx, tuple_reply_size) != MEMORY_GC_OK)) {
         ESP_LOGE(TAG, "Unable to allocate heap space for sta_connect/1; no message sent");
