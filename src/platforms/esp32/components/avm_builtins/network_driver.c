@@ -1591,6 +1591,21 @@ static NativeHandlerResult consume_mailbox(Context *ctx)
 // Entrypoints
 //
 
+void network_driver_destroy(GlobalContext *global)
+{
+    UNUSED(global);
+
+    esp_err_t err = esp_event_loop_delete_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "Failed to delete default event loop (err=%d)", err);
+    }
+
+    err = esp_netif_deinit();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "Failed to deinitialize network interface (err=%d)", err);
+    }
+}
+
 void network_driver_init(GlobalContext *global)
 {
     esp_err_t err;
@@ -1620,6 +1635,6 @@ Context *network_driver_create_port(GlobalContext *global, term opts)
     return ctx;
 }
 
-REGISTER_PORT_DRIVER(network, network_driver_init, NULL, network_driver_create_port)
+REGISTER_PORT_DRIVER(network, network_driver_init, network_driver_destroy, network_driver_create_port)
 
 #endif
