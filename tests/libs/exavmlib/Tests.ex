@@ -356,6 +356,36 @@ defmodule Tests do
     true = GenServer.call(:stat_stack, :pop) == :hello
     Supervisor.stop(pid)
 
+    # test "start_link/2 cleans up timed child if a later child fails to start"
+    ref = make_ref()
+
+    children = [
+      Supervisor.child_spec({SupervisorTest.SendAfter, {self(), ref}}, id: :timed_child),
+      %{id: :failing_child, start: {SupervisorTest.FailStart, :start_link, []}}
+    ]
+
+    {:error, {:shutdown, {:failed_to_start_child, :failing_child, :child_error}}} =
+      Supervisor.start_link(children, strategy: :one_for_one)
+
+    child =
+      receive do
+        {:send_after_child_started, ^ref, child} when is_pid(child) -> child
+      after
+        1000 -> :timeout
+      end
+
+    true = is_pid(child)
+    mon_ref = Process.monitor(child)
+
+    reason =
+      receive do
+        {:DOWN, ^mon_ref, :process, ^child, child_reason} -> child_reason
+      after
+        1000 -> :timeout
+      end
+
+    true = reason in [:shutdown, :noproc]
+
     # test "with invalid child spec"
     # do_check_childspec not available atomvm supervisor.erl
     # {:ok, pid} = Supervisor.start_link([], strategy: :one_for_one)

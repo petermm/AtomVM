@@ -1,7 +1,7 @@
 #
 # This file is part of AtomVM.
 #
-# Copyright 2024 Davide Bettio <davide@uninstall.it>
+# Copyright 2026 The AtomVM Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,25 +18,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
 #
 
-project(test_exavmlib)
-
-include(BuildElixir)
-
-set(TEST_MODULES
-    Some.Submodule
-    GenServerTest.Stack
-    GenServerTest.CustomStack
-    SupervisorTest.Stack
-    SupervisorTest.Stack.Sup
-    SupervisorTest.FailStart
-    SupervisorTest.SendAfter
-)
-
-pack_test(Tests Tests ${TEST_MODULES})
-
-# alisp is not in pack_test's standard library list but is needed by exavmlib tests
-add_custom_command(
-    OUTPUT Tests.avm
-    DEPENDS ${CMAKE_BINARY_DIR}/libs/alisp/src/alisp.avm alisp
-    APPEND
-)
+defmodule SupervisorTest.FailStart do
+  def start_link() do
+    {:error, :child_error}
+  end
+end

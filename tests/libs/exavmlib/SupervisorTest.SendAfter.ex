@@ -1,7 +1,7 @@
 #
 # This file is part of AtomVM.
 #
-# Copyright 2024 Davide Bettio <davide@uninstall.it>
+# Copyright 2026 The AtomVM Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,25 +18,23 @@
 # SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
 #
 
-project(test_exavmlib)
+defmodule SupervisorTest.SendAfter do
+  use GenServer
 
-include(BuildElixir)
+  def start_link({parent, ref}) do
+    GenServer.start_link(__MODULE__, {parent, ref})
+  end
 
-set(TEST_MODULES
-    Some.Submodule
-    GenServerTest.Stack
-    GenServerTest.CustomStack
-    SupervisorTest.Stack
-    SupervisorTest.Stack.Sup
-    SupervisorTest.FailStart
-    SupervisorTest.SendAfter
-)
+  def init({parent, ref}) do
+    :erlang.send_after(1, self(), :show_hello)
+    :erlang.send_after(5000, self(), :show_cat)
+    send(parent, {:send_after_child_started, ref, self()})
 
-pack_test(Tests Tests ${TEST_MODULES})
+    {:ok, %{parent: parent}}
+  end
 
-# alisp is not in pack_test's standard library list but is needed by exavmlib tests
-add_custom_command(
-    OUTPUT Tests.avm
-    DEPENDS ${CMAKE_BINARY_DIR}/libs/alisp/src/alisp.avm alisp
-    APPEND
-)
+  def handle_info(msg, %{parent: parent} = state) do
+    send(parent, {:send_after_message, self(), msg})
+    {:noreply, state}
+  end
+end

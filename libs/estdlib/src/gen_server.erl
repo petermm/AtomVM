@@ -172,7 +172,7 @@ init_it(Starter, Module, Args, Options) ->
                         timeout = InitTimeout
                     };
                 {stop, Reason} ->
-                    proc_lib:init_ack(Starter, {error, {init_stopped, Reason}}),
+                    proc_lib:init_ack(Starter, {error, Reason}),
                     undefined;
                 Reply ->
                     proc_lib:init_ack(Starter, {error, {unexpected_reply_from_init, Reply}}),

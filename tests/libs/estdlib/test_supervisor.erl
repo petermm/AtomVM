@@ -28,6 +28,10 @@ start() ->
 test() ->
     ok = test_basic_supervisor(),
     ok = test_map_supervisor(),
+    ok = test_init_start_child_failure(),
+    ok = test_init_start_child_failure_cleanup(),
+    ok = test_init_start_child_failure_two_children_cleanup(),
+    ok = test_init_start_child_failure_send_after_cleanup(),
     ok = test_start_child(),
     ok = test_start_child_ping_pong(),
     ok = test_supervisor_order(),
@@ -63,6 +67,67 @@ test_start_child_ping_pong() ->
         ]
     }),
     ok = test_ping_pong(SupPid).
+
+test_init_start_child_failure() ->
+    {error, {shutdown, {failed_to_start_child, failing_child, child_error}}} = with_trap_exit(fun() ->
+        supervisor:start_link(?MODULE, {test_init_child_fail, self()})
+    end),
+    ok.
+
+test_init_start_child_failure_cleanup() ->
+    Ref = make_ref(),
+    {error, {shutdown, {failed_to_start_child, failing_child, child_error}}} = with_trap_exit(
+        fun() ->
+            supervisor:start_link(?MODULE, {test_init_child_fail_cleanup, self(), Ref})
+        end
+    ),
+    ChildPid =
+        receive
+            {Ref, Pid} when is_pid(Pid) -> Pid
+        after 2000 -> throw(timeout)
+        end,
+    MonRef = erlang:monitor(process, ChildPid),
+    Reason =
+        receive
+            {'DOWN', MonRef, process, ChildPid, ChildReason} -> ChildReason
+        after 2000 -> timeout
+        end,
+    true = lists:member(Reason, [shutdown, noproc]),
+    ok.
+
+test_init_start_child_failure_two_children_cleanup() ->
+    Ref1 = make_ref(),
+    Ref2 = make_ref(),
+    {error, {shutdown, {failed_to_start_child, failing_child, child_error}}} = with_trap_exit(
+        fun() ->
+            supervisor:start_link(?MODULE, {test_init_two_children_fail_cleanup, self(), Ref1, Ref2})
+        end
+    ),
+    ChildPid1 =
+        receive
+            {Ref1, Pid1} when is_pid(Pid1) -> Pid1
+        after 2000 -> throw(timeout)
+        end,
+    ChildPid2 =
+        receive
+            {Ref2, Pid2} when is_pid(Pid2) -> Pid2
+        after 2000 -> throw(timeout)
+        end,
+    ok = assert_child_stopped(ChildPid1),
+    ok = assert_child_stopped(ChildPid2),
+    ok.
+
+test_init_start_child_failure_send_after_cleanup() ->
+    MsgRef = make_ref(),
+    {error, {shutdown, {failed_to_start_child, failing_child, child_error}}} = with_trap_exit(
+        fun() ->
+            supervisor:start_link(?MODULE, {test_init_child_fail_send_after_cleanup, self(), MsgRef})
+        end
+    ),
+    receive
+        {MsgRef, _Message} -> throw(unexpected_send_after_message)
+    after 50 -> ok
+    end.
 
 test_start_child() ->
     {ok, SupPid} = supervisor:start_link(?MODULE, {test_no_child, self()}),
@@ -211,6 +276,21 @@ child_start(start) ->
         end
     end),
     {ok, Pid};
+child_start({start_report, Parent, Ref}) ->
+    Pid = spawn_link(fun() ->
+        receive
+            ok -> ok
+        end
+    end),
+    Parent ! {Ref, Pid},
+    {ok, Pid};
+child_start({start_report_send_after, Parent, MsgRef}) ->
+    Pid = spawn_link(fun() ->
+        erlang:send_after(1, self(), show_hello),
+        erlang:send_after(5000, self(), show_cat),
+        loop_send_after_messages(Parent, MsgRef)
+    end),
+    {ok, Pid};
 child_start(info) ->
     Pid = spawn_link(fun() ->
         receive
@@ -255,6 +335,41 @@ child_start({get_permission, Arbitrator, Parent, Ref}) ->
             {error, start_denied};
         Error ->
             {error, Error}
+    end.
+
+loop_send_after_messages(Parent, MsgRef) ->
+    receive
+        Message ->
+            Parent ! {MsgRef, Message},
+            loop_send_after_messages(Parent, MsgRef)
+    end.
+
+assert_child_stopped(ChildPid) ->
+    MonRef = erlang:monitor(process, ChildPid),
+    Reason =
+        receive
+            {'DOWN', MonRef, process, ChildPid, ChildReason} -> ChildReason
+        after 2000 -> timeout
+        end,
+    true = lists:member(Reason, [shutdown, noproc]),
+    ok.
+
+with_trap_exit(Fun) ->
+    TrapExit = process_flag(trap_exit, true),
+    try
+        Result = Fun(),
+        flush_exit_messages(),
+        Result
+    after
+        process_flag(trap_exit, TrapExit)
+    end.
+
+flush_exit_messages() ->
+    receive
+        {'EXIT', _Pid, _Reason} ->
+            flush_exit_messages()
+    after 0 ->
+        ok
     end.
 
 arbitrator_start(Deny) when is_integer(Deny) ->
@@ -334,6 +449,86 @@ init({test_map_supervisor, Parent}) ->
             modules => [
                 ping_pong_server
             ]
+        }
+    ],
+    {ok, {#{strategy => one_for_one, intensity => 10000, period => 3600}, ChildSpecs}};
+init({test_init_child_fail, _Parent}) ->
+    ChildSpecs = [
+        #{
+            id => failing_child,
+            start => {?MODULE, child_start, [error]},
+            restart => permanent,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => [?MODULE]
+        }
+    ],
+    {ok, {#{strategy => one_for_one, intensity => 10000, period => 3600}, ChildSpecs}};
+init({test_init_child_fail_cleanup, Parent, Ref}) ->
+    ChildSpecs = [
+        #{
+            id => reported_child,
+            start => {?MODULE, child_start, [{start_report, Parent, Ref}]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [?MODULE]
+        },
+        #{
+            id => failing_child,
+            start => {?MODULE, child_start, [error]},
+            restart => permanent,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => [?MODULE]
+        }
+    ],
+    {ok, {#{strategy => one_for_one, intensity => 10000, period => 3600}, ChildSpecs}};
+init({test_init_two_children_fail_cleanup, Parent, Ref1, Ref2}) ->
+    ChildSpecs = [
+        #{
+            id => reported_child_1,
+            start => {?MODULE, child_start, [{start_report, Parent, Ref1}]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [?MODULE]
+        },
+        #{
+            id => reported_child_2,
+            start => {?MODULE, child_start, [{start_report, Parent, Ref2}]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [?MODULE]
+        },
+        #{
+            id => failing_child,
+            start => {?MODULE, child_start, [error]},
+            restart => permanent,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => [?MODULE]
+        }
+    ],
+    {ok, {#{strategy => one_for_one, intensity => 10000, period => 3600}, ChildSpecs}};
+init({test_init_child_fail_send_after_cleanup, Parent, MsgRef}) ->
+    ChildSpecs = [
+        #{
+            id => reported_child,
+            start => {?MODULE, child_start, [{start_report_send_after, Parent, MsgRef}]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [?MODULE]
+        },
+        #{
+            id => failing_child,
+            start => {?MODULE, child_start, [error]},
+            restart => permanent,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => [?MODULE]
         }
     ],
     {ok, {#{strategy => one_for_one, intensity => 10000, period => 3600}, ChildSpecs}};

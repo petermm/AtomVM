@@ -200,7 +200,9 @@ count_children(Supervisor) ->
 
 % @hidden
 -spec init({Mod :: module(), Args :: [any()]}) ->
-    {ok, State :: #state{}} | {stop, {bad_return, {Mod :: module(), init, Reason :: term()}}}.
+    {ok, State :: #state{}}
+    | {stop, {bad_return, {Mod :: module(), init, Reason :: term()}}}
+    | {stop, {shutdown, {failed_to_start_child, ChildId :: any(), Reason :: term()}}}.
 init({Mod, Args}) ->
     erlang:process_flag(trap_exit, true),
     case Mod:init(Args) of
@@ -210,8 +212,7 @@ init({Mod, Args}) ->
                 intensity = Intensity,
                 period = Period
             }),
-            NewChildren = start_children(State#state.children, []),
-            {ok, State#state{children = NewChildren}};
+            start_initial_children(State);
         {ok, {#{} = SupSpec, StartSpec}} ->
             Strategy = maps:get(strategy, SupSpec, one_for_one),
             Intensity = maps:get(intensity, SupSpec, ?DEFAULT_INTENSITY),
@@ -221,8 +222,7 @@ init({Mod, Args}) ->
                 intensity = Intensity,
                 period = Period
             }),
-            NewChildren = start_children(State#state.children, []),
-            {ok, State#state{children = NewChildren}};
+            start_initial_children(State);
         Error ->
             % TODO: log supervisor init failure
             {stop, {bad_return, {Mod, init, Error}}}
@@ -275,15 +275,26 @@ init_state([ChildSpec | T], State) ->
 init_state([], State) ->
     State#state{children = lists:reverse(State#state.children)}.
 
+start_initial_children(State) ->
+    case start_children(State#state.children, []) of
+        {ok, NewChildren} ->
+            {ok, State#state{children = NewChildren}};
+        {error, {Reason, #child{id = Id}}, StartedChildren} ->
+            terminate_started_children(StartedChildren),
+            {stop, {shutdown, {failed_to_start_child, Id, Reason}}}
+    end.
+
 -spec start_children(ChildSpecs :: [#child{}], [#child{}]) ->
-    Childs :: [#child{}].
+    {ok, Children :: [#child{}]} | {error, {Reason :: term(), #child{}}, Started :: [#child{}]}.
 start_children([Child | T], StartedC) ->
     case try_start(Child) of
         {ok, Pid, _Result} ->
-            start_children(T, [Child#child{pid = Pid} | StartedC])
+            start_children(T, [Child#child{pid = Pid} | StartedC]);
+        {error, Reason} ->
+            {error, Reason, StartedC}
     end;
 start_children([], StartedC) ->
-    StartedC.
+    {ok, StartedC}.
 
 % @hidden
 handle_call({start_child, ChildSpec}, _From, #state{children = Children} = State) ->
@@ -665,3 +676,7 @@ do_terminate(#child{pid = Pid, shutdown = infinity}) ->
 do_terminate(#child{pid = Pid, shutdown = Timeout}) when is_integer(Timeout) ->
     exit(Pid, shutdown),
     erlang:send_after(Timeout, self(), {ensure_killed, Pid}).
+
+terminate_started_children(StartedChildren) ->
+    RemainingChildren = loop_terminate(StartedChildren, []),
+    loop_wait_termination(RemainingChildren).
