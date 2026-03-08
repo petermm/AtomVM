@@ -145,7 +145,39 @@ struct ScanClientData
     uint64_t ref_ticks;
 };
 
+static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
+
+static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface)
+{
+    esp_sntp_stop();
+
+    // Unregister callbacks first so shutdown does not race pending network events.
+    esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &event_handler);
+    esp_event_handler_unregister(sntp_event_base, SNTP_EVENT_BASE_SYNC, &event_handler);
+
+    if ((sta_wifi_interface != NULL) && (esp_netif_is_netif_up(sta_wifi_interface))) {
+        esp_err_t err = esp_wifi_disconnect();
+        if (UNLIKELY(err == ESP_FAIL)) {
+            ESP_LOGE(TAG, "ESP FAIL error while disconnecting from AP, continuing network shutdown...");
+        }
+    }
+
+    // These return OK or not-init in the expected shutdown paths, which is fine to ignore here.
+    esp_wifi_stop();
+    esp_wifi_deinit();
+
+    if (ap_wifi_interface != NULL) {
+        esp_netif_destroy_default_wifi(ap_wifi_interface);
+    }
+    if (sta_wifi_interface != NULL) {
+        esp_netif_destroy_default_wifi(sta_wifi_interface);
+    }
+
+    free(data);
+}
 
 static inline term make_atom(GlobalContext *global, AtomString atom_str)
 {
@@ -567,14 +599,14 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 
             case WIFI_EVENT_AP_STACONNECTED: {
                 ESP_LOGI(TAG, "WIFI_EVENT_AP_STACONNECTED received.");
-                wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *) event_base;
+                wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *) event_data;
                 send_ap_sta_connected(data, event->mac);
                 break;
             }
 
             case WIFI_EVENT_AP_STADISCONNECTED: {
                 ESP_LOGI(TAG, "WIFI_EVENT_AP_STADISCONNECTED received.");
-                wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *) event_base;
+                wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *) event_data;
                 send_ap_sta_disconnected(data, event->mac);
                 break;
             }
@@ -967,6 +999,16 @@ static void start_network(Context *ctx, term pid, term ref, term config)
         roaming = true;
     }
 
+    if (UNLIKELY(ctx->platform_data != NULL)) {
+        ESP_LOGE(TAG, "Network already started for this port");
+        term error = port_create_error_tuple(ctx, ERROR_ATOM);
+        port_send_reply(ctx, pid, ref, error);
+        return;
+    }
+
+    struct ClientData *data = NULL;
+    esp_netif_t *sta_wifi_interface = NULL;
+    esp_netif_t *ap_wifi_interface = NULL;
     wifi_config_t *sta_wifi_config = get_sta_wifi_config(sta_config, ctx->global);
     wifi_config_t *ap_wifi_config = get_ap_wifi_config(ap_config, ctx->global);
     if ((!roaming) && IS_NULL_PTR(sta_wifi_config) && IS_NULL_PTR(ap_wifi_config)) {
@@ -976,7 +1018,7 @@ static void start_network(Context *ctx, term pid, term ref, term config)
         goto cleanup;
     }
 
-    struct ClientData *data = malloc(sizeof(struct ClientData));
+    data = malloc(sizeof(struct ClientData));
     if (IS_NULL_PTR(data)) {
         ESP_LOGE(TAG, "Failed to allocate ClientData");
         term error = port_create_error_tuple(ctx, OUT_OF_MEMORY_ATOM);
@@ -988,8 +1030,8 @@ static void start_network(Context *ctx, term pid, term ref, term config)
     data->owner_process_id = term_to_local_process_id(pid);
     data->ref_ticks = term_to_ref_ticks(ref);
     data->managed = roaming;
+    ctx->platform_data = data;
 
-    esp_netif_t *sta_wifi_interface = NULL;
     if ((sta_wifi_config != NULL) || (roaming)) {
         sta_wifi_interface = esp_netif_create_default_wifi_sta();
         if (IS_NULL_PTR(sta_wifi_interface)) {
@@ -999,7 +1041,6 @@ static void start_network(Context *ctx, term pid, term ref, term config)
             goto cleanup;
         }
     }
-    esp_netif_t *ap_wifi_interface = NULL;
     if (ap_wifi_config != NULL) {
         ap_wifi_interface = esp_netif_create_default_wifi_ap();
         if (IS_NULL_PTR(ap_wifi_interface)) {
@@ -1137,9 +1178,18 @@ static void start_network(Context *ctx, term pid, term ref, term config)
     // Done -- send an ok so the FSM can proceed
     //
     port_send_reply(ctx, pid, ref, OK_ATOM);
-    goto cleanup;
+    free(sta_wifi_config);
+    free(ap_wifi_config);
+    return;
 
 cleanup:
+    if (ctx->platform_data != NULL) {
+        cleanup_network(
+            ctx->platform_data,
+            sta_wifi_interface,
+            ap_wifi_interface);
+        ctx->platform_data = NULL;
+    }
     free(sta_wifi_config);
     free(ap_wifi_config);
     return;
@@ -1147,38 +1197,11 @@ cleanup:
 
 static void stop_network(Context *ctx)
 {
-
-    // Stop sntp (ignore OK, or not configured error)
-    esp_sntp_stop();
-
-    // Stop unregister event callbacks so they dont trigger during shutdown.
-    esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
-    esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
-    esp_event_handler_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &event_handler);
-    esp_event_handler_unregister(sntp_event_base, SNTP_EVENT_BASE_SYNC, &event_handler);
-
     esp_netif_t *sta_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_t *ap_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
-
-    // Disconnect STA if connected to access point
-    if ((sta_wifi_interface != NULL) && (esp_netif_is_netif_up(sta_wifi_interface))) {
-        esp_err_t err = esp_wifi_disconnect();
-        if (UNLIKELY(err == ESP_FAIL)) {
-            ESP_LOGE(TAG, "ESP FAIL error while disconnecting from AP, continuing network shutdown...");
-        }
-    }
-
-    // Stop and deinit the WiFi driver, these only return OK, or not init error (fine to ignore).
-    esp_wifi_stop();
-    esp_wifi_deinit();
-
-    // Destroy existing netif interfaces
-    if (ap_wifi_interface != NULL) {
-        esp_netif_destroy_default_wifi(ap_wifi_interface);
-    }
-    if (sta_wifi_interface != NULL) {
-        esp_netif_destroy_default_wifi(sta_wifi_interface);
-    }
+    struct ClientData *data = ctx->platform_data;
+    cleanup_network(data, sta_wifi_interface, ap_wifi_interface);
+    ctx->platform_data = NULL;
 }
 
 static void get_sta_rssi(Context *ctx, term pid, term ref)
