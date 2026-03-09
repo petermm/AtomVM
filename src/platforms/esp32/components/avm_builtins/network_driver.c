@@ -148,17 +148,10 @@ struct ScanClientData
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
+static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface);
 
 static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface)
 {
-    esp_sntp_stop();
-
-    // Unregister callbacks first so shutdown does not race pending network events.
-    esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
-    esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
-    esp_event_handler_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &event_handler);
-    esp_event_handler_unregister(sntp_event_base, SNTP_EVENT_BASE_SYNC, &event_handler);
-
     if ((sta_wifi_interface != NULL) && (esp_netif_is_netif_up(sta_wifi_interface))) {
         esp_err_t err = esp_wifi_disconnect();
         if (UNLIKELY(err == ESP_FAIL)) {
@@ -166,9 +159,26 @@ static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_inter
         }
     }
 
-    // These return OK or not-init in the expected shutdown paths, which is fine to ignore here.
+    cleanup_network_runtime(sta_wifi_interface, ap_wifi_interface);
+    free(data->sntp_host);
+    free(data);
+}
+
+static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface)
+{
+    esp_sntp_stop();
+
+    // Best-effort shutdown for partially initialized or already-stopped drivers.
+    esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
+    esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &event_handler);
+    esp_event_handler_unregister(sntp_event_base, SNTP_EVENT_BASE_SYNC, &event_handler);
+
+    esp_wifi_disconnect();
     esp_wifi_stop();
     esp_wifi_deinit();
+    esp_wifi_clear_ap_list();
 
     if (ap_wifi_interface != NULL) {
         esp_netif_destroy_default_wifi(ap_wifi_interface);
@@ -176,9 +186,6 @@ static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_inter
     if (sta_wifi_interface != NULL) {
         esp_netif_destroy_default_wifi(sta_wifi_interface);
     }
-
-    free(data->sntp_host);
-    free(data);
 }
 
 static inline term make_atom(GlobalContext *global, AtomString atom_str)
@@ -533,6 +540,7 @@ static void send_scan_results(struct ScanClientData *data)
         networks_data_list = wifi_ap_records_to_list_maybe_gc(data->global, ap_records, num_results, &heap);
     }
     free(ap_records);
+    esp_wifi_clear_ap_list();
     term scan_results = port_heap_create_tuple2(&heap, term_from_int(num_results), networks_data_list);
     term scan_results_atom = make_atom(data->global, ATOM_STR("\xc", "scan_results"));
     term ret = port_heap_create_tuple2(&heap, scan_results_atom, scan_results);
@@ -916,7 +924,7 @@ static wifi_config_t *get_ap_wifi_config(term ap_config, GlobalContext *global)
 
 static void time_sync_notification_cb(struct timeval *tv)
 {
-    esp_err_t err = esp_event_post(sntp_event_base, SNTP_EVENT_BASE_SYNC, tv, sizeof(tv), portMAX_DELAY);
+    esp_err_t err = esp_event_post(sntp_event_base, SNTP_EVENT_BASE_SYNC, tv, sizeof(*tv), portMAX_DELAY);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Posting SNTP synchronization event");
     } else {
@@ -939,6 +947,8 @@ static void maybe_set_sntp(term sntp_config, struct ClientData *data, GlobalCont
                 host = data->sntp_host;
             } else {
                 ESP_LOGW(TAG, "SNTP configured without client session state; host ownership cannot be tracked");
+                free(host);
+                return;
             }
             esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
             esp_sntp_setservername(0, host);
@@ -947,6 +957,7 @@ static void maybe_set_sntp(term sntp_config, struct ClientData *data, GlobalCont
             ESP_LOGI(TAG, "SNTP initialized with host set to %s", host);
         } else {
             ESP_LOGE(TAG, "Unable to locate sntp host in configuration");
+            free(host);
         }
     }
 }
@@ -1604,14 +1615,14 @@ void network_driver_destroy(GlobalContext *global)
 {
     UNUSED(global);
 
+    esp_netif_t *sta_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_t *ap_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+
+    cleanup_network_runtime(sta_wifi_interface, ap_wifi_interface);
+
     esp_err_t err = esp_event_loop_delete_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "Failed to delete default event loop (err=%d)", err);
-    }
-
-    err = esp_netif_deinit();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "Failed to deinitialize network interface (err=%d)", err);
     }
 }
 
