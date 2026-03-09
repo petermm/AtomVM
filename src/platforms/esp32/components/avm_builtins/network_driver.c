@@ -102,6 +102,9 @@ static const char *const network_down_atom = ATOM_STR("\x0C", "network_down");
 ESP_EVENT_DECLARE_BASE(sntp_event_base);
 ESP_EVENT_DEFINE_BASE(sntp_event_base);
 
+static bool s_netif_initialized = false;
+static bool s_event_loop_initialized = false;
+
 enum
 {
     SNTP_EVENT_BASE_SYNC
@@ -150,6 +153,8 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface);
 static void ensure_network_runtime_initialized(void);
+static void reset_network_runtime_initialized(void);
+static void maybe_destroy_network_runtime(void);
 
 static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface)
 {
@@ -191,21 +196,56 @@ static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t
 
 static void ensure_network_runtime_initialized(void)
 {
-    esp_err_t err = esp_netif_init();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "Failed to initialize network interface %d", err);
-        AVM_ABORT();
-    } else if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Initialized network interface");
+    if (!s_netif_initialized) {
+        esp_err_t err = esp_netif_init();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Failed to initialize network interface %d", err);
+            AVM_ABORT();
+        }
+        s_netif_initialized = true;
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Initialized network interface");
+        }
     }
 
-    err = esp_event_loop_create_default();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "Failed to create default event loop (err=%d)", err);
-        AVM_ABORT();
-    } else if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Created default event loop");
+    if (!s_event_loop_initialized) {
+        esp_err_t err = esp_event_loop_create_default();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Failed to create default event loop (err=%d)", err);
+            AVM_ABORT();
+        }
+        s_event_loop_initialized = true;
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Created default event loop");
+        }
     }
+}
+
+static void reset_network_runtime_initialized(void)
+{
+    s_event_loop_initialized = false;
+    s_netif_initialized = false;
+}
+
+static void maybe_destroy_network_runtime(void)
+{
+    if (!s_netif_initialized && !s_event_loop_initialized) {
+        return;
+    }
+
+    esp_netif_t *sta_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_t *ap_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+
+    cleanup_network_runtime(sta_wifi_interface, ap_wifi_interface);
+
+    if (s_event_loop_initialized) {
+        esp_err_t err = esp_event_loop_delete_default();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "Failed to delete default event loop (err=%d)", err);
+        }
+    }
+
+    reset_network_runtime_initialized();
 }
 
 static inline term make_atom(GlobalContext *global, AtomString atom_str)
@@ -1634,16 +1674,7 @@ static NativeHandlerResult consume_mailbox(Context *ctx)
 void network_driver_destroy(GlobalContext *global)
 {
     UNUSED(global);
-
-    esp_netif_t *sta_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    esp_netif_t *ap_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
-
-    cleanup_network_runtime(sta_wifi_interface, ap_wifi_interface);
-
-    esp_err_t err = esp_event_loop_delete_default();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "Failed to delete default event loop (err=%d)", err);
-    }
+    maybe_destroy_network_runtime();
 }
 
 void network_driver_init(GlobalContext *global)
