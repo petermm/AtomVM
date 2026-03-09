@@ -119,6 +119,18 @@ void esp32_sys_queue_init()
     xQueueAddToSet(event_queue, event_set);
 }
 
+void esp32_sys_queue_destroy()
+{
+    if (event_queue != NULL) {
+        vQueueDelete(event_queue);
+        event_queue = NULL;
+    }
+    if (event_set != NULL) {
+        vQueueDelete(event_set);
+        event_set = NULL;
+    }
+}
+
 static inline void sys_clock_gettime(struct timespec *t)
 {
     TickType_t ticks = xTaskGetTickCount();

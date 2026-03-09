@@ -90,6 +90,7 @@ struct ESP32PlatformData
 extern QueueSetHandle_t event_set;
 extern QueueHandle_t event_queue;
 void esp32_sys_queue_init();
+void esp32_sys_queue_destroy();
 
 void socket_init(Context *ctx, term opts);
 

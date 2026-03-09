@@ -176,6 +176,7 @@ term avm_test_case(const char *test_module)
     port_driver_destroy_all(glb);
 
     globalcontext_destroy(glb);
+    esp32_sys_queue_destroy();
 
     return ret_value;
 }
