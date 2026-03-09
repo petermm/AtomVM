@@ -20,6 +20,7 @@
 
 #include "unity.h"
 #include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -42,6 +43,7 @@
 
 #include <esp_eth.h>
 #include <esp_event.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_vfs.h>
@@ -58,6 +60,18 @@ extern const size_t size asm("esp32_test_modules_avm_length");
 #define TAG "AtomVM"
 
 const struct Nif *platform_nifs_get_nif(const char *nifname);
+
+static void log_test_memory(const char *phase, const char *test_module)
+{
+    ESP_LOGI(
+        TAG,
+        "Memory %s %s: free=%" PRIu32 " min=%" PRIu32 " largest=%" PRIu32,
+        phase,
+        test_module,
+        (uint32_t) heap_caps_get_free_size(MALLOC_CAP_8BIT),
+        (uint32_t) heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT),
+        (uint32_t) heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+}
 
 TEST_CASE("atomvm_platform_0", "[platform_nifs]")
 {
@@ -134,6 +148,7 @@ static void eth_stop(esp_netif_t *eth_netif)
 
 term avm_test_case(const char *test_module)
 {
+    log_test_memory("before", test_module);
     esp32_sys_queue_init();
 
     GlobalContext *glb = globalcontext_new();
@@ -177,6 +192,8 @@ term avm_test_case(const char *test_module)
 
     globalcontext_destroy(glb);
     esp32_sys_queue_destroy();
+
+    log_test_memory("after", test_module);
 
     return ret_value;
 }
