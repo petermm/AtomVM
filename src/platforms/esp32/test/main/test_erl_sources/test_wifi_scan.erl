@@ -25,7 +25,7 @@
 
 start() ->
     {ok, _Pid} = network:start([{sta, [managed]}]),
-    {ok, {Num, Networks}} = network:wifi_scan(),
+    {ok, {Num, Networks}} = network:wifi_scan([{results, 1}]),
     io:format("network:wifi_scan found ~p networks.~n", [Num]),
     lists:foreach(
         fun(
