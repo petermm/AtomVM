@@ -105,6 +105,7 @@ ESP_EVENT_DEFINE_BASE(sntp_event_base);
 
 static bool s_netif_initialized = false;
 static bool s_event_loop_initialized = false;
+static bool s_wifi_initialized = false;
 
 enum
 {
@@ -183,7 +184,6 @@ static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t
 
     esp_wifi_disconnect();
     esp_wifi_stop();
-    esp_wifi_deinit();
     esp_wifi_clear_ap_list();
 
     cleanup_default_wifi_netif(ap_wifi_interface, "AP");
@@ -1115,13 +1115,17 @@ static void start_network(Context *ctx, term pid, term ref, term config)
     }
 
     esp_err_t err;
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    if (UNLIKELY_NOT_ESP_OK(err = esp_wifi_init(&cfg))) {
-        ESP_LOGE(TAG, "Failed to initialize ESP WiFi, reason: %s", esp_err_to_name(err));
-        term error = port_create_error_tuple(ctx, term_from_int(err));
-        port_send_reply(ctx, pid, ref, error);
-        goto cleanup;
+    if (!s_wifi_initialized) {
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        if (UNLIKELY_NOT_ESP_OK(err = esp_wifi_init(&cfg))) {
+            ESP_LOGE(TAG, "Failed to initialize ESP WiFi, reason: %s", esp_err_to_name(err));
+            term error = port_create_error_tuple(ctx, term_from_int(err));
+            port_send_reply(ctx, pid, ref, error);
+            goto cleanup;
+        }
+        s_wifi_initialized = true;
     }
+
     if (UNLIKELY((err = esp_wifi_set_storage(WIFI_STORAGE_FLASH)) != ESP_OK)) {
         ESP_LOGE(TAG, "Failed to set ESP WiFi storage, reason: %s", esp_err_to_name(err));
         term error = port_create_error_tuple(ctx, term_from_int(err));
