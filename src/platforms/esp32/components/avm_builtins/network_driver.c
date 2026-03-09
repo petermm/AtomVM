@@ -47,6 +47,7 @@
 #include <esp_mac.h>
 #include <esp_netif.h>
 #include <esp_sntp.h>
+#include <esp_wifi_default.h>
 #include <esp_wifi.h>
 #include <lwip/inet.h>
 #pragma GCC diagnostic pop
@@ -153,6 +154,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface);
 static void ensure_network_runtime_initialized(void);
+static void cleanup_default_wifi_netif(esp_netif_t *wifi_interface, const char *interface_name);
 
 static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface)
 {
@@ -184,12 +186,22 @@ static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t
     esp_wifi_deinit();
     esp_wifi_clear_ap_list();
 
-    if (ap_wifi_interface != NULL) {
-        esp_netif_destroy_default_wifi(ap_wifi_interface);
+    cleanup_default_wifi_netif(ap_wifi_interface, "AP");
+    cleanup_default_wifi_netif(sta_wifi_interface, "STA");
+}
+
+static void cleanup_default_wifi_netif(esp_netif_t *wifi_interface, const char *interface_name)
+{
+    if (wifi_interface == NULL) {
+        return;
     }
-    if (sta_wifi_interface != NULL) {
-        esp_netif_destroy_default_wifi(sta_wifi_interface);
+
+    esp_err_t err = esp_wifi_clear_default_wifi_driver_and_handlers(wifi_interface);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to clear default WiFi %s driver and handlers (err=%d)", interface_name, err);
     }
+
+    esp_netif_destroy(wifi_interface);
 }
 
 static void ensure_network_runtime_initialized(void)
@@ -1122,12 +1134,6 @@ static void start_network(Context *ctx, term pid, term ref, term config)
         term error = port_create_error_tuple(ctx, term_from_int(err));
         port_send_reply(ctx, pid, ref, error);
         goto cleanup;
-    }
-
-    // Unregister wifi scan done events, these events need to be registered when a scan is requested.
-
-    if (UNLIKELY(err = esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &event_handler)) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to unregister wifi event handler, reason: %s", esp_err_to_name(err));
     }
 
     if ((err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, data)) != ESP_OK) {
