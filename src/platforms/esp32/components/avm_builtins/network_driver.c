@@ -156,6 +156,7 @@ static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t ev
 static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface);
 static void ensure_network_runtime_initialized(void);
 static void cleanup_default_wifi_netif(esp_netif_t *wifi_interface, const char *interface_name);
+static void cleanup_stale_default_wifi_netifs(void);
 
 static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface)
 {
@@ -202,6 +203,18 @@ static void cleanup_default_wifi_netif(esp_netif_t *wifi_interface, const char *
     }
 
     esp_netif_destroy(wifi_interface);
+}
+
+static void cleanup_stale_default_wifi_netifs(void)
+{
+    esp_netif_t *ap_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    esp_netif_t *sta_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+
+    if (ap_wifi_interface != NULL || sta_wifi_interface != NULL) {
+        ESP_LOGW(TAG, "Cleaning up stale default WiFi netifs before start");
+        cleanup_default_wifi_netif(ap_wifi_interface, "AP");
+        cleanup_default_wifi_netif(sta_wifi_interface, "STA");
+    }
 }
 
 static void ensure_network_runtime_initialized(void)
@@ -1094,6 +1107,8 @@ static void start_network(Context *ctx, term pid, term ref, term config)
     data->managed = roaming;
     data->sntp_host = NULL;
     ctx->platform_data = data;
+
+    cleanup_stale_default_wifi_netifs();
 
     if ((sta_wifi_config != NULL) || (roaming)) {
         sta_wifi_interface = esp_netif_create_default_wifi_sta();
