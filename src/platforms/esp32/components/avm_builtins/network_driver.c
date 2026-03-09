@@ -149,6 +149,7 @@ struct ScanClientData
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface);
+static void ensure_network_runtime_initialized(void);
 
 static void cleanup_network(struct ClientData *data, esp_netif_t *sta_wifi_interface, esp_netif_t *ap_wifi_interface)
 {
@@ -185,6 +186,25 @@ static void cleanup_network_runtime(esp_netif_t *sta_wifi_interface, esp_netif_t
     }
     if (sta_wifi_interface != NULL) {
         esp_netif_destroy_default_wifi(sta_wifi_interface);
+    }
+}
+
+static void ensure_network_runtime_initialized(void)
+{
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Failed to initialize network interface %d", err);
+        AVM_ABORT();
+    } else if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Initialized network interface");
+    }
+
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Failed to create default event loop (err=%d)", err);
+        AVM_ABORT();
+    } else if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Created default event loop");
     }
 }
 
@@ -1628,26 +1648,14 @@ void network_driver_destroy(GlobalContext *global)
 
 void network_driver_init(GlobalContext *global)
 {
-    esp_err_t err;
-
-    if ((err = esp_netif_init()) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize network interface %d", err);
-        AVM_ABORT();
-    } else {
-        ESP_LOGI(TAG, "Initialized network interface");
-    }
-    err = esp_event_loop_create_default();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "Failed to create default event loop (err=%d)", err);
-        AVM_ABORT();
-    } else {
-        ESP_LOGI(TAG, "Created default event loop");
-    }
+    UNUSED(global);
 }
 
 Context *network_driver_create_port(GlobalContext *global, term opts)
 {
     UNUSED(opts);
+
+    ensure_network_runtime_initialized();
 
     Context *ctx = context_new(global);
     ctx->native_handler = consume_mailbox;
