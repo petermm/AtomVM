@@ -212,8 +212,7 @@ static void cleanup_stale_default_wifi_netifs(void)
 
     if (ap_wifi_interface != NULL || sta_wifi_interface != NULL) {
         ESP_LOGW(TAG, "Cleaning up stale default WiFi netifs before start");
-        cleanup_default_wifi_netif(ap_wifi_interface, "AP");
-        cleanup_default_wifi_netif(sta_wifi_interface, "STA");
+        cleanup_network_runtime(sta_wifi_interface, ap_wifi_interface);
     }
 }
 
