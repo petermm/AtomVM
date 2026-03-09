@@ -616,7 +616,11 @@ TEST_CASE("test_wifi_example", "[test_run]")
 
 TEST_CASE("test_wifi_managed", "[test_run]")
 {
+    ESP_LOGI(TAG, "Delaying before test_wifi_managed");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     term ret_value = avm_test_case("test_wifi_managed.beam");
+    ESP_LOGI(TAG, "Delaying after test_wifi_managed");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     TEST_ASSERT(ret_value == OK_ATOM);
 }
 
