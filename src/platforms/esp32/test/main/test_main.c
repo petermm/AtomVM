@@ -149,7 +149,6 @@ static void eth_stop(esp_netif_t *eth_netif)
 term avm_test_case(const char *test_module)
 {
     log_test_memory("before", test_module);
-    esp32_sys_queue_init();
 
     GlobalContext *glb = globalcontext_new();
     TEST_ASSERT(glb != NULL);
@@ -191,7 +190,6 @@ term avm_test_case(const char *test_module)
     port_driver_destroy_all(glb);
 
     globalcontext_destroy(glb);
-    esp32_sys_queue_destroy();
 
     log_test_memory("after", test_module);
 
@@ -666,7 +664,9 @@ TEST_CASE("test_twdt", "[test_run]")
 
 void app_main(void)
 {
+    esp32_sys_queue_init();
     UNITY_BEGIN();
     unity_run_all_tests();
+    esp32_sys_queue_destroy();
     UNITY_END();
 }
