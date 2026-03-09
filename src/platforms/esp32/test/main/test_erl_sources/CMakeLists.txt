@@ -61,6 +61,7 @@ endfunction()
 compile_erlang(test_esp_partition)
 compile_erlang(test_esp_timer_get_time)
 compile_erlang(test_file)
+compile_erlang(test_wifi_restart)
 compile_erlang(test_wifi_example)
 compile_erlang(test_wifi_managed)
 compile_erlang(test_list_to_atom)
@@ -84,6 +85,7 @@ set(erlang_test_beams
     test_esp_partition.beam
     test_esp_timer_get_time.beam
     test_file.beam
+    test_wifi_restart.beam
     test_wifi_example.beam
     test_wifi_managed.beam
     test_list_to_atom.beam
