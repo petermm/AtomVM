@@ -30,7 +30,7 @@ start() ->
             ok = test_sta_status_lifecycle(),
             ok = test_disconnect_and_reconnect(),
             ok = test_connect_new_ap(),
-            network:stop(),
+            ok = network:stop(),
             ok;
         Error ->
             Error
@@ -40,15 +40,12 @@ start() ->
 test_managed_start() ->
     Self = self(),
     Config =
-        [
-            {sta, [
-                managed,
-                {connected, fun() -> Self ! sta_connected end},
-                {got_ip, fun(IpInfo) -> Self ! {got_ip, IpInfo} end},
-                {disconnected, fun() -> Self ! sta_disconnected end}
-            ]},
-            {sntp, [{host, "time.aws.com"}, {synchronized, fun sntp_synchronized/1}]}
-        ],
+        [{sta,
+          [managed,
+           {connected, fun() -> Self ! sta_connected end},
+           {got_ip, fun(IpInfo) -> Self ! {got_ip, IpInfo} end},
+           {disconnected, fun() -> Self ! sta_disconnected end}]},
+         {sntp, [{host, "time.aws.com"}, {synchronized, fun sntp_synchronized/1}]}],
     case network:start(Config) of
         {ok, _Pid} ->
             io:format("Managed network started.~n"),
@@ -65,11 +62,10 @@ test_managed_connect() ->
     %% Status should still be disconnected before connect
     disconnected = network:sta_status(),
     ok =
-        network:sta_connect([
-            {ssid, "Wokwi-GUEST"},
-            {psk, ""},
-            {sntp, [{host, "pool.ntp.org"}, {synchronized, fun sntp_synchronized/1}]}
-        ]),
+        network:sta_connect([{ssid, "Wokwi-GUEST"},
+                             {psk, ""},
+                             {sntp,
+                              [{host, "pool.ntp.org"}, {synchronized, fun sntp_synchronized/1}]}]),
     %% After initiating connect, status should be connecting
     Status = network:sta_status(),
     case Status of
@@ -83,8 +79,10 @@ test_managed_connect() ->
             error({unexpected_sta_status, Other})
     end,
     case wait_for_ip(20000) of
-        ok -> ok;
-        E -> error({waiting_for_ip, E})
+        ok ->
+            ok;
+        E ->
+            error({waiting_for_ip, E})
     end,
     connected = network:sta_status(),
     io:format("test_managed_connect OK.~n"),
