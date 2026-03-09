@@ -768,7 +768,7 @@ wait_for_port_close(PortMonitor, Port) ->
             % Handle unexpected messages if necessary
             wait_for_port_close(PortMonitor, Port)
         % Timeout after 1 second just in case.
-    after 1000 ->
+    after 3000 ->
         {error, timeout}
     end.
 
