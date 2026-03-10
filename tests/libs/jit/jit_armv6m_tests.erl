@@ -3902,6 +3902,42 @@ jump_to_continuation_test() ->
         >>,
     jit_tests_common:assert_stream(arm, Dump, Stream).
 
+jump_to_continuation_large_module_offset_test() ->
+    BaseOffset = 1024,
+    % The backend keeps the module base offset separately from the relative stream offset.
+    State0 = setelement(
+        4,
+        ?BACKEND:new(?JIT_VARIANT_PIC, jit_stream_binary, jit_stream_binary:new(0)),
+        BaseOffset
+    ),
+    State1 = ?BACKEND:jump_to_continuation(State0, {free, r0}),
+    Stream = ?BACKEND:stream(State1),
+    ImmediateValue = BaseOffset - 4 + 1,
+    Expected =
+        <<
+            (jit_armv6m_asm:adr(r7, 4))/binary,
+            (jit_armv6m_asm:adds(r0, r0, r7))/binary,
+            (jit_armv6m_asm:ldr(r7, {pc, 8}))/binary,
+            (jit_armv6m_asm:adds(r0, r0, r7))/binary,
+            (jit_armv6m_asm:ldr(r7, {sp, 20}))/binary,
+            (jit_armv6m_asm:str(r0, {sp, 20}))/binary,
+            (jit_armv6m_asm:mov(lr, r7))/binary,
+            (jit_armv6m_asm:pop([r1, r4, r5, r6, r7, pc]))/binary,
+            ImmediateValue:32/little
+        >>,
+    ?assertEqual(Expected, Stream).
+
+call_or_schedule_next_cp_literal_pool_large_gap_test() ->
+    State0 = ?BACKEND:new(?JIT_VARIANT_PIC, jit_stream_binary, jit_stream_binary:new(0)),
+    StatePadded = add_padding(State0, 128),
+    assert_call_or_schedule_next_cp_literal_pool(StatePadded).
+
+call_or_schedule_next_cp_literal_pool_large_gap_unaligned_test() ->
+    State0 = ?BACKEND:new(?JIT_VARIANT_PIC, jit_stream_binary, jit_stream_binary:new(0)),
+    State1 = ?BACKEND:move_to_vm_register(State0, r1, {ptr, r3}),
+    StatePadded = add_padding(State1, 127),
+    assert_call_or_schedule_next_cp_literal_pool(StatePadded).
+
 %% Mimic part of add.beam
 add_beam_test() ->
     State0 = ?BACKEND:new(?JIT_VARIANT_PIC, jit_stream_binary, jit_stream_binary:new(0)),
@@ -4063,3 +4099,34 @@ add_beam_test() ->
             "  e8:	bdf2      	pop	{r1, r4, r5, r6, r7, pc}\n"
         >>,
     jit_tests_common:assert_stream(arm, Dump, Stream).
+
+add_padding(State0, Count) ->
+    lists:foldl(
+        fun(_, State) ->
+            ?BACKEND:move_to_native_register(State, {x_reg, 2}, r3)
+        end,
+        State0,
+        lists:seq(1, Count)
+    ).
+
+assert_call_or_schedule_next_cp_literal_pool(State0) ->
+    RewriteOffset = ?BACKEND:offset(State0) + 8,
+    State1 = ?BACKEND:call_or_schedule_next(State0, 3),
+    Stream = ?BACKEND:stream(State1),
+    FinalOffset = ?BACKEND:offset(State1),
+    LiteralOffset = FinalOffset - 6,
+    PCValue = (RewriteOffset + 4) band (bnot 3),
+    ExpectedLiteral = (FinalOffset - 2) bsl 2,
+    ?assert(ExpectedLiteral > 255),
+    ?assertEqual(jit_armv6m_asm:lsls(r7, r7, 24), binary:part(Stream, RewriteOffset - 2, 2)),
+    ?assertEqual(
+        jit_armv6m_asm:ldr(r6, {pc, LiteralOffset - PCValue}),
+        binary:part(Stream, RewriteOffset, 2)
+    ),
+    ?assertEqual(jit_armv6m_asm:orrs(r7, r6), binary:part(Stream, RewriteOffset + 2, 2)),
+    ?assertEqual(jit_armv6m_asm:str(r7, {r0, 16#5C}), binary:part(Stream, RewriteOffset + 4, 2)),
+    ?assertEqual(<<ExpectedLiteral:32/little>>, binary:part(Stream, LiteralOffset, 4)),
+    ?assertEqual(
+        jit_armv6m_asm:push([r1, r4, r5, r6, r7, lr]),
+        binary:part(Stream, FinalOffset - 2, 2)
+    ).
