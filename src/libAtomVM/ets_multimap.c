@@ -41,7 +41,7 @@ static EtsStatus node_find(
     EtsMultimapNode **out_node,
     GlobalContext *global);
 static term node_key(EtsMultimap *multimap, EtsMultimapNode *node);
-static void multimap_to_single(EtsMultimap *multimap, GlobalContext *global);
+static void node_to_single(EtsMultimapNode *node, GlobalContext *global);
 static void insert_revert(
     EtsMultimap *multimap,
     EtsMultimapEntry **entries,
@@ -144,12 +144,23 @@ EtsStatus ets_multimap_insert(
         return EtsAllocationError;
     }
 
+    EtsMultimapNode **single_nodes = NULL;
+    size_t single_nodes_count = 0;
+    if (multimap->type == EtsMultimapTypeSingle) {
+        single_nodes = malloc(sizeof(EtsMultimapNode *) * count);
+        if (IS_NULL_PTR(single_nodes)) {
+            free(entries);
+            return EtsAllocationError;
+        }
+    }
+
     for (size_t i = 0; i < count; i++) {
         entries[i] = entry_new(tuples[i]);
         if (IS_NULL_PTR(entries[i])) {
             for (size_t j = 0; j < i; j++) {
                 entry_delete(entries[j], global);
             }
+            free(single_nodes);
             free(entries);
             return EtsAllocationError;
         }
@@ -179,6 +190,9 @@ EtsStatus ets_multimap_insert(
             uint32_t idx = hash_term(key, global) % ETS_MULTIMAP_NUM_BUCKETS;
             new_node->next = multimap->buckets[idx];
             multimap->buckets[idx] = new_node;
+            if (multimap->type == EtsMultimapTypeSingle) {
+                single_nodes[single_nodes_count++] = new_node;
+            }
             continue;
         }
 
@@ -201,14 +215,20 @@ EtsStatus ets_multimap_insert(
 
         entry->next = node->entries;
         node->entries = entry;
+        if (multimap->type == EtsMultimapTypeSingle) {
+            single_nodes[single_nodes_count++] = node;
+        }
     }
 
     if (status != EtsOk) {
         insert_revert(multimap, entries, count, global);
     } else if (multimap->type == EtsMultimapTypeSingle) {
-        multimap_to_single(multimap, global);
+        for (size_t i = 0; i < single_nodes_count; i++) {
+            node_to_single(single_nodes[i], global);
+        }
     }
 
+    free(single_nodes);
     free(entries);
 
     return status;
@@ -435,22 +455,20 @@ static void insert_revert(
     }
 }
 
-static void multimap_to_single(EtsMultimap *multimap, GlobalContext *global)
+static void node_to_single(EtsMultimapNode *node, GlobalContext *global)
 {
-    for (size_t i = 0; i < ETS_MULTIMAP_NUM_BUCKETS; i++) {
-        for (EtsMultimapNode *node = multimap->buckets[i]; node != NULL; node = node->next) {
-            assert(node->entries != NULL);
-            EtsMultimapEntry *entry = node->entries->next;
+    assert(node != NULL);
+    assert(node->entries != NULL);
 
-            while (entry != NULL) {
-                EtsMultimapEntry *next = entry->next;
-                entry_delete(entry, global);
-                entry = next;
-            }
+    EtsMultimapEntry *entry = node->entries->next;
 
-            node->entries->next = NULL;
-        }
+    while (entry != NULL) {
+        EtsMultimapEntry *next = entry->next;
+        entry_delete(entry, global);
+        entry = next;
     }
+
+    node->entries->next = NULL;
 }
 
 static EtsStatus tuple_exists(

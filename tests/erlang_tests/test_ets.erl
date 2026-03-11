@@ -251,6 +251,11 @@ test_insert() ->
     [{key2, new_value2}] = ets:lookup(S2, key2),
     [{key3, value3}] = ets:lookup(S2, key3),
 
+    % Batch overwrite keeps only the last tuple for a key in set tables
+    S3 = ets:new(test, []),
+    true = ets:insert(S3, [{key, value}, {key, new_value}, {key, last_value}]),
+    [{key, last_value}] = ets:lookup(S3, key),
+
     % Bag
     B1 = ets:new(test, [bag]),
     [] = ets:lookup(B1, key),
