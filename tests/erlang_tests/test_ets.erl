@@ -323,9 +323,11 @@ test_insert_new() ->
     true = ets:insert_new(S2, []),
     true = ets:insert_new(S2, [{key, value}, {key2, value2}]),
     false = ets:insert_new(S2, [{key2, new_value2}, {key3, value3}]),
+    true = ets:insert_new(S2, [{key4, value4}, {key3, value3}, {key4, new_value4}]),
     [{key, value}] = ets:lookup(S2, key),
     [{key2, value2}] = ets:lookup(S2, key2),
-    [] = ets:lookup(S2, key3),
+    [{key3, value3}] = ets:lookup(S2, key3),
+    [{key4, new_value4}] = ets:lookup(S2, key4),
 
     % Regression: existing keys must not bypass validation of the rest of the list
     S3 = new_table([{key, value}]),
