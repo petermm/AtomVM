@@ -322,6 +322,11 @@ test_insert_new() ->
     [{key2, value2}] = ets:lookup(S2, key2),
     [] = ets:lookup(S2, key3),
 
+    % Regression: existing keys must not bypass validation of the rest of the list
+    S3 = new_table([{key, value}]),
+    assert_badarg(fun() -> ets:insert_new(S3, [{key, new_value}, not_a_tuple]) end),
+    [{key, value}] = ets:lookup(S3, key),
+
     % Bag
     B1 = ets:new(test, [bag]),
     [] = ets:lookup(B1, key),
@@ -343,6 +348,10 @@ test_insert_new() ->
     [{key3, value3}] = ets:lookup(B2, key3),
     [{key4, value4}, {key4, new_value4}] = ets:lookup(B2, key4),
 
+    B3 = new_table(bag, [{key, value}]),
+    assert_badarg(fun() -> ets:insert_new(B3, [{key, new_value}, not_a_tuple]) end),
+    [{key, value}] = ets:lookup(B3, key),
+
     % Duplicate bag
     DB1 = ets:new(test, [duplicate_bag]),
     [] = ets:lookup(DB1, key),
@@ -363,6 +372,10 @@ test_insert_new() ->
     [{key2, value2}] = ets:lookup(DB2, key2),
     [{key3, value3}] = ets:lookup(DB2, key3),
     [{key4, value4}, {key4, value4}] = ets:lookup(DB2, key4),
+
+    DB3 = new_table(duplicate_bag, [{key, value}]),
+    assert_badarg(fun() -> ets:insert_new(DB3, [{key, new_value}, not_a_tuple]) end),
+    [{key, value}] = ets:lookup(DB3, key),
 
     % Badargs
     assert_insert_badargs(ets:new(test, []), fun ets:insert_new/2),

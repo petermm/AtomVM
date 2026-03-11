@@ -719,6 +719,7 @@ static EtsStatus insert_many(
     assert(term_is_list(tuples));
 
     EtsStatus result = EtsOk;
+    bool key_exists = false;
 
     size_t count = 0;
     for (term iter = tuples; !term_is_nil(iter); iter = term_get_list_tail(iter), count++) {
@@ -740,9 +741,13 @@ static EtsStatus insert_many(
                 return EtsAllocationError;
             }
             if (existing > 0) {
-                return EtsKeyExists;
+                key_exists = true;
             }
         }
+    }
+
+    if (key_exists) {
+        return EtsKeyExists;
     }
 
     if (count == 0) {
