@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added support for external pids and encoded pids in external terms
 - Added support for external refs and encoded refs in external terms
 - Introduce ports to represent native processes and added support for external ports and encoded ports in external terms
+- Added `erlang:node/1` BIF
 - Added `atomvm:get_creation/0`, equivalent to `erts_internal:get_creation/0`
 - Added menuconfig option for enabling USE_USB_SERIAL, eg. serial over USB for certain ESP32-S2 boards etc.
 - Partial support for `erlang:fun_info/2` and `erlang:fun_info/1`
