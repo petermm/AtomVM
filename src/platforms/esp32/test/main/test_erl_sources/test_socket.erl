@@ -360,6 +360,9 @@ test_pending_connect_rejects_non_close_calls() ->
     Port = wait_for_pending_connect_port(Connector),
     true = is_port(Port),
     true = is_process_alive(Connector),
+    spawn(fun() -> tick(Parent, 5) end),
+    ok = wait_for_ticks(Connector, 5),
+    true = is_process_alive(Connector),
     {error, einprogress} = call(Port, {send, <<"ping">>}),
     {error, einprogress} = call(Port, {recv, 512, 100}, 5000),
     ok =
