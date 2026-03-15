@@ -360,11 +360,50 @@ void socket_driver_init(GlobalContext *glb)
     TRACE("Socket driver init: done\n");
 }
 
+static void socket_driver_destroy_live_sockets(struct ESP32PlatformData *platform)
+{
+    struct ListHead *item;
+    struct ListHead *tmp;
+
+    struct ListHead *sockets = synclist_nolock(&platform->sockets);
+    MUTABLE_LIST_FOR_EACH (item, tmp, sockets) {
+        struct SocketData *socket_data = GET_LIST_ENTRY(item, struct SocketData, sockets_head);
+
+        if (!IS_NULL_PTR(socket_data->conn)) {
+            socket_data->conn->callback = NULL;
+            if (UNLIKELY(netconn_delete(socket_data->conn) != ERR_OK)) {
+                TRACE("socket_driver_destroy: netconn_delete failed\n");
+            }
+            socket_data->conn = NULL;
+        }
+
+        if (socket_data->type == TCPServerSocket) {
+            struct TCPServerSocketData *tcp_data = (struct TCPServerSocketData *) socket_data;
+            struct ListHead *accepter_head;
+            struct ListHead *accepter_tmp;
+            MUTABLE_LIST_FOR_EACH (accepter_head, accepter_tmp, &tcp_data->accepters_list_head) {
+                struct TCPServerAccepter *accepter = GET_LIST_ENTRY(accepter_head, struct TCPServerAccepter, accepter_head);
+                list_remove(accepter_head);
+                free(accepter);
+            }
+        }
+    }
+
+    struct ListHead *ready_connection_head;
+    MUTABLE_LIST_FOR_EACH (ready_connection_head, tmp, &platform->ready_connections) {
+        struct ReadyConnection *ready_connection = GET_LIST_ENTRY(ready_connection_head, struct ReadyConnection, ready_connection_head);
+        list_remove(ready_connection_head);
+        free(ready_connection);
+    }
+}
+
 void socket_driver_destroy(GlobalContext *glb)
 {
     TRACE("Destroying socket driver\n");
 
     struct ESP32PlatformData *platform = glb->platform_data;
+    socket_driver_destroy_live_sockets(platform);
+
     EventListener *socket_listener = platform->socket_listener;
     sys_unregister_listener(glb, socket_listener);
     vQueueDelete(socket_listener->sender);
