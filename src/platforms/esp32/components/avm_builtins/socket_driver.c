@@ -998,7 +998,7 @@ static NativeHandlerResult do_connect_netconn_event(Context *ctx, enum netconn_e
         }
     }
 
-    if (IS_NULL_PTR(socket_data->conn) || socket_data->conn->state == NETCONN_CONNECT) {
+    if (IS_NULL_PTR(socket_data->conn)) {
         return NativeContinue;
     }
 
