@@ -31,6 +31,7 @@ start() ->
     ok = test_tcp_server(true, 10080),
     ok = test_tcp_server(false, 10081),
     ok = test_pending_connect_does_not_stall(),
+    ok = test_pending_connect_rejects_non_close_calls(),
     0.
 
 test_tcp_client(Active, BinaryOpt) ->
@@ -330,15 +331,7 @@ tcp_client(Active, Port) ->
 test_pending_connect_does_not_stall() ->
     Parent = self(),
     Connector = spawn(fun() -> pending_connect(Parent) end),
-    Port =
-        receive
-            {pending_connect_port, Connector, PendingPort} when is_port(PendingPort) ->
-                PendingPort;
-            UnexpectedPortMessage ->
-                {unexpected_pending_connect_port_message, UnexpectedPortMessage}
-        after 5000 ->
-            {pending_connect_port, timeout}
-        end,
+    Port = wait_for_pending_connect_port(Connector),
     true = is_port(Port),
     true = is_process_alive(Connector),
     spawn(fun() -> tick(Parent, 5) end),
@@ -352,8 +345,6 @@ test_pending_connect_does_not_stall() ->
         end,
     ok =
         receive
-            {pending_connect_result, Connector, {error, noproc}} ->
-                ok;
             {pending_connect_result, Connector, {error, closed}} ->
                 ok;
             {pending_connect_result, Connector, UnexpectedConnectResult} ->
@@ -362,6 +353,41 @@ test_pending_connect_does_not_stall() ->
             {pending_connect_result, timeout}
         end,
     ok.
+
+test_pending_connect_rejects_non_close_calls() ->
+    Parent = self(),
+    Connector = spawn(fun() -> pending_connect(Parent) end),
+    Port = wait_for_pending_connect_port(Connector),
+    true = is_port(Port),
+    true = is_process_alive(Connector),
+    {error, einprogress} = call(Port, {send, <<"ping">>}),
+    {error, einprogress} = call(Port, {recv, 512, 100}, 5000),
+    ok =
+        case call(Port, {close}, 5000) of
+            ok -> ok;
+            {error, noproc} -> ok;
+            UnexpectedCloseResult -> {unexpected_pending_connect_close, UnexpectedCloseResult}
+        end,
+    ok =
+        receive
+            {pending_connect_result, Connector, {error, closed}} ->
+                ok;
+            {pending_connect_result, Connector, UnexpectedConnectResult} ->
+                {unexpected_pending_connect_result, UnexpectedConnectResult}
+        after 5000 ->
+            {pending_connect_result, timeout}
+        end,
+    ok.
+
+wait_for_pending_connect_port(Connector) ->
+    receive
+        {pending_connect_port, Connector, PendingPort} when is_port(PendingPort) ->
+            PendingPort;
+        UnexpectedPortMessage ->
+            {unexpected_pending_connect_port_message, UnexpectedPortMessage}
+    after 5000 ->
+        {pending_connect_port, timeout}
+    end.
 
 pending_connect(Parent) ->
     Port = open_port({spawn, "socket"}, []),
@@ -375,7 +401,7 @@ pending_connect(Parent) ->
         {active, false},
         binary
     ],
-    Parent ! {pending_connect_result, self(), call(Port, {init, Params}, 30000)}.
+    Parent ! {pending_connect_result, self(), call_wait_for_reply(Port, {init, Params}, 30000)}.
 
 tick(_Parent, 0) ->
     ok;
@@ -420,3 +446,35 @@ call(Port, Message, Timeout) ->
         end,
     demonitor(MonitorRef, [flush]),
     Result.
+
+call_wait_for_reply(Port, Message, Timeout) ->
+    MonitorRef = monitor(port, Port),
+    Port ! {'$call', {self(), MonitorRef}, Message},
+    Deadline = erlang:monotonic_time(millisecond) + Timeout,
+    Result = call_wait_for_reply_result(Port, MonitorRef, Deadline, undefined),
+    demonitor(MonitorRef, [flush]),
+    Result.
+
+call_wait_for_reply_result(Port, MonitorRef, Deadline, DownResult) ->
+    Remaining = Deadline - erlang:monotonic_time(millisecond),
+    if
+        Remaining =< 0 ->
+            case DownResult of
+                undefined -> {error, timeout};
+                _ -> DownResult
+            end;
+        true ->
+            receive
+                {'DOWN', MonitorRef, port, Port, normal} ->
+                    call_wait_for_reply_result(Port, MonitorRef, Deadline, {error, noproc});
+                {'DOWN', MonitorRef, port, Port, Reason} ->
+                    call_wait_for_reply_result(Port, MonitorRef, Deadline, {error, Reason});
+                {MonitorRef, Ret} ->
+                    Ret
+            after Remaining ->
+                case DownResult of
+                    undefined -> {error, timeout};
+                    _ -> DownResult
+                end
+            end
+    end.

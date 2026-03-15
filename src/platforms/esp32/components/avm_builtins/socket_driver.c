@@ -255,6 +255,12 @@ struct ReadyConnection
 
 QueueHandle_t netconn_events = NULL;
 
+static bool socket_event_is_forwarded(enum netconn_evt evt, u16_t len)
+{
+    return evt == NETCONN_EVT_RCVPLUS || evt == NETCONN_EVT_ERROR
+        || (evt == NETCONN_EVT_SENDPLUS && len == 0);
+}
+
 void IRAM_ATTR socket_callback(struct netconn *netconn, enum netconn_evt evt, u16_t len)
 {
     TRACE("socket_callback netconn=%p, evt=%d, len=%d\n", (void *) netconn, evt, len);
@@ -267,7 +273,7 @@ void IRAM_ATTR socket_callback(struct netconn *netconn, enum netconn_evt evt, u1
     //
     // TCP connect completion is reported through SENDPLUS / ERROR events when
     // using lwIP's non-blocking connect path.
-    if (evt == NETCONN_EVT_RCVPLUS || evt == NETCONN_EVT_SENDPLUS || evt == NETCONN_EVT_ERROR) {
+    if (socket_event_is_forwarded(evt, len)) {
         struct NetconnEvent event;
         event.netconn = netconn;
         event.evt = evt;
@@ -309,16 +315,15 @@ EventListener *socket_events_handler(GlobalContext *glb, EventListener *listener
         }
 
         if (socket == NULL) {
-            if (event.len == 0) {
-                // The socket may already be gone
-                TRACE("Got event for unknown conn: %p, dropping it as len is 0\n", (void *) event.netconn);
-            } else {
-                // Add it to ready_connections
-                TRACE("Got event for unknown conn: %p, len = %d adding to ready connections list\n", (void *) event.netconn, event.len);
+            if (event.evt == NETCONN_EVT_RCVPLUS && event.len > 0) {
+                TRACE("Got RCVPLUS for unknown conn: %p, len = %d adding to ready connections list\n", (void *) event.netconn, event.len);
                 struct ReadyConnection *ready = (struct ReadyConnection *) malloc(sizeof (struct ReadyConnection));
                 ready->netconn = event.netconn;
                 ready->len = event.len;
                 list_append(&platform->ready_connections, &ready->ready_connection_head);
+            } else {
+                // The socket may already be gone or this event is not accept-ready data.
+                TRACE("Got event for unknown conn: %p, evt = %d, len = %d dropping it\n", (void *) event.netconn, event.evt, event.len);
             }
         }
         synclist_unlock(&platform->sockets);
@@ -447,6 +452,21 @@ static void socket_data_clear_connect_reply(struct SocketData *socket_data)
     socket_data->connect_in_progress = false;
     socket_data->connect_receiver_process_pid = 0;
     socket_data->connect_ref_ticks = 0;
+}
+
+static err_t socket_data_peek_pending_err(struct netconn *conn)
+{
+    err_t status = ERR_OK;
+    if (IS_NULL_PTR(conn)) {
+        return status;
+    }
+
+    SYS_ARCH_DECL_PROTECT(lev);
+    SYS_ARCH_PROTECT(lev);
+    status = conn->pending_err;
+    SYS_ARCH_UNPROTECT(lev);
+
+    return status;
 }
 
 static void socket_data_remove(Context *ctx, struct SocketData *socket_data)
@@ -900,16 +920,25 @@ static NativeHandlerResult do_connect_netconn_event(Context *ctx, enum netconn_e
         return NativeContinue;
     }
 
-    int32_t pid = socket_data->connect_receiver_process_pid;
-    uint64_t ref_ticks = socket_data->connect_ref_ticks;
-    err_t status = netconn_err(socket_data->conn);
-    socket_data_clear_connect_reply(socket_data);
-
-    if (UNLIKELY(status != ERR_OK)) {
+    if (evt == NETCONN_EVT_ERROR) {
+        int32_t pid = socket_data->connect_receiver_process_pid;
+        uint64_t ref_ticks = socket_data->connect_ref_ticks;
+        err_t status = socket_data_peek_pending_err(socket_data->conn);
+        if (UNLIKELY(status == ERR_OK)) {
+            status = ERR_CONN;
+        }
+        socket_data_clear_connect_reply(socket_data);
         tcp_client_cleanup_connect_failure(ctx, tcp_data);
         do_send_error_reply(ctx, status, ref_ticks, pid);
         return NativeContinue;
     }
+    if (evt != NETCONN_EVT_SENDPLUS) {
+        return NativeContinue;
+    }
+
+    int32_t pid = socket_data->connect_receiver_process_pid;
+    uint64_t ref_ticks = socket_data->connect_ref_ticks;
+    socket_data_clear_connect_reply(socket_data);
 
     if (UNLIKELY(memory_ensure_free(ctx, REPLY_SIZE) != MEMORY_GC_OK)) {
         AVM_ABORT();
@@ -1363,18 +1392,23 @@ static void do_close(Context *ctx, const GenMessage *gen_message)
     int32_t pid = term_to_local_process_id(gen_message->pid);
     uint64_t ref_ticks = term_to_ref_ticks(gen_message->ref);
 
-    if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2) + REPLY_SIZE) != MEMORY_GC_OK)) {
-        AVM_ABORT();
-    }
     if (IS_NULL_PTR(socket_data) || IS_NULL_PTR(socket_data->conn)) {
         do_send_error_reply(ctx, ERR_ARG, ref_ticks, pid);
         return;
     }
 
+    bool was_connecting = socket_data_is_connecting(socket_data);
+    if (was_connecting && socket_data->connect_receiver_process_pid != 0) {
+        int32_t connect_pid = socket_data->connect_receiver_process_pid;
+        uint64_t connect_ref_ticks = socket_data->connect_ref_ticks;
+        socket_data_clear_connect_reply(socket_data);
+        do_send_error_reply(ctx, ERR_CLSD, connect_ref_ticks, connect_pid);
+    }
+
     err_t close_disconnect_res = ERR_OK;
     if (socket_data->type == UDPSocket) {
         close_disconnect_res = netconn_disconnect(socket_data->conn);
-    } else if (socket_data->type == TCPClientSocket && !socket_data->connect_in_progress) {
+    } else if (socket_data->type == TCPClientSocket && !was_connecting) {
         close_disconnect_res = netconn_close(socket_data->conn);
     }
     err_t delete_res = netconn_delete(socket_data->conn);
@@ -1387,6 +1421,9 @@ static void do_close(Context *ctx, const GenMessage *gen_message)
     } else if (UNLIKELY(delete_res != ERR_OK)) {
         do_send_error_reply(ctx, delete_res, ref_ticks, pid);
     } else {
+        if (UNLIKELY(memory_ensure_free(ctx, REPLY_SIZE) != MEMORY_GC_OK)) {
+            AVM_ABORT();
+        }
         do_send_reply(ctx, OK_ATOM, ref_ticks, pid);
     }
 }
@@ -1573,6 +1610,11 @@ static NativeHandlerResult socket_consume_mailbox(Context *ctx)
         }
         if (cmd_name == INIT_ATOM && !IS_NULL_PTR(ctx->platform_data)) {
             do_send_error_reply(ctx, ERR_ALREADY, term_to_ref_ticks(gen_message.ref), term_to_local_process_id(gen_message.pid));
+            mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+            continue;
+        }
+        if (socket_data_is_connecting(ctx->platform_data) && cmd_name != CLOSE_ATOM) {
+            do_send_error_reply(ctx, ERR_INPROGRESS, term_to_ref_ticks(gen_message.ref), term_to_local_process_id(gen_message.pid));
             mailbox_remove_message(&ctx->mailbox, &ctx->heap);
             continue;
         }
