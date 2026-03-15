@@ -69,6 +69,11 @@ static Context *socket_driver_create_port(GlobalContext *global, term opts);
 
 static NativeHandlerResult socket_consume_mailbox(Context *ctx);
 
+struct SocketData;
+static bool socket_data_is_connecting(const struct SocketData *socket_data);
+static void socket_data_clear_connect_reply(struct SocketData *socket_data);
+static void do_send_error_reply(Context *ctx, err_t status, uint64_t ref_ticks, int32_t pid);
+
 static const char *const tcp_error_atom = "\x9" "tcp_error";
 
 static const char *const netconn_event_internal = ATOM_STR("\x1E", "$atomvm_netconn_event_internal");
@@ -360,35 +365,73 @@ void socket_driver_init(GlobalContext *glb)
     TRACE("Socket driver init: done\n");
 }
 
-static void socket_driver_destroy_live_sockets(struct ESP32PlatformData *platform)
+static struct SocketData *socket_driver_take_socket(struct ESP32PlatformData *platform)
 {
-    struct ListHead *item;
-    struct ListHead *tmp;
-
-    struct ListHead *sockets = synclist_nolock(&platform->sockets);
-    MUTABLE_LIST_FOR_EACH (item, tmp, sockets) {
-        struct SocketData *socket_data = GET_LIST_ENTRY(item, struct SocketData, sockets_head);
-
-        if (!IS_NULL_PTR(socket_data->conn)) {
-            socket_data->conn->callback = NULL;
-            if (UNLIKELY(netconn_delete(socket_data->conn) != ERR_OK)) {
-                TRACE("socket_driver_destroy: netconn_delete failed\n");
-            }
-            socket_data->conn = NULL;
-        }
-
-        if (socket_data->type == TCPServerSocket) {
-            struct TCPServerSocketData *tcp_data = (struct TCPServerSocketData *) socket_data;
-            struct ListHead *accepter_head;
-            struct ListHead *accepter_tmp;
-            MUTABLE_LIST_FOR_EACH (accepter_head, accepter_tmp, &tcp_data->accepters_list_head) {
-                struct TCPServerAccepter *accepter = GET_LIST_ENTRY(accepter_head, struct TCPServerAccepter, accepter_head);
-                list_remove(accepter_head);
-                free(accepter);
-            }
-        }
+    struct ListHead *sockets = synclist_wrlock(&platform->sockets);
+    if (list_is_empty(sockets)) {
+        synclist_unlock(&platform->sockets);
+        return NULL;
     }
 
+    struct ListHead *item = list_first(sockets);
+    list_remove(item);
+    synclist_unlock(&platform->sockets);
+
+    return GET_LIST_ENTRY(item, struct SocketData, sockets_head);
+}
+
+static void socket_driver_cleanup_socket_data(struct SocketData *socket_data)
+{
+    if (!IS_NULL_PTR(socket_data->conn)) {
+        socket_data->conn->callback = NULL;
+        if (UNLIKELY(netconn_delete(socket_data->conn) != ERR_OK)) {
+            TRACE("socket_driver_destroy: netconn_delete failed\n");
+        }
+        socket_data->conn = NULL;
+    }
+
+    if (socket_data->type == TCPServerSocket) {
+        struct TCPServerSocketData *tcp_data = (struct TCPServerSocketData *) socket_data;
+        struct ListHead *accepter_head;
+        struct ListHead *accepter_tmp;
+        MUTABLE_LIST_FOR_EACH (accepter_head, accepter_tmp, &tcp_data->accepters_list_head) {
+            struct TCPServerAccepter *accepter = GET_LIST_ENTRY(accepter_head, struct TCPServerAccepter, accepter_head);
+            list_remove(accepter_head);
+            free(accepter);
+        }
+    }
+}
+
+static void socket_driver_destroy_socket_context(Context *ctx, struct SocketData *socket_data)
+{
+    if (socket_data_is_connecting(socket_data) && socket_data->connect_receiver_process_pid != 0) {
+        int32_t connect_pid = socket_data->connect_receiver_process_pid;
+        uint64_t connect_ref_ticks = socket_data->connect_ref_ticks;
+        socket_data_clear_connect_reply(socket_data);
+        do_send_error_reply(ctx, ERR_CLSD, connect_ref_ticks, connect_pid);
+    }
+
+    socket_driver_cleanup_socket_data(socket_data);
+    scheduler_terminate(ctx);
+}
+
+static void socket_driver_destroy_live_sockets(GlobalContext *glb)
+{
+    struct ESP32PlatformData *platform = glb->platform_data;
+
+    struct SocketData *socket_data;
+    while ((socket_data = socket_driver_take_socket(platform)) != NULL) {
+        Context *ctx = globalcontext_get_process_nolock(glb, socket_data->process_id);
+        if (IS_NULL_PTR(ctx)) {
+            TRACE("socket_driver_destroy: missing context for socket %i\n", socket_data->process_id);
+            socket_driver_cleanup_socket_data(socket_data);
+            free(socket_data);
+            continue;
+        }
+        socket_driver_destroy_socket_context(ctx, socket_data);
+    }
+
+    struct ListHead *tmp;
     struct ListHead *ready_connection_head;
     MUTABLE_LIST_FOR_EACH (ready_connection_head, tmp, &platform->ready_connections) {
         struct ReadyConnection *ready_connection = GET_LIST_ENTRY(ready_connection_head, struct ReadyConnection, ready_connection_head);
@@ -402,7 +445,7 @@ void socket_driver_destroy(GlobalContext *glb)
     TRACE("Destroying socket driver\n");
 
     struct ESP32PlatformData *platform = glb->platform_data;
-    socket_driver_destroy_live_sockets(platform);
+    socket_driver_destroy_live_sockets(glb);
 
     EventListener *socket_listener = platform->socket_listener;
     sys_unregister_listener(glb, socket_listener);
