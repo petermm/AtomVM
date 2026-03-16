@@ -732,13 +732,12 @@ handle_info({Ref, {sntp_sync, TimeVal}} = _Msg, #state{ref = Ref, config = Confi
     maybe_sntp_sync_callback(Config, TimeVal),
     {noreply, State};
 handle_info(
-    {ScanRef, {scan_results, _Results} = Msg}, #state{scan_receiver = {_Pid, ScanRef}} = State
+    {ScanRef, {scan_results, _Results} = Msg},
+    #state{scan_receiver = {Receiver, ScanRef}} = State
 ) ->
-    %% We have results, so to avoid a race if a new wifi_scan request is made, spawn
-    %% the handler, and immediately update the state so handle_call does not reply to
-    %% this caller with {error,canceled} before we can send the results (avoiding a
-    %% crash if this is a blocking scan request).
-    spawn(fun() -> scan_reply_or_callback(Msg, State) end),
+    %% Spawn the reply handler so the state is cleared before a caller can issue
+    %% another scan and race with cancellation of the previous request.
+    spawn(fun() -> scan_reply_or_callback(Msg, Receiver) end),
     {noreply, State#state{scan_receiver = undefined}};
 handle_info({_ScanRef, {scan_results, _Results}} = Msg, State) ->
     %% late, (likely incomplete or inaccurate) results for canceled scan.
@@ -795,21 +794,23 @@ wait_for_port_close(PortMonitor, Port) ->
 %% Internal operations
 %%
 
-scan_reply_or_callback({scan_results, Results} = Msg, #state{scan_receiver = Receiver} = _State) ->
+scan_reply_or_callback({scan_results, Results} = Msg, Receiver) ->
     case Receiver of
         undefined ->
             ok;
-        {From, _} when is_tuple(From) ->
+        {Pid, Ref} = From when is_pid(Pid), is_reference(Ref) ->
             case Results of
                 {error, _} ->
                     gen_server:reply(From, Results);
                 _ ->
                     gen_server:reply(From, {ok, Results})
             end;
-        {Pid, _} when is_pid(Pid) ->
+        Pid when is_pid(Pid) ->
             Pid ! Msg;
-        {Fun, _} when is_function(Fun, 1) ->
-            spawn(fun() -> Fun(Results) end)
+        Fun when is_function(Fun, 1) ->
+            spawn(fun() -> Fun(Results) end);
+        _Other ->
+            ok
     end,
     ok.
 

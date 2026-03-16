@@ -143,13 +143,18 @@ struct ScanClientData
 {
     Context *ctx;
     uint16_t num_results;
+    uint16_t discovered;
+    uint16_t return_results;
     uint32_t owner_process_id;
     uint64_t ref_ticks;
+    wifi_ap_record_t *ap_records;
+    esp_err_t scan_result_err;
     atomic_int ref_count;
 };
 
 static portMUX_TYPE scan_ctx_mux = portMUX_INITIALIZER_UNLOCKED;
 
+static void scan_data_release(struct ScanClientData *data);
 static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 
 static inline term make_atom(GlobalContext *global, AtomString atom_str)
@@ -456,30 +461,87 @@ static struct ScanClientData *claim_scan_data(Context *ctx)
     return data;
 }
 
-// Only one caller can receive a non-NULL return; all others get NULL.
-// Needed to prevent a newly started scan from taking ownership if a
-// previous scan has finished, but results are still being processed by
-// callback handler task.
-static struct ScanClientData *take_scan_data_if_owner(Context *ctx, uint64_t ref_ticks)
+// Atomically check ownership, unregister the scan_done event handler, release
+// the ownership reference, and clear ctx->platform_data.  Only clears
+// platform_data when unregister succeeds so the pointer is never orphaned.
+// Returns true if cleanup succeeded (or this caller was not the owner).
+static bool unregister_scan_if_owner(Context *ctx, uint64_t ref_ticks)
 {
-    // TODO: change to LOGD
-    ESP_LOGI(TAG, "entering port critical take scan data...");
     portENTER_CRITICAL_SAFE(&scan_ctx_mux);
     struct ScanClientData *data = (struct ScanClientData *) ctx->platform_data;
-    if (data != NULL && data->ref_ticks == ref_ticks) {
-        ctx->platform_data = NULL;
-    } else {
-        data = NULL;
+    if (data == NULL || data->ref_ticks != ref_ticks) {
+        portEXIT_CRITICAL_SAFE(&scan_ctx_mux);
+        return true;
     }
     portEXIT_CRITICAL_SAFE(&scan_ctx_mux);
-    // TODO: change to LOGD
-    if (ctx->platform_data == NULL) {
-        ESP_LOGI(TAG, "Took ownership of scan data");
-    } else {
-        ESP_LOGI(TAG, "data not owned by this process");
+
+    esp_err_t err = esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
+    if (err == ESP_OK) {
+        portENTER_CRITICAL_SAFE(&scan_ctx_mux);
+        // Re-check: a new scan may have replaced platform_data while we were unregistering.
+        if (ctx->platform_data == data) {
+            ctx->platform_data = NULL;
+        }
+        portEXIT_CRITICAL_SAFE(&scan_ctx_mux);
+        scan_data_release(data);
+        return true;
     }
 
-    return data;
+    ESP_LOGE(TAG, "Failed to unregister event handler for reason %s, future scans may fail",
+        esp_err_to_name(err));
+    return false;
+}
+
+// Block until any in-flight scan_results_task has released its ref.
+// Must be called after esp_event_handler_unregister so no new refs can be acquired.
+static void wait_for_scan_task(struct ScanClientData *data)
+{
+    while (atomic_load(&data->ref_count) > 1) {
+        vTaskDelay(1);
+    }
+}
+
+static esp_err_t fetch_scan_results_from_driver(struct ScanClientData *data)
+{
+    uint16_t discovered = 0;
+    esp_err_t err = esp_wifi_scan_get_ap_num(&discovered);
+    if (UNLIKELY(err != ESP_OK)) {
+        esp_wifi_clear_ap_list();
+        data->scan_result_err = err;
+        data->discovered = 0;
+        data->return_results = 0;
+        return err;
+    }
+
+    data->discovered = discovered;
+    data->return_results = discovered > data->num_results ? data->num_results : discovered;
+
+    if (data->return_results > 0) {
+        data->ap_records = calloc(data->return_results, sizeof(wifi_ap_record_t));
+        if (IS_NULL_PTR(data->ap_records)) {
+            esp_wifi_clear_ap_list();
+            data->scan_result_err = ESP_ERR_NO_MEM;
+            data->return_results = 0;
+            return ESP_ERR_NO_MEM;
+        }
+
+        uint16_t record_count = data->return_results;
+        err = esp_wifi_scan_get_ap_records(&record_count, data->ap_records);
+        if (UNLIKELY(err != ESP_OK)) {
+            esp_wifi_clear_ap_list();
+            free(data->ap_records);
+            data->ap_records = NULL;
+            data->scan_result_err = err;
+            data->return_results = 0;
+            return err;
+        }
+        data->return_results = record_count;
+    } else {
+        esp_wifi_clear_ap_list();
+    }
+
+    data->scan_result_err = ESP_OK;
+    return ESP_OK;
 }
 
 // Free ScanClientData when all references have been released.
@@ -489,6 +551,7 @@ static void scan_data_release(struct ScanClientData *data)
     ESP_LOGI(TAG, "Releasing scan reference...");
     if (atomic_fetch_sub(&data->ref_count, 1) == 1) {
         ESP_LOGI(TAG, "All references released, freeing scan data");
+        free(data->ap_records);
         free(data);
     }
 }
@@ -520,92 +583,16 @@ static void send_scan_results(struct ScanClientData *data)
     uint64_t ref_ticks = data->ref_ticks;
     term local_process_term = term_from_local_process_id(data->owner_process_id);
     term ref = term_invalid_term();
-    struct ScanClientData *owned;
-    uint16_t discovered = 0;
-
-    esp_err_t err = esp_wifi_scan_get_ap_num(&discovered);
+    uint16_t discovered = data->discovered;
+    uint16_t return_results = data->return_results;
+    wifi_ap_record_t *ap_records = data->ap_records;
+    esp_err_t err = data->scan_result_err;
     if (UNLIKELY(err != ESP_OK)) {
-        // the ap_list must be cleared on failures to prevent a memory leak
-        esp_wifi_clear_ap_list();
         ESP_LOGE(TAG, "Failed to obtain scan results, reason: %s", esp_err_to_name(err));
         const char *error = esp_err_to_name(err);
         size_t error_len = strlen(error);
 
-        owned = take_scan_data_if_owner(ctx, ref_ticks);
-        if (owned != NULL) {
-            err = esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
-            if (err == ESP_OK) {
-                scan_data_release(owned);
-            } else {
-                ESP_LOGE(TAG, "Failed to unregister event handler for reason %s, future scans may fail",
-                    esp_err_to_name(err));
-            }
-        }
-
-        BEGIN_WITH_STACK_HEAP(PORT_REPLY_SIZE + TUPLE_SIZE(2) + TUPLE_SIZE(2) + TERM_BINARY_HEAP_SIZE(error_len), heap);
-        term reason = term_from_literal_binary((const uint8_t *) error, (uint16_t) error_len, &heap, ctx->global);
-        ref = term_from_ref_ticks(ref_ticks, &heap);
-        send_scan_error_from_task_heap(ctx->global, local_process_term, reason, ref, &heap);
-        END_WITH_STACK_HEAP(heap, ctx->global);
-        return;
-    }
-
-    uint16_t num_results = data->num_results;
-    uint16_t return_results;
-    if (discovered > num_results) {
-        return_results = num_results;
-    } else {
-        return_results = discovered;
-    }
-    wifi_ap_record_t *ap_records = NULL;
-    if (return_results > 0) {
-        ap_records = calloc(return_results, sizeof(wifi_ap_record_t));
-    }
-    if ((return_results > 0) && IS_NULL_PTR(ap_records)) {
-        esp_wifi_clear_ap_list();
-
-        owned = take_scan_data_if_owner(ctx, ref_ticks);
-        if (owned != NULL) {
-            err = esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
-            if (err == ESP_OK) {
-                scan_data_release(owned);
-            } else {
-                ESP_LOGE(TAG, "Failed to unregister event handler for reason %s, future scans may fail",
-                    esp_err_to_name(err));
-            }
-        }
-
-        BEGIN_WITH_STACK_HEAP(PORT_REPLY_SIZE + TUPLE_SIZE(2) + TUPLE_SIZE(2), heap);
-        ref = term_from_ref_ticks(ref_ticks, &heap);
-        send_scan_error_from_task_heap(ctx->global, local_process_term, OUT_OF_MEMORY_ATOM, ref, &heap);
-        END_WITH_STACK_HEAP(heap, ctx->global);
-        return;
-    }
-
-    if (return_results > 0) {
-        err = esp_wifi_scan_get_ap_records(&num_results, ap_records);
-    } else {
-        esp_wifi_clear_ap_list();
-        err = ESP_OK;
-    }
-    if (UNLIKELY(err != ESP_OK)) {
-        // the ap_list must be cleared on failures to prevent a memory leak
-        esp_wifi_clear_ap_list();
-        ESP_LOGE(TAG, "Failed to obtain scan results, reason: %s", esp_err_to_name(err));
-        const char *error = esp_err_to_name(err);
-        size_t error_len = strlen(error);
-
-        free(ap_records);
-        owned = take_scan_data_if_owner(ctx, ref_ticks);
-        if (owned != NULL) {
-            err = esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
-            if (err == ESP_OK) {
-                scan_data_release(owned);
-            } else {
-                ESP_LOGE(TAG, "Failed to unregister event handler for reason %s, future scans may fail",
-                    esp_err_to_name(err));
-            }
-        }
+        unregister_scan_if_owner(ctx, ref_ticks);
 
         BEGIN_WITH_STACK_HEAP(PORT_REPLY_SIZE + TUPLE_SIZE(2) + TUPLE_SIZE(2) + TERM_BINARY_HEAP_SIZE(error_len), heap);
         term reason = term_from_literal_binary((const uint8_t *) error, (uint16_t) error_len, &heap, ctx->global);
@@ -624,7 +611,7 @@ static void send_scan_results(struct ScanClientData *data)
     // BEGIN_WITH_STACK_HEAP(results_size, heap);
     Heap heap;
     if (UNLIKELY(memory_init_heap(&heap, results_size) != MEMORY_GC_OK)) {
-        free(ap_records);
+        unregister_scan_if_owner(ctx, ref_ticks);
         BEGIN_WITH_STACK_HEAP(PORT_REPLY_SIZE + TUPLE_SIZE(2) + TUPLE_SIZE(2), err_heap);
         ref = term_from_ref_ticks(ref_ticks, &err_heap);
         send_scan_error_from_task_heap(ctx->global, local_process_term,
@@ -637,45 +624,16 @@ static void send_scan_results(struct ScanClientData *data)
     if (return_results != 0) {
         networks_data_list = wifi_ap_records_to_list_maybe_gc(ctx->global, ap_records, return_results, &heap);
     }
-    free(ap_records);
     term scan_results = port_heap_create_tuple2(&heap, term_from_int(discovered), networks_data_list);
     term scan_results_atom = make_atom(ctx->global, ATOM_STR("\xc", "scan_results"));
     term ret = port_heap_create_tuple2(&heap, scan_results_atom, scan_results);
     ref = term_from_ref_ticks(ref_ticks, &heap);
     term msg = port_heap_create_tuple2(&heap, ref, ret);
 
-    // If unregistering the scan done handler fails an error tuple is sent to the gen_server after
-    // the scan results. This currently will fall through to the default info handler and print a
-    // message on the console. A better way of handling this failure may be needed in the future.
-    owned = take_scan_data_if_owner(ctx, ref_ticks);
-    if (owned != NULL) {
-        err = esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
-        if (err == ESP_OK) {
-            scan_data_release(owned);
-        }
-    }
+    unregister_scan_if_owner(ctx, ref_ticks);
 
     port_send_message_from_task(ctx->global, local_process_term, msg);
     memory_destroy_heap(&heap, ctx->global);
-    // END_WITH_STACK_HEAP(heap, ctx->global);
-
-    // Send this event unregister error after the good scan results. This will be caught by the
-    // catch-all handler and print a message to the console, if this is discovered to happen in the
-    // wild, a future callback or other mechanism for programmatic notification may be needed, for
-    // blocking scans this may need to have an alternative return that includes the unregister error,
-    // along with the good results (since future scans may fail).
-    if (err != ESP_OK) {
-        const char *error = esp_err_to_name(err);
-        ESP_LOGE(TAG, "Failed to unregister event handler for reason %s, future scans may fail", error);
-        size_t error_len = strlen(error);
-        BEGIN_WITH_STACK_HEAP(PORT_REPLY_SIZE + TUPLE_SIZE(2) + TUPLE_SIZE(2) + TERM_BINARY_HEAP_SIZE(error_len), heap);
-        term reason = term_from_literal_binary((const uint8_t *) error, (uint16_t) error_len, &heap, ctx->global);
-        term error_reply = port_heap_create_tuple2(&heap, ERROR_ATOM, reason);
-        ref = term_from_ref_ticks(ref_ticks, &heap);
-        term err_msg = port_heap_create_tuple2(&heap, ref, error_reply);
-        port_send_message_from_task(ctx->global, local_process_term, err_msg);
-        END_WITH_STACK_HEAP(heap, ctx->global);
-    }
 }
 
 //
@@ -827,6 +785,20 @@ static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t ev
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
         ESP_LOGD(TAG, "Scan complete.");
         scan_data_acquire(data);
+        esp_err_t fetch_err = fetch_scan_results_from_driver(data);
+        if (UNLIKELY(fetch_err != ESP_OK)) {
+            ESP_LOGE(TAG, "Failed to fetch scan results in callback, reason: %s", esp_err_to_name(fetch_err));
+            unregister_scan_if_owner(data->ctx, data->ref_ticks);
+            size_t error_len = strlen(esp_err_to_name(fetch_err));
+            BEGIN_WITH_STACK_HEAP(PORT_REPLY_SIZE + TUPLE_SIZE(2) + TUPLE_SIZE(2) + TERM_BINARY_HEAP_SIZE(error_len), err_heap);
+            term ref = term_from_ref_ticks(data->ref_ticks, &err_heap);
+            term local_pid = term_from_local_process_id(data->owner_process_id);
+            term reason = term_from_literal_binary((const uint8_t *) esp_err_to_name(fetch_err), (uint16_t) error_len, &err_heap, data->ctx->global);
+            send_scan_error_from_task_heap(data->ctx->global, local_pid, reason, ref, &err_heap);
+            END_WITH_STACK_HEAP(err_heap, data->ctx->global);
+            scan_data_release(data);
+            return;
+        }
         // Offload to a separate task — the event loop stack is too small
         // for the full send_scan_results → mailbox_message_create_from_term chain.
         BaseType_t results_task = xTaskCreate(scan_results_task, "avm_scan_res",
@@ -834,6 +806,8 @@ static void scan_done_handler(void *arg, esp_event_base_t event_base, int32_t ev
             data, tskIDLE_PRIORITY + 5, NULL);
         if (results_task != pdPASS) {
             ESP_LOGE(TAG, "Failed to create scan_results task, out of memory!");
+            esp_wifi_clear_ap_list();
+            unregister_scan_if_owner(data->ctx, data->ref_ticks);
             size_t err_size = PORT_REPLY_SIZE + TUPLE_SIZE(2) + TUPLE_SIZE(2);
             BEGIN_WITH_STACK_HEAP(err_size, err_heap);
             term ref = term_from_ref_ticks(data->ref_ticks, &err_heap);
@@ -1336,17 +1310,25 @@ static void stop_network(Context *ctx)
     // Stop sntp (ignore OK, or not configured error)
     esp_sntp_stop();
 
+    // Unregister scan handler first — esp_event_handler_unregister blocks until
+    // any in-progress handler invocation finishes, so after this returns the
+    // SCAN_DONE event posted by esp_wifi_scan_stop won't invoke the handler.
+    esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
+    struct ScanClientData *scan_data = claim_scan_data(ctx);
+    if (scan_data != NULL) {
+        // Wait for any in-flight scan_results_task to finish before WiFi teardown,
+        // otherwise the task may dereference the destroyed Context.
+        wait_for_scan_task(scan_data);
+        esp_wifi_scan_stop();
+        esp_wifi_clear_ap_list();
+        scan_data_release(scan_data);
+    }
+
     // Stop unregister event callbacks so they dont trigger during shutdown.
     esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
     esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
     esp_event_handler_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &event_handler);
     esp_event_handler_unregister(sntp_event_base, SNTP_EVENT_BASE_SYNC, &event_handler);
-    esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
-
-    struct ScanClientData *data = claim_scan_data(ctx);
-    if (data != NULL) {
-        scan_data_release(data);
-    }
 
     esp_netif_t *sta_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_t *ap_wifi_interface = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
@@ -1656,6 +1638,10 @@ static void wifi_scan(Context *ctx, term pid, term ref, term config)
     data->owner_process_id = term_to_local_process_id(pid);
     data->ref_ticks = term_to_ref_ticks(ref);
     data->num_results = num_results;
+    data->discovered = 0;
+    data->return_results = 0;
+    data->ap_records = NULL;
+    data->scan_result_err = ESP_OK;
     data->ref_count = 1;
 
     // Unregister any pending handlers, any currently running scans will be canceled if a new scan
@@ -1664,6 +1650,9 @@ static void wifi_scan(Context *ctx, term pid, term ref, term config)
     struct ScanClientData *old = claim_scan_data(ctx);
     if (old != NULL) {
         esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &scan_done_handler);
+        // Wait for any in-flight scan_results_task to finish before registering a new
+        // handler, otherwise the old task's unregister_scan_if_owner could remove it.
+        wait_for_scan_task(old);
         scan_data_release(old);
     }
     portENTER_CRITICAL_SAFE(&scan_ctx_mux);
