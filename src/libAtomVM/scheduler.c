@@ -58,12 +58,20 @@ static int update_timer_list(GlobalContext *global)
     return (int) wait_timeout_ms;
 }
 
+static inline int scheduler_watchdog_slot(GlobalContext *global)
+{
+#ifndef AVM_NO_SMP
+    int scheduler_id = smp_scheduler_id(global);
+    return scheduler_id < 0 ? 0 : scheduler_id;
+#else
+    UNUSED(global);
+    return 0;
+#endif
+}
+
 static inline void scheduler_record_progress(GlobalContext *global)
 {
-    int scheduler_id = smp_scheduler_id(global);
-    if (scheduler_id < 0) {
-        scheduler_id = 0;
-    }
+    int scheduler_id = scheduler_watchdog_slot(global);
     if (UNLIKELY(scheduler_id >= AVM_SCHEDULER_WATCHDOG_MAX_SLOTS)) {
         fprintf(stderr, "WARNING: scheduler_id %d exceeds AVM_SCHEDULER_WATCHDOG_MAX_SLOTS (%d), watchdog coverage lost\n",
             scheduler_id, AVM_SCHEDULER_WATCHDOG_MAX_SLOTS);
