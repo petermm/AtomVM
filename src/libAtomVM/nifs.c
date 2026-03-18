@@ -246,6 +246,8 @@ static term nif_atomvm_get_start_beam(Context *ctx, int argc, term argv[]);
 static term nif_atomvm_read_priv(Context *ctx, int argc, term argv[]);
 static term nif_atomvm_get_creation(Context *ctx, int argc, term argv[]);
 static term nif_atomvm_debug_stall(Context *ctx, int argc, term argv[]);
+static term nif_atomvm_scheduler_watchdog_status(Context *ctx, int argc, term argv[]);
+static term nif_atomvm_scheduler_watchdog_mode(Context *ctx, int argc, term argv[]);
 static term nif_console_print(Context *ctx, int argc, term argv[]);
 static term nif_base64_encode(Context *ctx, int argc, term argv[]);
 static term nif_base64_decode(Context *ctx, int argc, term argv[]);
@@ -777,6 +779,14 @@ static const struct Nif atomvm_get_creation_nif = {
 static const struct Nif atomvm_debug_stall_nif = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_atomvm_debug_stall
+};
+static const struct Nif atomvm_scheduler_watchdog_status_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomvm_scheduler_watchdog_status
+};
+static const struct Nif atomvm_scheduler_watchdog_mode_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomvm_scheduler_watchdog_mode
 };
 static const struct Nif console_print_nif = {
     .base.type = NIFFunctionType,
@@ -5102,6 +5112,102 @@ static term nif_atomvm_debug_stall(Context *ctx, int argc, term argv[])
 
         return OK_ATOM;
     }
+}
+
+static term nif_atomvm_scheduler_watchdog_status(Context *ctx, int argc, term argv[])
+{
+    UNUSED(argc);
+    UNUSED(argv);
+
+    GlobalContext *glb = ctx->global;
+    uint32_t timeout_ms = glb->scheduler_watchdog_timeout_millis;
+    uint32_t poll_ms = glb->scheduler_watchdog_poll_interval_millis;
+    unsigned int active_mask = glb->scheduler_heartbeat_active_mask;
+    int log_only = glb->scheduler_watchdog_log_only;
+    uint32_t now_ms = (uint32_t) sys_monotonic_time_u64_to_ms(sys_monotonic_time_u64());
+
+    // Count active slots for the ages sub-list
+    int active_count = 0;
+    for (int i = 0; i < AVM_SCHEDULER_WATCHDOG_MAX_SLOTS; i++) {
+        if (active_mask & (1U << i)) {
+            active_count++;
+        }
+    }
+
+    // proplist: [{mode, restart|log_only}, {timeout_ms, N}, {poll_interval_ms, N},
+    //            {active_mask, N}, {ages, [{SlotId, AgeMs}, ...]}]
+    // 5 outer tuples + 5 cons cells + active_count inner tuples + active_count cons cells
+    size_t needed = LIST_SIZE(5, TUPLE_SIZE(2)) + LIST_SIZE(active_count, TUPLE_SIZE(2));
+    if (UNLIKELY(memory_ensure_free_opt(ctx, needed, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
+        RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+    }
+
+    // Build ages sub-list (innermost first)
+    term ages_list = term_nil();
+    for (int i = AVM_SCHEDULER_WATCHDOG_MAX_SLOTS - 1; i >= 0; i--) {
+        if (!(active_mask & (1U << i))) {
+            continue;
+        }
+        uint32_t age_ms = now_ms - glb->scheduler_last_activity_millis[i];
+        term age_tuple = term_alloc_tuple(2, &ctx->heap);
+        term_put_tuple_element(age_tuple, 0, term_from_int(i));
+        term_put_tuple_element(age_tuple, 1, term_from_int((avm_int_t) age_ms));
+        ages_list = term_list_prepend(age_tuple, ages_list, &ctx->heap);
+    }
+
+    term mode_atom = log_only
+        ? globalcontext_make_atom(glb, ATOM_STR("\x8", "log_only"))
+        : globalcontext_make_atom(glb, ATOM_STR("\x7", "restart"));
+
+    term result = term_nil();
+
+    term ages_kv = term_alloc_tuple(2, &ctx->heap);
+    term_put_tuple_element(ages_kv, 0, globalcontext_make_atom(glb, ATOM_STR("\x4", "ages")));
+    term_put_tuple_element(ages_kv, 1, ages_list);
+    result = term_list_prepend(ages_kv, result, &ctx->heap);
+
+    term mask_kv = term_alloc_tuple(2, &ctx->heap);
+    term_put_tuple_element(mask_kv, 0, globalcontext_make_atom(glb, ATOM_STR("\xB", "active_mask")));
+    term_put_tuple_element(mask_kv, 1, term_from_int((avm_int_t) active_mask));
+    result = term_list_prepend(mask_kv, result, &ctx->heap);
+
+    term poll_kv = term_alloc_tuple(2, &ctx->heap);
+    term_put_tuple_element(poll_kv, 0, globalcontext_make_atom(glb, ATOM_STR("\x10", "poll_interval_ms")));
+    term_put_tuple_element(poll_kv, 1, term_from_int((avm_int_t) poll_ms));
+    result = term_list_prepend(poll_kv, result, &ctx->heap);
+
+    term timeout_kv = term_alloc_tuple(2, &ctx->heap);
+    term_put_tuple_element(timeout_kv, 0, globalcontext_make_atom(glb, ATOM_STR("\xA", "timeout_ms")));
+    term_put_tuple_element(timeout_kv, 1, term_from_int((avm_int_t) timeout_ms));
+    result = term_list_prepend(timeout_kv, result, &ctx->heap);
+
+    term mode_kv = term_alloc_tuple(2, &ctx->heap);
+    term_put_tuple_element(mode_kv, 0, globalcontext_make_atom(glb, ATOM_STR("\x4", "mode")));
+    term_put_tuple_element(mode_kv, 1, mode_atom);
+    result = term_list_prepend(mode_kv, result, &ctx->heap);
+
+    return result;
+}
+
+static term nif_atomvm_scheduler_watchdog_mode(Context *ctx, int argc, term argv[])
+{
+    UNUSED(argc);
+
+    GlobalContext *glb = ctx->global;
+    term mode = argv[0];
+
+    term log_only_atom = globalcontext_make_atom(glb, ATOM_STR("\x8", "log_only"));
+    term restart_atom = globalcontext_make_atom(glb, ATOM_STR("\x7", "restart"));
+
+    if (mode == log_only_atom) {
+        glb->scheduler_watchdog_log_only = 1;
+    } else if (mode == restart_atom) {
+        glb->scheduler_watchdog_log_only = 0;
+    } else {
+        RAISE_ERROR(BADARG_ATOM);
+    }
+
+    return OK_ATOM;
 }
 
 static term nif_console_print(Context *ctx, int argc, term argv[])

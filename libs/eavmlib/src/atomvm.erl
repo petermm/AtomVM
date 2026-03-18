@@ -47,7 +47,9 @@
     posix_closedir/1,
     posix_readdir/1,
     get_creation/0,
-    subprocess/4
+    subprocess/4,
+    scheduler_watchdog_status/0,
+    scheduler_watchdog_mode/1
 ]).
 
 -export_type([
@@ -386,4 +388,36 @@ get_creation() ->
 ) ->
     {ok, non_neg_integer(), posix_fd()} | {error, posix_error()}.
 subprocess(_Path, _Args, _Env, _Options) ->
+    erlang:nif_error(undefined).
+
+%%-----------------------------------------------------------------------------
+%% @returns A proplist with the current watchdog state.
+%% @doc     Return the current scheduler watchdog status.
+%%
+%%          The returned proplist contains:
+%%          <ul>
+%%              <li>`{mode, restart | log_only}' - current watchdog action</li>
+%%              <li>`{timeout_ms, non_neg_integer()}' - stall threshold</li>
+%%              <li>`{poll_interval_ms, non_neg_integer()}' - check interval</li>
+%%              <li>`{active_mask, non_neg_integer()}' - bitmask of active scheduler slots</li>
+%%              <li>`{ages, [{SlotId, AgeMs}]}' - per-slot heartbeat ages in milliseconds</li>
+%%          </ul>
+%% @end
+%%-----------------------------------------------------------------------------
+-spec scheduler_watchdog_status() -> [{atom(), term()}].
+scheduler_watchdog_status() ->
+    erlang:nif_error(undefined).
+
+%%-----------------------------------------------------------------------------
+%% @param   Mode `restart' or `log_only'
+%% @returns `ok'
+%% @doc     Set the scheduler watchdog action mode.
+%%
+%%          In `restart' mode (default), the watchdog reboots the system when a
+%%          stalled scheduler is detected. In `log_only' mode, the stall is
+%%          logged but no reboot occurs. Use `log_only' for testing.
+%% @end
+%%-----------------------------------------------------------------------------
+-spec scheduler_watchdog_mode(Mode :: restart | log_only) -> ok.
+scheduler_watchdog_mode(_Mode) ->
     erlang:nif_error(undefined).

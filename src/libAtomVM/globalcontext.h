@@ -169,6 +169,7 @@ struct GlobalContext
     unsigned int ATOMIC scheduler_heartbeat_active_mask;
     uint32_t scheduler_watchdog_timeout_millis;
     uint32_t scheduler_watchdog_poll_interval_millis;
+    int ATOMIC scheduler_watchdog_log_only;
 
 #ifndef AVM_NO_SMP
     SpinLock env_spinlock;

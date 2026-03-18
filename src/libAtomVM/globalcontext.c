@@ -128,6 +128,7 @@ GlobalContext *globalcontext_new(void)
     glb->scheduler_heartbeat_active_mask = 0;
     glb->scheduler_watchdog_timeout_millis = 0;
     glb->scheduler_watchdog_poll_interval_millis = 0;
+    glb->scheduler_watchdog_log_only = 0;
 
     glb->node_name = NONODE_AT_NOHOST_ATOM;
     glb->creation = 0;

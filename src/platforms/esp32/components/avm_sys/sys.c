@@ -249,9 +249,14 @@ static void *scheduler_watchdog_thread_loop(void *arg)
                     }
                     uint32_t age_ms = now_ms - glb->scheduler_last_activity_millis[i];
                     if (age_ms > timeout_ms) {
-                        ESP_LOGE(TAG, "AtomVM scheduler heartbeat stale on scheduler slot %d. active_mask=0x%x age=%" PRIu32 " timeout=%" PRIu32 " ms. Rebooting.",
-                            i, active_mask, age_ms, timeout_ms);
-                        esp_restart();
+                        if (glb->scheduler_watchdog_log_only) {
+                            ESP_LOGW(TAG, "AtomVM scheduler heartbeat stale on scheduler slot %d. active_mask=0x%x age=%" PRIu32 " timeout=%" PRIu32 " ms (log_only mode).",
+                                i, active_mask, age_ms, timeout_ms);
+                        } else {
+                            ESP_LOGE(TAG, "AtomVM scheduler heartbeat stale on scheduler slot %d. active_mask=0x%x age=%" PRIu32 " timeout=%" PRIu32 " ms. Rebooting.",
+                                i, active_mask, age_ms, timeout_ms);
+                            esp_restart();
+                        }
                     }
                 }
             }
