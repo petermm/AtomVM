@@ -61,11 +61,13 @@ endfunction()
 
 compile_erlang(test_clocks "")
 compile_erlang(test_smp "")
+compile_erlang(test_scheduler_watchdog "")
 compile_erlang(test_crypto ../../../esp32/test/main/test_erl_sources/)
 
 set(erlang_test_beams
     test_clocks.beam
     test_smp.beam
+    test_scheduler_watchdog.beam
     test_crypto.beam
 )
 

@@ -168,6 +168,12 @@ TEST_CASE(test_smp)
     TEST_ASSERT_EQUAL_INT(OK_ATOM, ret_value);
 }
 
+TEST_CASE(test_scheduler_watchdog)
+{
+    term ret_value = avm_test_case("test_scheduler_watchdog.beam");
+    TEST_ASSERT_EQUAL_INT(OK_ATOM, ret_value);
+}
+
 /* newlib stubs to get AVM_ABORT to work */
 pid_t _getpid()
 {
