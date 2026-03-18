@@ -165,7 +165,7 @@ struct GlobalContext
 
     // Per-scheduler heartbeats used by platform watchdogs to detect when all
     // active schedulers have stopped making progress.
-    uint32_t scheduler_last_activity_millis[AVM_SCHEDULER_WATCHDOG_MAX_SLOTS];
+    uint32_t ATOMIC scheduler_last_activity_millis[AVM_SCHEDULER_WATCHDOG_MAX_SLOTS];
     unsigned int ATOMIC scheduler_heartbeat_active_mask;
     uint32_t scheduler_watchdog_timeout_millis;
     uint32_t scheduler_watchdog_poll_interval_millis;

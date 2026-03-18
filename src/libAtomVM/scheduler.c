@@ -64,7 +64,11 @@ static inline void scheduler_record_progress(GlobalContext *global)
     if (scheduler_id < 0) {
         scheduler_id = 0;
     }
-    scheduler_id %= AVM_SCHEDULER_WATCHDOG_MAX_SLOTS;
+    if (UNLIKELY(scheduler_id >= AVM_SCHEDULER_WATCHDOG_MAX_SLOTS)) {
+        fprintf(stderr, "WARNING: scheduler_id %d exceeds AVM_SCHEDULER_WATCHDOG_MAX_SLOTS (%d), watchdog coverage lost\n",
+            scheduler_id, AVM_SCHEDULER_WATCHDOG_MAX_SLOTS);
+        return;
+    }
     global->scheduler_last_activity_millis[scheduler_id] = (uint32_t) sys_monotonic_time_u64_to_ms(sys_monotonic_time_u64());
 
     unsigned int active_bit = 1U << scheduler_id;

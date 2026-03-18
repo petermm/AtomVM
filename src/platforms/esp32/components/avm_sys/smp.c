@@ -62,16 +62,24 @@ struct RWLock
 static __thread bool g_sub_main_thread = false;
 static __thread int g_scheduler_id = 0;
 static uint32_t _Atomic g_pinned_cores = 0x1;
+static pthread_mutex_t g_scheduler_id_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int g_next_scheduler_id = 1;
 
 static void *scheduler_thread_entry_point(void *arg)
 {
     g_sub_main_thread = true;
+    if (UNLIKELY(pthread_mutex_lock(&g_scheduler_id_mutex))) {
+        AVM_ABORT();
+    }
+    g_scheduler_id = g_next_scheduler_id++;
+    if (UNLIKELY(pthread_mutex_unlock(&g_scheduler_id_mutex))) {
+        AVM_ABORT();
+    }
 #if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0))
     BaseType_t core = xTaskGetCoreID(NULL);
 #else
     BaseType_t core = xTaskGetAffinity(NULL);
 #endif
-    g_scheduler_id = core >= 0 ? (int) core : 1;
     void *result = (void *) scheduler_entry_point((GlobalContext *) arg);
     if (core != -1) {
         uint32_t desired = 1;

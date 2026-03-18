@@ -243,22 +243,16 @@ static void *scheduler_watchdog_thread_loop(void *arg)
             unsigned int active_mask = glb->scheduler_heartbeat_active_mask;
             if (active_mask != 0) {
                 uint32_t now_ms = (uint32_t) sys_monotonic_time_u64_to_ms(sys_monotonic_time_u64());
-                bool all_stale = true;
                 for (int i = 0; i < AVM_SCHEDULER_WATCHDOG_MAX_SLOTS; i++) {
                     if (!(active_mask & (1U << i))) {
                         continue;
                     }
                     uint32_t age_ms = now_ms - glb->scheduler_last_activity_millis[i];
-                    if (age_ms <= timeout_ms) {
-                        all_stale = false;
-                        break;
+                    if (age_ms > timeout_ms) {
+                        ESP_LOGE(TAG, "AtomVM scheduler heartbeat stale on scheduler slot %d. active_mask=0x%x age=%" PRIu32 " timeout=%" PRIu32 " ms. Rebooting.",
+                            i, active_mask, age_ms, timeout_ms);
+                        esp_restart();
                     }
-                }
-
-                if (all_stale) {
-                    ESP_LOGE(TAG, "AtomVM scheduler heartbeat stale on all active schedulers. active_mask=0x%x timeout=%" PRIu32 " ms. Rebooting.",
-                        active_mask, timeout_ms);
-                    esp_restart();
                 }
             }
         }
