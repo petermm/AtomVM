@@ -29,6 +29,7 @@ set(ERLANG_MODULES
     test_http_server
     test_mdns
     test_port
+    test_scheduler_watchdog
     test_timer_manager
 )
 
