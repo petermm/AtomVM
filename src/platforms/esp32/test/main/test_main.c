@@ -633,6 +633,12 @@ TEST_CASE("test_twdt", "[test_run]")
 }
 #endif
 
+TEST_CASE("test_scheduler_watchdog", "[test_run]")
+{
+    term ret_value = avm_test_case("test_scheduler_watchdog.beam");
+    TEST_ASSERT(ret_value == OK_ATOM);
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
