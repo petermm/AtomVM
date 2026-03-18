@@ -245,6 +245,7 @@ static term nif_atomvm_close_avm_pack(Context *ctx, int argc, term argv[]);
 static term nif_atomvm_get_start_beam(Context *ctx, int argc, term argv[]);
 static term nif_atomvm_read_priv(Context *ctx, int argc, term argv[]);
 static term nif_atomvm_get_creation(Context *ctx, int argc, term argv[]);
+static term nif_atomvm_debug_stall(Context *ctx, int argc, term argv[]);
 static term nif_console_print(Context *ctx, int argc, term argv[]);
 static term nif_base64_encode(Context *ctx, int argc, term argv[]);
 static term nif_base64_decode(Context *ctx, int argc, term argv[]);
@@ -772,6 +773,10 @@ static const struct Nif atomvm_read_priv_nif = {
 static const struct Nif atomvm_get_creation_nif = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_atomvm_get_creation
+};
+static const struct Nif atomvm_debug_stall_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomvm_debug_stall
 };
 static const struct Nif console_print_nif = {
     .base.type = NIFFunctionType,
@@ -5069,6 +5074,34 @@ static term nif_atomvm_get_creation(Context *ctx, int argc, term argv[])
     }
 
     return term_make_maybe_boxed_int64(ctx->global->creation, &ctx->heap);
+}
+
+static term nif_atomvm_debug_stall(Context *ctx, int argc, term argv[])
+{
+    UNUSED(ctx);
+
+    volatile uint32_t spin = 0;
+    if (argc == 0) {
+        // Intentionally wedge the current scheduler thread for watchdog and
+        // deadlock testing. This never returns.
+        while (true) {
+            spin++;
+        }
+    } else {
+        VALIDATE_VALUE(argv[0], term_is_any_integer);
+
+        avm_int64_t timeout_ms = term_maybe_unbox_int64(argv[0]);
+        if (UNLIKELY(timeout_ms < 0)) {
+            RAISE_ERROR(BADARG_ATOM);
+        }
+
+        uint64_t deadline = sys_monotonic_time_u64() + sys_monotonic_time_ms_to_u64((uint64_t) timeout_ms);
+        while (sys_monotonic_time_u64() < deadline) {
+            spin++;
+        }
+
+        return OK_ATOM;
+    }
 }
 
 static term nif_console_print(Context *ctx, int argc, term argv[])

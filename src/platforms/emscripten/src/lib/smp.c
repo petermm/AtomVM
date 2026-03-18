@@ -47,9 +47,19 @@ struct RWLock
 };
 
 static _Thread_local bool g_sub_main_thread = false;
+static _Thread_local int g_scheduler_id = 0;
+static pthread_mutex_t g_scheduler_id_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int g_next_scheduler_id = 1;
 
 static void *scheduler_thread_entry_point(void *arg)
 {
+    if (UNLIKELY(pthread_mutex_lock(&g_scheduler_id_mutex))) {
+        AVM_ABORT();
+    }
+    g_scheduler_id = g_next_scheduler_id++;
+    if (UNLIKELY(pthread_mutex_unlock(&g_scheduler_id_mutex))) {
+        AVM_ABORT();
+    }
     g_sub_main_thread = true;
     return (void *) (uintptr_t) scheduler_entry_point((GlobalContext *) arg);
 }
@@ -69,6 +79,12 @@ bool smp_is_main_thread(GlobalContext *glb)
 {
     UNUSED(glb);
     return !g_sub_main_thread;
+}
+
+int smp_scheduler_id(GlobalContext *glb)
+{
+    UNUSED(glb);
+    return g_scheduler_id;
 }
 
 Mutex *smp_mutex_create()

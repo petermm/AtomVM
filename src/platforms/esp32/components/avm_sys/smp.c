@@ -60,17 +60,19 @@ struct RWLock
 
 // ESP-IDF SDK explicitly mentions support for C11 with "__thread" keyword
 static __thread bool g_sub_main_thread = false;
+static __thread int g_scheduler_id = 0;
 static uint32_t _Atomic g_pinned_cores = 0x1;
 
 static void *scheduler_thread_entry_point(void *arg)
 {
     g_sub_main_thread = true;
-    void *result = (void *) scheduler_entry_point((GlobalContext *) arg);
 #if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0))
     BaseType_t core = xTaskGetCoreID(NULL);
 #else
     BaseType_t core = xTaskGetAffinity(NULL);
 #endif
+    g_scheduler_id = core >= 0 ? (int) core : 1;
+    void *result = (void *) scheduler_entry_point((GlobalContext *) arg);
     if (core != -1) {
         uint32_t desired = 1;
         uint32_t expected = 3;
@@ -130,6 +132,12 @@ bool smp_is_main_thread(GlobalContext *glb)
 {
     UNUSED(glb);
     return !g_sub_main_thread;
+}
+
+int smp_scheduler_id(GlobalContext *glb)
+{
+    UNUSED(glb);
+    return g_sub_main_thread ? g_scheduler_id : 0;
 }
 
 Mutex *smp_mutex_create()

@@ -262,6 +262,14 @@ void smp_scheduler_start(GlobalContext *glb);
  */
 bool smp_is_main_thread(GlobalContext *glb);
 
+/**
+ * @brief Return a small stable identifier for the current scheduler thread.
+ *
+ * @details In non-SMP builds this is always 0. In SMP builds, the main
+ * scheduler is 0 and other schedulers return a positive small integer.
+ */
+int smp_scheduler_id(GlobalContext *glb);
+
 #define SMP_SPINLOCK_LOCK(spinlock) smp_spinlock_lock(spinlock)
 #define SMP_SPINLOCK_TRYLOCK(spinlock) smp_spinlock_trylock(spinlock)
 #define SMP_SPINLOCK_UNLOCK(spinlock) smp_spinlock_unlock(spinlock)
@@ -289,6 +297,12 @@ bool smp_is_main_thread(GlobalContext *glb);
 #define SMP_RWLOCK_TRYRDLOCK(lock)
 #define SMP_RWLOCK_WRLOCK(lock)
 #define SMP_RWLOCK_UNLOCK(lock)
+
+static inline int smp_scheduler_id(GlobalContext *glb)
+{
+    UNUSED(glb);
+    return 0;
+}
 #endif
 
 #endif

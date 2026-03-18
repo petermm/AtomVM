@@ -47,30 +47,47 @@ struct RWLock
 // Thread local storage with _Thread_local C11 keyword crashes on i386 with
 // valgrind (Ubutun 18 & 20, gcc 6-10). Use POSIX API instead.
 #ifdef __i386__
-static pthread_key_t g_sub_main_thread_key;
-static pthread_once_t g_sub_main_thread_key_once = PTHREAD_ONCE_INIT;
+static pthread_key_t g_scheduler_id_key;
+static pthread_once_t g_scheduler_id_key_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t g_scheduler_id_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int g_next_scheduler_id = 1;
 
-static void sub_main_thread_make_key()
+static void scheduler_id_make_key()
 {
-    if (UNLIKELY(pthread_key_create(&g_sub_main_thread_key, NULL))) {
+    if (UNLIKELY(pthread_key_create(&g_scheduler_id_key, NULL))) {
         AVM_ABORT();
     }
 }
 #else
-static _Thread_local bool g_sub_main_thread = false;
+static _Thread_local int g_scheduler_id = 0;
+static pthread_mutex_t g_scheduler_id_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int g_next_scheduler_id = 1;
 #endif
 
 static void *scheduler_thread_entry_point(void *arg)
 {
 #ifdef __i386__
-    if (UNLIKELY(pthread_once(&g_sub_main_thread_key_once, sub_main_thread_make_key))) {
+    if (UNLIKELY(pthread_once(&g_scheduler_id_key_once, scheduler_id_make_key))) {
         AVM_ABORT();
     }
-    if (UNLIKELY(pthread_setspecific(g_sub_main_thread_key, (void *) 1))) {
+    if (UNLIKELY(pthread_mutex_lock(&g_scheduler_id_mutex))) {
+        AVM_ABORT();
+    }
+    int scheduler_id = g_next_scheduler_id++;
+    if (UNLIKELY(pthread_mutex_unlock(&g_scheduler_id_mutex))) {
+        AVM_ABORT();
+    }
+    if (UNLIKELY(pthread_setspecific(g_scheduler_id_key, (void *) (uintptr_t) scheduler_id))) {
         AVM_ABORT();
     }
 #else
-    g_sub_main_thread = true;
+    if (UNLIKELY(pthread_mutex_lock(&g_scheduler_id_mutex))) {
+        AVM_ABORT();
+    }
+    g_scheduler_id = g_next_scheduler_id++;
+    if (UNLIKELY(pthread_mutex_unlock(&g_scheduler_id_mutex))) {
+        AVM_ABORT();
+    }
 #endif
     return (void *) (uintptr_t) scheduler_entry_point((GlobalContext *) arg);
 }
@@ -90,10 +107,21 @@ bool smp_is_main_thread(GlobalContext *glb)
 {
     UNUSED(glb);
 #ifdef __i386__
-    (void) pthread_once(&g_sub_main_thread_key_once, sub_main_thread_make_key);
-    return pthread_getspecific(g_sub_main_thread_key) == NULL;
+    (void) pthread_once(&g_scheduler_id_key_once, scheduler_id_make_key);
+    return pthread_getspecific(g_scheduler_id_key) == NULL;
 #else
-    return !g_sub_main_thread;
+    return g_scheduler_id == 0;
+#endif
+}
+
+int smp_scheduler_id(GlobalContext *glb)
+{
+    UNUSED(glb);
+#ifdef __i386__
+    (void) pthread_once(&g_scheduler_id_key_once, scheduler_id_make_key);
+    return (int) (uintptr_t) pthread_getspecific(g_scheduler_id_key);
+#else
+    return g_scheduler_id;
 #endif
 }
 

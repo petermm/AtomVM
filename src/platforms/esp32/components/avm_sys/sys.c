@@ -21,6 +21,8 @@
 #include "sys.h"
 #include "esp32_sys.h"
 
+#include <sdkconfig.h>
+
 #include "avmpack.h"
 #include "defaultatoms.h"
 #include "erl_nif.h"
@@ -42,6 +44,7 @@
 #include "freertos/task.h"
 #include <esp_log.h>
 #include <esp_partition.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -72,6 +75,9 @@
 
 static void *select_thread_loop(void *);
 static void select_thread_signal(struct ESP32PlatformData *platform);
+#if CONFIG_AVM_ENABLE_SCHEDULER_WATCHDOG
+static void *scheduler_watchdog_thread_loop(void *);
+#endif
 
 // clang-format off
 static const char *const esp_free_heap_size_atom = "\x14" "esp32_free_heap_size";
@@ -220,11 +226,53 @@ const ErlNifResourceTypeInit partition_mmap_resource_type_init = {
     .dtor = partition_mmap_dtor,
 };
 
+#if CONFIG_AVM_ENABLE_SCHEDULER_WATCHDOG
+static void *scheduler_watchdog_thread_loop(void *arg)
+{
+    GlobalContext *glb = arg;
+    struct ESP32PlatformData *platform = glb->platform_data;
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(glb->scheduler_watchdog_poll_interval_millis));
+        if (platform->scheduler_watchdog_exit) {
+            return NULL;
+        }
+
+        uint32_t timeout_ms = glb->scheduler_watchdog_timeout_millis;
+        if (timeout_ms != 0) {
+            unsigned int active_mask = glb->scheduler_heartbeat_active_mask;
+            if (active_mask != 0) {
+                uint32_t now_ms = (uint32_t) sys_monotonic_time_u64_to_ms(sys_monotonic_time_u64());
+                bool all_stale = true;
+                for (int i = 0; i < AVM_SCHEDULER_WATCHDOG_MAX_SLOTS; i++) {
+                    if (!(active_mask & (1U << i))) {
+                        continue;
+                    }
+                    uint32_t age_ms = now_ms - glb->scheduler_last_activity_millis[i];
+                    if (age_ms <= timeout_ms) {
+                        all_stale = false;
+                        break;
+                    }
+                }
+
+                if (all_stale) {
+                    ESP_LOGE(TAG, "AtomVM scheduler heartbeat stale on all active schedulers. active_mask=0x%x timeout=%" PRIu32 " ms. Rebooting.",
+                        active_mask, timeout_ms);
+                    esp_restart();
+                }
+            }
+        }
+    }
+}
+#endif
+
 void sys_init_platform(GlobalContext *glb)
 {
     struct ESP32PlatformData *platform = malloc(sizeof(struct ESP32PlatformData));
     glb->platform_data = platform;
     platform->select_thread_exit = false;
+    platform->scheduler_watchdog_exit = false;
+    platform->scheduler_watchdog_thread_initialized = false;
     platform->select_events_poll_count = -1;
     esp_vfs_eventfd_config_t eventfd_config = ESP_VFS_EVENTD_CONFIG_DEFAULT();
     esp_err_t err = esp_vfs_eventfd_register(&eventfd_config);
@@ -247,6 +295,20 @@ void sys_init_platform(GlobalContext *glb)
     if (UNLIKELY(pthread_create(&platform->select_thread, NULL, select_thread_loop, glb))) {
         AVM_ABORT();
     }
+
+#if CONFIG_AVM_ENABLE_SCHEDULER_WATCHDOG
+    glb->scheduler_last_activity_millis[0] = (uint32_t) sys_monotonic_time_u64_to_ms(sys_monotonic_time_u64());
+    glb->scheduler_heartbeat_active_mask = 1U;
+    glb->scheduler_watchdog_timeout_millis = (uint32_t) CONFIG_AVM_SCHEDULER_WATCHDOG_TIMEOUT_SECONDS * 1000U;
+    glb->scheduler_watchdog_poll_interval_millis = (uint32_t) CONFIG_AVM_SCHEDULER_WATCHDOG_POLL_INTERVAL_MS;
+    if (UNLIKELY(pthread_create(&platform->scheduler_watchdog_thread, NULL, scheduler_watchdog_thread_loop, glb))) {
+        AVM_ABORT();
+    }
+    platform->scheduler_watchdog_thread_initialized = true;
+    ESP_LOGI(TAG, "AtomVM scheduler watchdog enabled. timeout=%" PRIu32 " ms poll=%" PRIu32 " ms",
+        glb->scheduler_watchdog_timeout_millis, glb->scheduler_watchdog_poll_interval_millis);
+#endif
+
 #ifndef AVM_NO_SMP
     // Use the ESP-IDF API to change the default thread attributes
     // We use the current main thread priority.
@@ -301,8 +363,16 @@ void sys_free_platform(GlobalContext *glb)
 {
     struct ESP32PlatformData *platform = glb->platform_data;
     platform->select_thread_exit = true;
+#if CONFIG_AVM_ENABLE_SCHEDULER_WATCHDOG
+    platform->scheduler_watchdog_exit = true;
+#endif
     select_thread_signal(platform);
     pthread_join(platform->select_thread, NULL);
+#if CONFIG_AVM_ENABLE_SCHEDULER_WATCHDOG
+    if (platform->scheduler_watchdog_thread_initialized) {
+        pthread_join(platform->scheduler_watchdog_thread, NULL);
+    }
+#endif
     close(platform->signal_fd);
     if (platform->eventfd_registered) {
         if (UNLIKELY(esp_vfs_eventfd_unregister() != ESP_OK)) {

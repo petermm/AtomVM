@@ -58,6 +58,30 @@ menu "AtomVM configuration"
         help
             Print the C module and line number when a VM abort occurs.
 
+    config AVM_ENABLE_SCHEDULER_WATCHDOG
+        bool "Enable scheduler heartbeat watchdog"
+        default n
+        help
+            Reboot the device if AtomVM scheduler activity stops for too long.
+
+    if AVM_ENABLE_SCHEDULER_WATCHDOG
+
+    config AVM_SCHEDULER_WATCHDOG_TIMEOUT_SECONDS
+        int "Scheduler watchdog timeout (seconds)"
+        range 5 3600
+        default 60
+        help
+            Reboot if AtomVM does not report scheduler progress within this timeout.
+
+    config AVM_SCHEDULER_WATCHDOG_POLL_INTERVAL_MS
+        int "Scheduler watchdog poll interval (ms)"
+        range 100 5000
+        default 1000
+        help
+            Maximum idle poll interval and watchdog check cadence while the scheduler watchdog is enabled.
+
+    endif
+
     config ENABLE_REALLOC_GC
         bool  "Enable experimental optimized realloc garbage collection."
         default n

@@ -58,6 +58,41 @@ static int update_timer_list(GlobalContext *global)
     return (int) wait_timeout_ms;
 }
 
+static inline void scheduler_record_progress(GlobalContext *global)
+{
+    int scheduler_id = smp_scheduler_id(global);
+    if (scheduler_id < 0) {
+        scheduler_id = 0;
+    }
+    scheduler_id %= AVM_SCHEDULER_WATCHDOG_MAX_SLOTS;
+    global->scheduler_last_activity_millis[scheduler_id] = (uint32_t) sys_monotonic_time_u64_to_ms(sys_monotonic_time_u64());
+
+    unsigned int active_bit = 1U << scheduler_id;
+#ifndef AVM_NO_SMP
+    unsigned int expected = global->scheduler_heartbeat_active_mask;
+    while (!(expected & active_bit)) {
+        unsigned int desired = expected | active_bit;
+        if (ATOMIC_COMPARE_EXCHANGE_WEAK_INT(&global->scheduler_heartbeat_active_mask, &expected, desired)) {
+            break;
+        }
+    }
+#else
+    global->scheduler_heartbeat_active_mask |= active_bit;
+#endif
+}
+
+static inline int scheduler_cap_idle_wait(GlobalContext *global, int wait_timeout)
+{
+    uint32_t poll_interval = global->scheduler_watchdog_poll_interval_millis;
+    if (poll_interval == 0) {
+        return wait_timeout;
+    }
+    if (wait_timeout < 0 || wait_timeout > (int) poll_interval) {
+        return (int) poll_interval;
+    }
+    return wait_timeout;
+}
+
 Context *scheduler_wait(Context *ctx)
 {
 #ifdef DEBUG_PRINT_READY_PROCESSES
@@ -168,6 +203,7 @@ static Context *scheduler_run0(GlobalContext *global)
     }
     bool main_thread = smp_is_main_thread(global);
 #endif
+    scheduler_record_progress(global);
     do {
 #ifndef AVM_NO_SMP
         // We keep every scheduler threads but one in condition variable.
@@ -231,6 +267,7 @@ static Context *scheduler_run0(GlobalContext *global)
         SMP_SPINLOCK_LOCK(&global->timer_spinlock);
         int32_t wait_timeout = update_timer_list(global);
         SMP_SPINLOCK_UNLOCK(&global->timer_spinlock);
+        wait_timeout = scheduler_cap_idle_wait(global, wait_timeout);
 
         SMP_SPINLOCK_LOCK(&global->processes_spinlock);
         // Pick first ready which is not running.
@@ -258,6 +295,7 @@ static Context *scheduler_run0(GlobalContext *global)
         } else {
             sys_poll_events(global, SYS_POLL_EVENTS_DO_NOT_WAIT);
         }
+        scheduler_record_progress(global);
 #ifdef AVM_TASK_DRIVER_ENABLED
         globalcontext_process_task_driver_queues(global);
 #endif
@@ -269,6 +307,7 @@ static Context *scheduler_run0(GlobalContext *global)
     smp_condvar_signal(global->schedulers_cv);
     SMP_MUTEX_UNLOCK(global->schedulers_mutex);
 #endif
+    scheduler_record_progress(global);
 
     return result;
 }

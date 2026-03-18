@@ -124,6 +124,10 @@ GlobalContext *globalcontext_new(void)
 #if !defined(AVM_NO_SMP) && ATOMIC_LLONG_LOCK_FREE != 2
     smp_spinlock_init(&glb->ref_ticks_spinlock);
 #endif
+    memset(glb->scheduler_last_activity_millis, 0, sizeof(glb->scheduler_last_activity_millis));
+    glb->scheduler_heartbeat_active_mask = 0;
+    glb->scheduler_watchdog_timeout_millis = 0;
+    glb->scheduler_watchdog_poll_interval_millis = 0;
 
     glb->node_name = NONODE_AT_NOHOST_ATOM;
     glb->creation = 0;

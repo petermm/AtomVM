@@ -28,6 +28,8 @@
 
 -export([
     platform/0,
+    debug_stall/0,
+    debug_stall/1,
     random/0,
     rand_bytes/1,
     read_priv/2,
@@ -101,6 +103,30 @@
 %%-----------------------------------------------------------------------------
 -spec platform() -> platform_name().
 platform() ->
+    erlang:nif_error(undefined).
+
+%%-----------------------------------------------------------------------------
+%% @doc     Intentionally wedge the current scheduler thread in native code.
+%%
+%% This function never returns. It is only intended for testing watchdog and
+%% deadlock recovery behavior. On SMP builds it stalls a single scheduler; to
+%% provoke a VM-wide stall you may need to wedge multiple schedulers or combine
+%% it with a shared native lock.
+%% @end
+%%-----------------------------------------------------------------------------
+-spec debug_stall() -> no_return().
+debug_stall() ->
+    erlang:nif_error(undefined).
+
+%%-----------------------------------------------------------------------------
+%% @doc     Intentionally wedge the current scheduler thread in native code.
+%%
+%% This variant returns after `Milliseconds'. It is intended for testing
+%% watchdog thresholds and partial SMP stalls without forcing a full reboot.
+%% @end
+%%-----------------------------------------------------------------------------
+-spec debug_stall(Milliseconds :: non_neg_integer()) -> ok.
+debug_stall(_Milliseconds) ->
     erlang:nif_error(undefined).
 
 %%-----------------------------------------------------------------------------

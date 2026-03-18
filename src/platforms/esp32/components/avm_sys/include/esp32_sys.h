@@ -59,6 +59,9 @@ struct ESP32PlatformData
 {
     pthread_t select_thread;
     bool select_thread_exit;
+    pthread_t scheduler_watchdog_thread;
+    bool scheduler_watchdog_exit;
+    bool scheduler_watchdog_thread_initialized;
     bool eventfd_registered;
     int signal_fd;
     int ATOMIC select_events_poll_count;
