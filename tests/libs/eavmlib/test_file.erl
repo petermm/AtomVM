@@ -25,8 +25,9 @@
 -include("etest.hrl").
 
 test() ->
-    HasSelect = atomvm:platform() =/= emscripten,
-    HasExecve = atomvm:platform() =/= emscripten,
+    Platform = atomvm:platform(),
+    HasSelect = Platform =/= emscripten andalso Platform =/= emscripten_nosmp,
+    HasExecve = Platform =/= emscripten andalso Platform =/= emscripten_nosmp,
     ok = test_basic_file(),
     ok = test_fifo_select(HasSelect),
     ok = test_gc(HasSelect),

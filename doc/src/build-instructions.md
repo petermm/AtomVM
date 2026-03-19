@@ -1164,11 +1164,55 @@ $ emcmake cmake .. -DAVM_EMSCRIPTEN_ENV=web
 $ emmake make -j
 ```
 
+## Building for `emscripten_nosmp`
+
+`emscripten_nosmp` is a browser-first WebAssembly build that avoids
+`SharedArrayBuffer` and pthread requirements. It preloads `Module.arguments`
+into the Emscripten filesystem before AtomVM starts, so `.beam` and `.avm`
+files should be passed as URLs that can be fetched by the page.
+
+Execute the following commands:
+
+```shell
+$ cd src/platforms/emscripten_nosmp/
+$ mkdir build
+$ cd build
+$ emcmake cmake .. -DAVM_EMSCRIPTEN_ENV=web
+$ emmake make -j
+```
+
+### Running `emscripten_nosmp` test pages
+
+Build first AtomVM for Generic Unix (see above). This will include the web
+server that can serve the nosmp test pages.
+
+In another terminal, compile the specific Erlang test modules:
+
+```shell
+$ cd src/platforms/emscripten_nosmp/build/
+$ make emscripten_nosmp_erlang_test_modules
+```
+
+Then run the Unix web server:
+
+```shell
+$ cd build
+$ ./src/AtomVM examples/emscripten/wasm_webserver.avm
+```
+
+The nosmp test pages are served from:
+
+* `/tests/nosmp/src/test_atomvm.html`
+* `/tests/nosmp/src/test_call.html`
+* `/tests/nosmp/src/test_html5.html`
+* `/tests/nosmp/src/test_websockets.html`
+
 ### Running tests with Cypress
 
-AtomVM WebAssembly port on the web uses SharedArrayBuffer feature which is
-restricted by browsers. Tests require an HTTP server that returns the proper
-HTTP headers.
+The threaded `emscripten` browser build uses `SharedArrayBuffer`, so its
+browser tests require an HTTP server that returns the proper COOP/COEP
+headers. The `emscripten_nosmp` browser tests do not require those headers
+when they are served by `examples/emscripten/wasm_webserver.avm`.
 
 Additionally, tests require [Cypress](https://www.cypress.io). Plus, because of
 a current [bug in Cypress](https://github.com/cypress-io/cypress/issues/19912),

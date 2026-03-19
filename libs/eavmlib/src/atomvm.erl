@@ -61,6 +61,7 @@
 -type platform_name() ::
     generic_unix
     | emscripten
+    | emscripten_nosmp
     | esp32
     | pico
     | stm32.

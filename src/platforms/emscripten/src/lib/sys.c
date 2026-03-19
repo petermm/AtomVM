@@ -28,15 +28,20 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#ifndef AVM_EMSCRIPTEN_NOSMP
 #include <pthread.h>
+#endif
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <emscripten.h>
 #include <emscripten/fetch.h>
+#include <emscripten/html5.h>
 #include <emscripten/promise.h>
+#ifndef AVM_EMSCRIPTEN_NOSMP
 #include <emscripten/threading.h>
+#endif
 
 #include <erl_nif.h>
 #include <erl_nif_priv.h>
@@ -47,6 +52,16 @@
 #include "emscripten_sys.h"
 #include "platform_defaultatoms.h"
 #include "websocket_nifs.h"
+
+#ifdef AVM_EMSCRIPTEN_NOSMP
+#define AVM_UNREGISTER_TARGET_CALLBACK(callback, target) emscripten_set_##callback##_callback(target, NULL, false, NULL)
+#define AVM_UNREGISTER_GLOBAL_CALLBACK(callback) emscripten_set_##callback##_callback(NULL, false, NULL)
+#define AVM_UNREGISTER_SIMPLE_CALLBACK(callback) emscripten_set_##callback##_callback(NULL, NULL)
+#else
+#define AVM_UNREGISTER_TARGET_CALLBACK(callback, target) emscripten_set_##callback##_callback_on_thread(target, NULL, false, NULL, emscripten_main_runtime_thread_id())
+#define AVM_UNREGISTER_GLOBAL_CALLBACK(callback) emscripten_set_##callback##_callback_on_thread(NULL, false, NULL, emscripten_main_runtime_thread_id())
+#define AVM_UNREGISTER_SIMPLE_CALLBACK(callback) emscripten_set_##callback##_callback_on_thread(NULL, NULL, emscripten_main_runtime_thread_id())
+#endif
 
 /**
  * @brief resolve a promise with an int value and destroy it
@@ -100,7 +115,11 @@ static void promise_dtor(ErlNifEnv *caller_env, void *obj)
 
     struct PromiseResource *promise_rsrc = (struct PromiseResource *) obj;
     if (!promise_rsrc->resolved) {
+#ifdef AVM_EMSCRIPTEN_NOSMP
+        sys_promise_resolve_str_and_destroy(promise_rsrc->promise, EM_PROMISE_REJECT, (int) (intptr_t) "noproc");
+#else
         emscripten_dispatch_to_thread(emscripten_main_runtime_thread_id(), EM_FUNC_SIG_VIII, sys_promise_resolve_str_and_destroy, NULL, promise_rsrc->promise, EM_PROMISE_REJECT, "noproc");
+#endif
         promise_rsrc->resolved = true;
     }
 }
@@ -149,6 +168,7 @@ void sys_init_platform(GlobalContext *glb)
         fprintf(stderr, "Cannot allocate platform data");
         AVM_ABORT();
     }
+#ifndef AVM_EMSCRIPTEN_NOSMP
     if (UNLIKELY(pthread_mutex_init(&platform->poll_mutex, NULL))) {
         fprintf(stderr, "Cannot initialize pthread_mutex");
         AVM_ABORT();
@@ -157,6 +177,7 @@ void sys_init_platform(GlobalContext *glb)
         fprintf(stderr, "Cannot initialize pthread_cond");
         AVM_ABORT();
     }
+#endif
     list_init(&platform->messages);
     ErlNifEnv env;
     erl_nif_env_partial_init_from_globalcontext(&env, glb);
@@ -195,8 +216,10 @@ void sys_init_platform(GlobalContext *glb)
 void sys_free_platform(GlobalContext *glb)
 {
     struct EmscriptenPlatformData *platform = glb->platform_data;
+#ifndef AVM_EMSCRIPTEN_NOSMP
     pthread_cond_destroy(&platform->poll_cond);
     pthread_mutex_destroy(&platform->poll_mutex);
+#endif
     if (platform->random_is_initialized) {
         mbedtls_ctr_drbg_free(&platform->random_ctx);
     }
@@ -209,10 +232,15 @@ void sys_free_platform(GlobalContext *glb)
 static void sys_enqueue_emscripten_message(GlobalContext *glb, struct EmscriptenMessageBase *message)
 {
     struct EmscriptenPlatformData *platform = glb->platform_data;
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    list_append(&platform->messages, &message->message_head);
+    emscripten_nosmp_schedule_pump(0);
+#else
     pthread_mutex_lock(&platform->poll_mutex);
     list_append(&platform->messages, &message->message_head);
     pthread_cond_signal(&platform->poll_cond);
     pthread_mutex_unlock(&platform->poll_mutex);
+#endif
 }
 
 #ifndef AVM_NO_SMP
@@ -318,109 +346,109 @@ static void sys_unregister_htmlevent_handler(struct HTMLEventUserDataResource *r
     if (!rsrc->unregistered) {
         switch (rsrc->event) {
             case EMSCRIPTEN_EVENT_KEYPRESS:
-                emscripten_set_keypress_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(keypress, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_KEYDOWN:
-                emscripten_set_keydown_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(keydown, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_KEYUP:
-                emscripten_set_keyup_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(keyup, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_CLICK:
-                emscripten_set_click_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(click, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_MOUSEDOWN:
-                emscripten_set_mousedown_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(mousedown, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_MOUSEUP:
-                emscripten_set_mouseup_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(mouseup, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_DBLCLICK:
-                emscripten_set_dblclick_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(dblclick, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_MOUSEMOVE:
-                emscripten_set_mousemove_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(mousemove, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_WHEEL:
-                emscripten_set_wheel_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(wheel, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_RESIZE:
-                emscripten_set_resize_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(resize, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_SCROLL:
-                emscripten_set_scroll_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(scroll, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_BLUR:
-                emscripten_set_blur_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(blur, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_FOCUS:
-                emscripten_set_focus_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(focus, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_FOCUSIN:
-                emscripten_set_focusin_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(focusin, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_FOCUSOUT:
-                emscripten_set_focusout_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(focusout, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_DEVICEORIENTATION:
-                emscripten_set_deviceorientation_callback_on_thread(NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_GLOBAL_CALLBACK(deviceorientation);
                 break;
             case EMSCRIPTEN_EVENT_DEVICEMOTION:
-                emscripten_set_devicemotion_callback_on_thread(NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_GLOBAL_CALLBACK(devicemotion);
                 break;
             case EMSCRIPTEN_EVENT_ORIENTATIONCHANGE:
-                emscripten_set_orientationchange_callback_on_thread(NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_GLOBAL_CALLBACK(orientationchange);
                 break;
             case EMSCRIPTEN_EVENT_FULLSCREENCHANGE:
-                emscripten_set_fullscreenchange_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(fullscreenchange, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_POINTERLOCKCHANGE:
-                emscripten_set_pointerlockchange_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(pointerlockchange, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_VISIBILITYCHANGE:
-                emscripten_set_visibilitychange_callback_on_thread(NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_GLOBAL_CALLBACK(visibilitychange);
                 break;
             case EMSCRIPTEN_EVENT_TOUCHSTART:
-                emscripten_set_touchstart_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(touchstart, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_TOUCHEND:
-                emscripten_set_touchend_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(touchend, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_TOUCHMOVE:
-                emscripten_set_touchmove_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(touchmove, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_TOUCHCANCEL:
-                emscripten_set_touchcancel_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(touchcancel, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_GAMEPADCONNECTED:
-                emscripten_set_gamepadconnected_callback_on_thread(NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_GLOBAL_CALLBACK(gamepadconnected);
                 break;
             case EMSCRIPTEN_EVENT_GAMEPADDISCONNECTED:
-                emscripten_set_gamepaddisconnected_callback_on_thread(NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_GLOBAL_CALLBACK(gamepaddisconnected);
                 break;
             case EMSCRIPTEN_EVENT_BEFOREUNLOAD:
-                emscripten_set_beforeunload_callback_on_thread(NULL, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_SIMPLE_CALLBACK(beforeunload);
                 break;
             case EMSCRIPTEN_EVENT_BATTERYCHARGINGCHANGE:
-                emscripten_set_batterychargingchange_callback_on_thread(NULL, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_SIMPLE_CALLBACK(batterychargingchange);
                 break;
             case EMSCRIPTEN_EVENT_BATTERYLEVELCHANGE:
-                emscripten_set_batterylevelchange_callback_on_thread(NULL, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_SIMPLE_CALLBACK(batterylevelchange);
                 break;
             case EMSCRIPTEN_EVENT_MOUSEENTER:
-                emscripten_set_mouseenter_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(mouseenter, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_MOUSELEAVE:
-                emscripten_set_mouseleave_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(mouseleave, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_MOUSEOVER:
-                emscripten_set_mouseover_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(mouseover, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_MOUSEOUT:
-                emscripten_set_mouseout_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(mouseout, rsrc->target_element);
                 break;
             case EMSCRIPTEN_EVENT_POINTERLOCKERROR:
-                emscripten_set_pointerlockerror_callback_on_thread(rsrc->target_element, NULL, false, NULL, emscripten_main_runtime_thread_id());
+                AVM_UNREGISTER_TARGET_CALLBACK(pointerlockerror, rsrc->target_element);
                 break;
         }
         rsrc->unregistered = true;
@@ -499,7 +527,11 @@ static void sys_process_emscripten_message(GlobalContext *glb, struct Emscripten
             if (local_pid > 0) {
                 sys_emscripten_send_message(glb, local_pid, message_async_call->message, message_async_call->promise_rsrc);
             } else {
+#ifdef AVM_EMSCRIPTEN_NOSMP
+                sys_promise_resolve_str_and_destroy(message_async_call->promise_rsrc->promise, EM_PROMISE_REJECT, (int) (intptr_t) "noproc");
+#else
                 emscripten_dispatch_to_thread(emscripten_main_runtime_thread_id(), EM_FUNC_SIG_VIII, sys_promise_resolve_str_and_destroy, NULL, message_async_call->promise_rsrc->promise, EM_PROMISE_REJECT, "noproc");
+#endif
                 message_async_call->promise_rsrc->resolved = true;
             }
             free(message_async_call->target_name);
@@ -524,7 +556,11 @@ static void sys_process_emscripten_message(GlobalContext *glb, struct Emscripten
 
         case UnregisterHTMLEvent: {
             struct EmscriptenMessageUnregisterHTMLEvent *message_unregister = (struct EmscriptenMessageUnregisterHTMLEvent *) message;
+#ifdef AVM_EMSCRIPTEN_NOSMP
+            sys_unregister_htmlevent_handler(message_unregister->rsrc);
+#else
             emscripten_dispatch_to_thread(emscripten_main_runtime_thread_id(), EM_FUNC_SIG_VI, sys_unregister_htmlevent_handler, NULL, message_unregister->rsrc);
+#endif
         } break;
 
         case Signal:
@@ -535,6 +571,7 @@ static void sys_process_emscripten_message(GlobalContext *glb, struct Emscripten
 void sys_poll_events(GlobalContext *glb, int timeout_ms)
 {
     struct EmscriptenPlatformData *platform = glb->platform_data;
+#ifndef AVM_EMSCRIPTEN_NOSMP
     if (timeout_ms > 0) {
         struct timespec abstime;
         sys_monotonic_time(&abstime);
@@ -575,6 +612,22 @@ void sys_poll_events(GlobalContext *glb, int timeout_ms)
     } else {
         pthread_mutex_unlock(&platform->poll_mutex);
     }
+#else
+    UNUSED(timeout_ms);
+    if (!list_is_empty(&platform->messages)) {
+        struct ListHead messages = platform->messages;
+        messages.next->prev = &messages;
+        messages.prev->next = &messages;
+        list_init(&platform->messages);
+
+        do {
+            struct EmscriptenMessageBase *message = GET_LIST_ENTRY(list_first(&messages), struct EmscriptenMessageBase, message_head);
+            sys_process_emscripten_message(glb, message);
+            list_remove(&message->message_head);
+            free(message);
+        } while (!list_is_empty(&messages));
+    }
+#endif
 }
 
 void sys_listener_destroy(struct ListHead *item)
@@ -672,6 +725,9 @@ static void *load_or_fetch_file(const char *path, emscripten_fetch_t **fetch, si
         return NULL;
     }
 
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    return NULL;
+#else
     *fetch = fetch_file(path);
     if (IS_NULL_PTR(*fetch)) {
         return NULL;
@@ -680,6 +736,7 @@ static void *load_or_fetch_file(const char *path, emscripten_fetch_t **fetch, si
         *size = (*fetch)->numBytes;
     }
     return (void *) (*fetch)->data;
+#endif
 }
 
 enum OpenAVMResult sys_open_avm_from_file(

@@ -36,27 +36,8 @@ start() ->
     end.
 
 handle_req(Method, Path, Conn) when Method =:= "GET" orelse Method =:= "HEAD" ->
-    Filename =
-        case Path of
-            [] ->
-                "../examples/emscripten/index.html";
-            ["AtomVM.js"] ->
-                "../src/platforms/emscripten/build/src/AtomVM.js";
-            ["AtomVM.wasm"] ->
-                "../src/platforms/emscripten/build/src/AtomVM.wasm";
-            ["AtomVM.worker.js"] ->
-                "../src/platforms/emscripten/build/src/AtomVM.worker.js";
-            ["tests", "build" | Tail] ->
-                lists:flatten([
-                    "../src/platforms/emscripten/build/tests/src/" | lists:join($/, Tail)
-                ]);
-            ["tests", "src" | Tail] ->
-                lists:flatten(["../src/platforms/emscripten/tests/src/" | lists:join($/, Tail)]);
-            ["build" | _] ->
-                lists:flatten(["../" | lists:join($/, Path)]);
-            _ ->
-                lists:flatten(["../examples/emscripten/" | lists:join($/, Path)])
-        end,
+    Filename = resolve_filename(Path),
+    NeedsCrossOriginIsolation = needs_cross_origin_isolation(Path, Filename),
     MimeType =
         case lists:reverse(Filename) of
             "sj." ++ _ -> "text/javascript";
@@ -89,11 +70,8 @@ handle_req(Method, Path, Conn) when Method =:= "GET" orelse Method =:= "HEAD" ->
                         integer_to_list(Size),
                         <<"\r\n">>,
                         <<"Connection: close\r\n">>,
-                        <<"Server: AtomVM\r\n">>,
-                        % The following are the required headers for wasm to work in worker
-                        <<"Cross-Origin-Opener-Policy: same-origin\r\n">>,
-                        <<"Cross-Origin-Embedder-Policy: require-corp\r\n">>
-                    ],
+                        <<"Server: AtomVM\r\n">>
+                    ] ++ maybe_cross_origin_isolation_headers(NeedsCrossOriginIsolation),
                     io:format("~p 200 mime=~s size=~B\n", [Path, MimeType, Size]),
                     case Method of
                         "GET" -> http_server:reply(200, Data, Headers, Conn);
@@ -114,3 +92,43 @@ read_file(Fd, Size, Acc) ->
         eof ->
             {Size, lists:reverse(Acc)}
     end.
+
+resolve_filename([]) ->
+    "../examples/emscripten/index.html";
+resolve_filename([Filename]) ->
+    case lists:prefix("AtomVM", Filename) of
+        true ->
+            lists:flatten(["../src/platforms/emscripten/build/src/", Filename]);
+        false ->
+            lists:flatten(["../examples/emscripten/", Filename])
+    end;
+resolve_filename(["tests", "nosmp", "build" | Tail]) ->
+    lists:flatten([
+        "../src/platforms/emscripten_nosmp/build/tests/src/" | lists:join($/, Tail)
+    ]);
+resolve_filename(["tests", "nosmp", "src" | Tail]) ->
+    lists:flatten([
+        "../src/platforms/emscripten_nosmp/tests/src/" | lists:join($/, Tail)
+    ]);
+resolve_filename(["tests", "build" | Tail]) ->
+    lists:flatten([
+        "../src/platforms/emscripten/build/tests/src/" | lists:join($/, Tail)
+    ]);
+resolve_filename(["tests", "src" | Tail]) ->
+    lists:flatten(["../src/platforms/emscripten/tests/src/" | lists:join($/, Tail)]);
+resolve_filename(["build" | _] = Path) ->
+    lists:flatten(["../" | lists:join($/, Path)]);
+resolve_filename(Path) ->
+    lists:flatten(["../examples/emscripten/" | lists:join($/, Path)]).
+
+needs_cross_origin_isolation(Path, Filename) ->
+    not (lists:member("nosmp", Path) orelse string:str(Filename, "emscripten_nosmp") =/= 0).
+
+maybe_cross_origin_isolation_headers(true) ->
+    [
+        % The threaded browser build requires cross-origin isolation headers.
+        <<"Cross-Origin-Opener-Policy: same-origin\r\n">>,
+        <<"Cross-Origin-Embedder-Policy: require-corp\r\n">>
+    ];
+maybe_cross_origin_isolation_headers(false) ->
+    [].

@@ -119,6 +119,8 @@ GlobalContext *globalcontext_new(void)
 #ifndef AVM_NO_SMP
     smp_spinlock_init(&glb->timer_spinlock);
 #endif
+    glb->scheduler_yield_on_idle = false;
+    glb->scheduler_idle_wait_timeout_ms = 0;
 
     glb->ref_ticks = 0;
 #if !defined(AVM_NO_SMP) && ATOMIC_LLONG_LOCK_FREE != 2

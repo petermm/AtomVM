@@ -1,9 +1,9 @@
 /*
  * This file is part of AtomVM.
  *
- * Copyright 2025 Paul Guyot <pguyot@kallisys.net>
+ * Copyright 2026 by Paul Guyot <pguyot@kallisys.net>
  *
- * Licensed under the Apache License, Version 2.0 (the "License"))
+ * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
@@ -17,11 +17,12 @@
  *
  * SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
  */
+const { defineConfig } = require('cypress')
 
-X(EMSCRIPTEN_ATOM, "\xA", "emscripten")
-X(EMSCRIPTEN_NOSMP_PLATFORM_ATOM, "\x10", "emscripten_nosmp")
-X(DOLLAR_WEBSOCKET_ATOM, "\xA", "$websocket")
-X(WEBSOCKET_ATOM, "\x9", "websocket")
-X(WEBSOCKET_OPEN_ATOM, "\xE", "websocket_open")
-X(WEBSOCKET_CLOSE_ATOM, "\xF", "websocket_close")
-X(WEBSOCKET_ERROR_ATOM, "\xF", "websocket_error")
+module.exports = defineConfig({
+  e2e: {
+    supportFile: false,
+    baseUrl: 'http://localhost:8080',
+    video: false,
+  },
+})

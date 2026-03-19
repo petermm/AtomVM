@@ -579,7 +579,7 @@ AtomVM may also be run in modern browsers (Safari, Chrome and Chrome-based, Fire
 
 Please note that these files are different from the NodeJS ones.
 
-Because AtomVM uses SharedArrayBuffer, to be executed by a browser, these files need to be served:
+For the threaded `emscripten` browser build, AtomVM uses SharedArrayBuffer, so these files need to be served:
 
 * on localhost or over HTTPS
 * by a web server that also sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers. These headers are also called COOP and COEP headers.
@@ -623,6 +623,11 @@ server {
     }
 }
 ```
+
+The `emscripten_nosmp` browser build does not rely on `SharedArrayBuffer` or
+COOP/COEP headers. It preloads the `.beam` and `.avm` files listed in
+`Module.arguments` into the Emscripten filesystem before AtomVM starts, and it
+can be served by a plain local HTTP server.
 
 #### Using Javascript service worker trick
 

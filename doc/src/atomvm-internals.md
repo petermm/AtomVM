@@ -431,6 +431,12 @@ When an `EtsTable` is retrieved from this list, before the read lock is released
 
 WebAssembly or Wasm port of AtomVM relies on Emscripten SDK and library. Even when SMP is disabled (with `-DAVM_DISABLE_SMP=On`), it uses pthread library to sleep when Erlang processes are not running (to not waste CPU cycles).
 
+AtomVM also provides an `emscripten_nosmp` browser build. This variant does
+not use pthreads. Instead, it preloads startup `.beam` and `.avm` files into
+the Emscripten filesystem, runs the VM in an event-driven mode, and yields back
+to the browser when the scheduler becomes idle. Because it avoids
+`SharedArrayBuffer`, it does not require COOP/COEP response headers.
+
 ### NodeJS environment build
 
 The NodeJS environment build of this port is relatively straightforward, featuring NODERAWFS which means it can access files directly like node does.

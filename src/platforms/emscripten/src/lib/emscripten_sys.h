@@ -21,8 +21,11 @@
 #ifndef _EMSCRIPTEN_SYS_H_
 #define _EMSCRIPTEN_SYS_H_
 
-#include <pthread.h>
 #include <time.h>
+
+#ifndef AVM_EMSCRIPTEN_NOSMP
+#include <pthread.h>
+#endif
 
 #include <erl_nif.h>
 #include <list.h>
@@ -110,8 +113,10 @@ struct EmscriptenMessageUnregisterHTMLEvent
 
 struct EmscriptenPlatformData
 {
+#ifndef AVM_EMSCRIPTEN_NOSMP
     pthread_mutex_t poll_mutex;
     pthread_cond_t poll_cond;
+#endif
     struct ListHead messages;
     ErlNifResourceType *promise_resource_type;
     ErlNifResourceType *htmlevent_user_data_resource_type;
@@ -136,5 +141,9 @@ void sys_enqueue_emscripten_htmlevent_message(GlobalContext *glb, int32_t target
 void sys_enqueue_emscripten_unregister_htmlevent_message(GlobalContext *glb, struct HTMLEventUserDataResource *rsrc);
 void sys_promise_resolve_int_and_destroy(em_promise_t promise, em_promise_result_t result, int value);
 void sys_promise_resolve_str_and_destroy(em_promise_t promise, em_promise_result_t result, int value);
+
+#ifdef AVM_EMSCRIPTEN_NOSMP
+void emscripten_nosmp_schedule_pump(int timeout_ms);
+#endif
 
 #endif

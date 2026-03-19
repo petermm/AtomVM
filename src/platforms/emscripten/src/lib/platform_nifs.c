@@ -32,10 +32,14 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <emscripten/promise.h>
+#ifndef AVM_EMSCRIPTEN_NOSMP
 #include <emscripten/proxying.h>
 #include <emscripten/threading.h>
+#endif
 
 #include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 // #define ENABLE_TRACE
 #include <trace.h>
@@ -46,12 +50,26 @@
 #include "platform_nifs.h"
 #include "websocket_nifs.h"
 
+#ifdef AVM_EMSCRIPTEN_NOSMP
+#define AVM_SET_HTML5_CALLBACK(callback, target, resource, use_capture, handler) emscripten_set_##callback##_callback(target, resource, use_capture, handler)
+#define AVM_CLEAR_HTML5_CALLBACK(callback, target) emscripten_set_##callback##_callback(target, NULL, false, NULL)
+#else
+#define AVM_SET_HTML5_CALLBACK(callback, target, resource, use_capture, handler) emscripten_set_##callback##_callback_on_thread(target, resource, use_capture, handler, emscripten_main_runtime_thread_id())
+#define AVM_CLEAR_HTML5_CALLBACK(callback, target) emscripten_set_##callback##_callback_on_thread(target, NULL, false, NULL, emscripten_main_runtime_thread_id())
+#endif
+
+#ifdef AVM_EMSCRIPTEN_NOSMP
+#define ATOMVM_PLATFORM_ATOM EMSCRIPTEN_NOSMP_PLATFORM_ATOM
+#else
+#define ATOMVM_PLATFORM_ATOM EMSCRIPTEN_ATOM
+#endif
+
 static term nif_atomvm_platform(Context *ctx, int argc, term argv[])
 {
     UNUSED(ctx);
     UNUSED(argc);
     UNUSED(argv);
-    return EMSCRIPTEN_ATOM;
+    return ATOMVM_PLATFORM_ATOM;
 }
 
 static term nif_atomvm_random(Context *ctx, int argc, term argv[])
@@ -68,6 +86,14 @@ static term nif_atomvm_random(Context *ctx, int argc, term argv[])
     return term_make_maybe_boxed_int64(result, &ctx->heap);
 }
 
+#ifdef AVM_EMSCRIPTEN_NOSMP
+static void do_run_script_async(void *arg)
+{
+    char *script = arg;
+    emscripten_run_script(script);
+    free(script);
+}
+#else
 static void do_run_script(GlobalContext *global, char *script, int sync, int sync_caller_pid)
 {
     emscripten_run_script(script);
@@ -79,6 +105,7 @@ static void do_run_script(GlobalContext *global, char *script, int sync, int syn
         } // else: sender died
     }
 }
+#endif
 
 static term nif_emscripten_run_script(Context *ctx, int argc, term argv[])
 {
@@ -104,14 +131,23 @@ static term nif_emscripten_run_script(Context *ctx, int argc, term argv[])
     term ret = OK_ATOM;
     if (main_thread) {
         if (async) {
+#ifdef AVM_EMSCRIPTEN_NOSMP
+            emscripten_async_call(do_run_script_async, str, 0);
+#else
             // str will be freed as it's passed as satellite
             emscripten_dispatch_to_thread(emscripten_main_runtime_thread_id(), EM_FUNC_SIG_VIIII, do_run_script, str, ctx->global, str, false, 0);
+#endif
         } else {
+#ifdef AVM_EMSCRIPTEN_NOSMP
+            emscripten_run_script(str);
+            free(str);
+#else
             // Trap caller waiting for completion
             context_update_flags(ctx, ~NoFlags, Trap);
             ret = term_invalid_term();
             // str will be freed as it's passed as satellite
             emscripten_dispatch_to_thread(emscripten_main_runtime_thread_id(), EM_FUNC_SIG_VIIII, do_run_script, str, ctx->global, str, true, ctx->process_id);
+#endif
         }
     } else {
         emscripten_run_script(str);
@@ -130,17 +166,26 @@ static term nif_emscripten_promise_resolve_reject(Context *ctx, int argc, term a
     if (promise_rsrc->resolved) {
         RAISE_ERROR(BADARG_ATOM);
     }
-    if (argc == 0 || term_is_integer(argv[1])) {
-        int value = argc > 0 ? term_to_int(argv[1]) : 0;
+    if (argc == 1 || term_is_integer(argv[1])) {
+        int value = argc > 1 ? term_to_int(argv[1]) : 0;
+#ifdef AVM_EMSCRIPTEN_NOSMP
+        sys_promise_resolve_int_and_destroy(promise_rsrc->promise, result, value);
+#else
         emscripten_dispatch_to_thread(emscripten_main_runtime_thread_id(), EM_FUNC_SIG_VIII, sys_promise_resolve_int_and_destroy, NULL, promise_rsrc->promise, result, value);
+#endif
     } else {
         int ok;
         char *str = interop_term_to_string(argv[1], &ok);
         if (UNLIKELY(!ok)) {
             RAISE_ERROR(BADARG_ATOM);
         }
+#ifdef AVM_EMSCRIPTEN_NOSMP
+        sys_promise_resolve_str_and_destroy(promise_rsrc->promise, result, (int) (intptr_t) str);
+        free(str);
+#else
         // str will be freed as it's passed as satellite
         emscripten_dispatch_to_thread(emscripten_main_runtime_thread_id(), EM_FUNC_SIG_VIII, sys_promise_resolve_str_and_destroy, str, promise_rsrc->promise, result, str);
+#endif
     }
     promise_rsrc->resolved = true;
 
@@ -677,7 +722,7 @@ static EM_BOOL html5api_touch_callback(int eventType, const EmscriptenTouchEvent
             RAISE_ERROR(BADARG_ATOM);                                                                                                                                                    \
         }                                                                                                                                                                                \
         resource->event = event_constant;                                                                                                                                                \
-        EMSCRIPTEN_RESULT result = emscripten_set_##callback##_callback_on_thread(target, resource, use_capture, html5api_##event_type##_callback, emscripten_main_runtime_thread_id()); \
+        EMSCRIPTEN_RESULT result = AVM_SET_HTML5_CALLBACK(callback, target, resource, use_capture, html5api_##event_type##_callback);                                                \
         if (result != EMSCRIPTEN_RESULT_SUCCESS && result != EMSCRIPTEN_RESULT_DEFERRED) {                                                                                               \
             enif_release_resource(resource);                                                                                                                                             \
             return term_from_emscripten_result(result, ctx);                                                                                                                             \
@@ -723,7 +768,7 @@ static EM_BOOL html5api_touch_callback(int eventType, const EmscriptenTouchEvent
         if (UNLIKELY(!get_callback_target(ctx, argv[0], &target, &str))) {                                                                                                               \
             RAISE_ERROR(BADARG_ATOM);                                                                                                                                                    \
         }                                                                                                                                                                                \
-        EMSCRIPTEN_RESULT result = emscripten_set_##callback##_callback_on_thread(target, NULL, false, NULL, emscripten_main_runtime_thread_id());                                       \
+        EMSCRIPTEN_RESULT result = AVM_CLEAR_HTML5_CALLBACK(callback, target);                                                                                                               \
         free(str);                                                                                                                                                                       \
         return term_from_emscripten_result(result, ctx);                                                                                                                                 \
     }                                                                                                                                                                                    \

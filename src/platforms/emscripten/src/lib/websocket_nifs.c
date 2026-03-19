@@ -39,6 +39,12 @@
 #include "platform_defaultatoms.h"
 #include "websocket_nifs.h"
 
+#ifdef AVM_TASK_DRIVER_ENABLED
+#define AVM_WEBSOCKET_SEND_MESSAGE(global, process_id, term) globalcontext_send_message_from_task(global, process_id, NormalMessage, term)
+#else
+#define AVM_WEBSOCKET_SEND_MESSAGE(global, process_id, term) globalcontext_send_message(global, process_id, term)
+#endif
+
 struct WebsocketResource
 {
     uint64_t ref;
@@ -148,7 +154,7 @@ static bool websocket_open_callback_func(int eventType, const EmscriptenWebSocke
     term_put_tuple_element(event_term, 0, WEBSOCKET_OPEN_ATOM);
     term_put_tuple_element(event_term, 1, term_make_websocket_resource(websocket_rsrc, &heap));
 
-    globalcontext_send_message_from_task(global, websocket_rsrc->controlling_process_pid, NormalMessage, event_term);
+    AVM_WEBSOCKET_SEND_MESSAGE(global, websocket_rsrc->controlling_process_pid, event_term);
 
     END_WITH_STACK_HEAP(heap, global)
 
@@ -176,7 +182,7 @@ static bool websocket_message_callback_func(int eventType, const EmscriptenWebSo
     term_put_tuple_element(event_term, 1, term_make_websocket_resource(websocket_rsrc, &heap));
     term_put_tuple_element(event_term, 2, term_from_literal_binary(websocketEvent->data, numBytes, &heap, global));
 
-    globalcontext_send_message_from_task(global, websocket_rsrc->controlling_process_pid, NormalMessage, event_term);
+    AVM_WEBSOCKET_SEND_MESSAGE(global, websocket_rsrc->controlling_process_pid, event_term);
 
     memory_destroy_heap(&heap, global);
 
@@ -199,7 +205,7 @@ static bool websocket_error_callback_func(int eventType, const EmscriptenWebSock
     term_put_tuple_element(event_term, 0, WEBSOCKET_ERROR_ATOM);
     term_put_tuple_element(event_term, 1, term_make_websocket_resource(websocket_rsrc, &heap));
 
-    globalcontext_send_message_from_task(global, websocket_rsrc->controlling_process_pid, NormalMessage, event_term);
+    AVM_WEBSOCKET_SEND_MESSAGE(global, websocket_rsrc->controlling_process_pid, event_term);
 
     END_WITH_STACK_HEAP(heap, global)
 
@@ -232,7 +238,7 @@ static bool websocket_close_callback_func(int eventType, const EmscriptenWebSock
     term_put_tuple_element(close_reason_term, 2, term_from_literal_binary(websocketEvent->reason, reason_len, &heap, global));
     term_put_tuple_element(event_term, 2, close_reason_term);
 
-    globalcontext_send_message_from_task(global, websocket_rsrc->controlling_process_pid, NormalMessage, event_term);
+    AVM_WEBSOCKET_SEND_MESSAGE(global, websocket_rsrc->controlling_process_pid, event_term);
 
     memory_destroy_heap(&heap, global);
 

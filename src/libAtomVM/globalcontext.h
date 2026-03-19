@@ -140,6 +140,8 @@ struct GlobalContext
 #ifndef AVM_NO_SMP
     SpinLock timer_spinlock;
 #endif
+    bool scheduler_yield_on_idle;
+    int scheduler_idle_wait_timeout_ms;
 
 #if !defined(AVM_NO_SMP) && ATOMIC_LLONG_LOCK_FREE == 2
     unsigned long long ATOMIC ref_ticks;

@@ -159,6 +159,7 @@ static Context *scheduler_run0(GlobalContext *global)
     // opportunity to end the scheduler, in which case the function returns
     // NULL
     Context *result = NULL;
+    bool yielded_on_idle = false;
 
 #ifndef AVM_NO_SMP
     SMP_MUTEX_LOCK(global->schedulers_mutex);
@@ -254,14 +255,27 @@ static Context *scheduler_run0(GlobalContext *global)
         SMP_SPINLOCK_UNLOCK(&global->processes_spinlock);
 
         if (result == NULL && !global->scheduler_stop_all) {
-            sys_poll_events(global, wait_timeout);
+            if (global->scheduler_yield_on_idle) {
+                if (!yielded_on_idle) {
+                    sys_poll_events(global, SYS_POLL_EVENTS_DO_NOT_WAIT);
+                    yielded_on_idle = true;
+                } else {
+                    global->scheduler_idle_wait_timeout_ms = wait_timeout;
+                    return NULL;
+                }
+            } else {
+                sys_poll_events(global, wait_timeout);
+            }
         } else {
             sys_poll_events(global, SYS_POLL_EVENTS_DO_NOT_WAIT);
+            yielded_on_idle = false;
         }
 #ifdef AVM_TASK_DRIVER_ENABLED
         globalcontext_process_task_driver_queues(global);
 #endif
+#ifndef AVM_NO_SMP
         SMP_MUTEX_LOCK(global->schedulers_mutex);
+#endif
     } while (result == NULL);
 
 #ifndef AVM_NO_SMP
@@ -271,6 +285,17 @@ static Context *scheduler_run0(GlobalContext *global)
 #endif
 
     return result;
+}
+
+void scheduler_set_yield_on_idle(GlobalContext *global, bool yield_on_idle)
+{
+    global->scheduler_yield_on_idle = yield_on_idle;
+    global->scheduler_idle_wait_timeout_ms = 0;
+}
+
+int scheduler_get_idle_wait_timeout_ms(GlobalContext *global)
+{
+    return global->scheduler_idle_wait_timeout_ms;
 }
 
 Context *scheduler_run(GlobalContext *global)

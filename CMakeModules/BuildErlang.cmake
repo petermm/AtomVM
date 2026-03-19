@@ -20,9 +20,16 @@
 
 macro(pack_archive avm_name)
 
+    set(oneValueArgs SOURCE_DIR)
     set(multiValueArgs ERLC_FLAGS MODULES DEPENDS_ON)
-    cmake_parse_arguments(PACK_ARCHIVE "" "" "${multiValueArgs}" ${ARGN})
+    cmake_parse_arguments(PACK_ARCHIVE "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     list(JOIN PACK_ARCHIVE_ERLC_FLAGS " " PACK_ARCHIVE_ERLC_FLAGS)
+
+    if(PACK_ARCHIVE_SOURCE_DIR)
+        set(_pack_archive_source_dir ${PACK_ARCHIVE_SOURCE_DIR})
+    else()
+        set(_pack_archive_source_dir ${CMAKE_CURRENT_SOURCE_DIR})
+    endif()
 
     # Build -pa flags and file dependencies from DEPENDS_ON
     set(_pack_archive_pa_flags "")
@@ -40,10 +47,10 @@ macro(pack_archive avm_name)
                     -o ${CMAKE_CURRENT_BINARY_DIR}/beams
                     -I ${CMAKE_SOURCE_DIR}/libs/include
                     -I ${CMAKE_SOURCE_DIR}/libs
-                    -I ${CMAKE_CURRENT_SOURCE_DIR}/../include
+                    -I ${_pack_archive_source_dir}/../include
                     ${_pack_archive_pa_flags}
-                    ${CMAKE_CURRENT_SOURCE_DIR}/${module_name}.erl
-            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${module_name}.erl ${_pack_archive_extra_deps}
+                    ${_pack_archive_source_dir}/${module_name}.erl
+            DEPENDS ${_pack_archive_source_dir}/${module_name}.erl ${_pack_archive_extra_deps}
             COMMENT "Compiling ${module_name}.erl"
             VERBATIM
         )
@@ -290,7 +297,7 @@ macro(pack_runnable avm_name main)
     foreach(archive_name ${PACK_RUNNABLE_UNPARSED_ARGUMENTS})
         if(NOT ${archive_name} STREQUAL "exavmlib")
             set(pack_runnable_${avm_name}_archives ${pack_runnable_${avm_name}_archives} ${CMAKE_BINARY_DIR}/libs/${archive_name}/src/${archive_name}.avm)
-            if(NOT ${archive_name} MATCHES "^(eavmlib|estdlib|alisp|avm_network|avm_esp32|avm_rp2|avm_stm32|avm_emscripten)$")
+            if(NOT ${archive_name} MATCHES "^(eavmlib|estdlib|alisp|avm_network|avm_esp32|avm_rp2|avm_stm32|avm_emscripten|avm_emscripten_nosmp)$")
                 set(${avm_name}_dialyzer_beams_opt ${${avm_name}_dialyzer_beams_opt} "-r" ${CMAKE_BINARY_DIR}/libs/${archive_name}/src/beams/)
             endif()
         else()
@@ -306,6 +313,8 @@ macro(pack_runnable avm_name main)
             set(pack_runnable_${avm_name}_plt_name "atomvmlib-stm32")
         elseif(${archive_name} STREQUAL "avm_emscripten")
             set(pack_runnable_${avm_name}_plt_name "atomvmlib-emscripten")
+        elseif(${archive_name} STREQUAL "avm_emscripten_nosmp")
+            set(pack_runnable_${avm_name}_plt_name "atomvmlib-emscripten_nosmp")
         endif()
     endforeach()
 
@@ -321,6 +330,8 @@ macro(pack_runnable avm_name main)
                 list(APPEND pack_runnable_${avm_name}_plt_names "atomvmlib-stm32")
             elseif(${plt_lib} STREQUAL "avm_emscripten")
                 list(APPEND pack_runnable_${avm_name}_plt_names "atomvmlib-emscripten")
+            elseif(${plt_lib} STREQUAL "avm_emscripten_nosmp")
+                list(APPEND pack_runnable_${avm_name}_plt_names "atomvmlib-emscripten_nosmp")
             endif()
         endforeach()
     else()

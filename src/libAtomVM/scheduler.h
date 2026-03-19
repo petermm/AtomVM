@@ -98,6 +98,10 @@ void scheduler_terminate(Context *c);
  */
 void scheduler_stop_all(GlobalContext *global);
 
+void scheduler_set_yield_on_idle(GlobalContext *global, bool yield_on_idle);
+
+int scheduler_get_idle_wait_timeout_ms(GlobalContext *global);
+
 /**
  * @brief gets next runnable process from the ready queue.
  *

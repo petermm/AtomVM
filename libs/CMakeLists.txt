@@ -30,6 +30,7 @@ add_subdirectory(avm_esp32/src)
 add_subdirectory(avm_rp2/src)
 add_subdirectory(avm_stm32/src)
 add_subdirectory(avm_emscripten/src)
+add_subdirectory(avm_emscripten_nosmp/src)
 add_subdirectory(esp32boot)
 add_subdirectory(esp32devmode/src)
 # JIT compiler doesn't compile with OTP < 23
@@ -65,6 +66,7 @@ pack_lib(atomvmlib-esp32 ${ATOMVM_COMMON_LIBS} avm_network avm_esp32)
 pack_lib(atomvmlib-rp2 UF2 ${ATOMVM_COMMON_LIBS} avm_network avm_rp2)
 pack_lib(atomvmlib-stm32 ${ATOMVM_COMMON_LIBS} avm_stm32)
 pack_lib(atomvmlib-emscripten ${ATOMVM_COMMON_LIBS} avm_network avm_emscripten)
+pack_lib(atomvmlib-emscripten_nosmp ${ATOMVM_COMMON_LIBS} avm_network avm_emscripten_nosmp)
 
 if (Dialyzer_FOUND)
     # Helper macro to generate a beams list file from an archive
@@ -86,6 +88,7 @@ if (Dialyzer_FOUND)
     dialyzer_beams_list(avm_rp2 ${CMAKE_CURRENT_BINARY_DIR}/avm_rp2/src/avm_rp2.avm)
     dialyzer_beams_list(avm_stm32 ${CMAKE_CURRENT_BINARY_DIR}/avm_stm32/src/avm_stm32.avm)
     dialyzer_beams_list(avm_emscripten ${CMAKE_CURRENT_BINARY_DIR}/avm_emscripten/src/avm_emscripten.avm)
+    dialyzer_beams_list(avm_emscripten_nosmp ${CMAKE_CURRENT_BINARY_DIR}/avm_emscripten_nosmp/src/avm_emscripten_nosmp.avm)
 
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/jit_beams.txt
@@ -128,6 +131,7 @@ if (Dialyzer_FOUND)
     build_plt(atomvmlib-rp2 ${CMAKE_CURRENT_BINARY_DIR}/avm_rp2_beams.txt)
     build_plt(atomvmlib-stm32 ${CMAKE_CURRENT_BINARY_DIR}/avm_stm32_beams.txt)
     build_plt(atomvmlib-emscripten ${CMAKE_CURRENT_BINARY_DIR}/avm_emscripten_beams.txt)
+    build_plt(atomvmlib-emscripten_nosmp ${CMAKE_CURRENT_BINARY_DIR}/avm_emscripten_nosmp_beams.txt)
 else()
     message("Dialyzer was not found -- skipping PLT build")
 endif()
@@ -142,6 +146,7 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/atomvmlib-rp2.avm
         ${CMAKE_CURRENT_BINARY_DIR}/atomvmlib-stm32.avm
         ${CMAKE_CURRENT_BINARY_DIR}/atomvmlib-emscripten.avm
+        ${CMAKE_CURRENT_BINARY_DIR}/atomvmlib-emscripten_nosmp.avm
     DESTINATION lib/atomvm
 )
 if(NOT AVM_DISABLE_JIT)
