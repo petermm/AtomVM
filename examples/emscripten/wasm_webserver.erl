@@ -96,7 +96,7 @@ read_file(Fd, Size, Acc) ->
 resolve_filename([]) ->
     "../examples/emscripten/index.html";
 resolve_filename([Filename]) ->
-    case lists:prefix("AtomVM", Filename) of
+    case is_atomvm_asset(Filename) of
         true ->
             lists:flatten(["../src/platforms/emscripten/build/src/", Filename]);
         false ->
@@ -109,6 +109,10 @@ resolve_filename(["tests", "nosmp", "build" | Tail]) ->
 resolve_filename(["tests", "nosmp", "src" | Tail]) ->
     lists:flatten([
         "../src/platforms/emscripten_nosmp/tests/src/" | lists:join($/, Tail)
+    ]);
+resolve_filename(["nosmp" | Tail]) ->
+    lists:flatten([
+        "../src/platforms/emscripten_nosmp/build/src/" | lists:join($/, Tail)
     ]);
 resolve_filename(["tests", "build" | Tail]) ->
     lists:flatten([
@@ -132,3 +136,8 @@ maybe_cross_origin_isolation_headers(true) ->
     ];
 maybe_cross_origin_isolation_headers(false) ->
     [].
+
+is_atomvm_asset([$A, $t, $o, $m, $V, $M | _]) ->
+    true;
+is_atomvm_asset(_) ->
+    false.
