@@ -37,7 +37,7 @@ start() ->
 
 handle_req(Method, Path, Conn) when Method =:= "GET" orelse Method =:= "HEAD" ->
     Filename = resolve_filename(Path),
-    NeedsCrossOriginIsolation = needs_cross_origin_isolation(Path, Filename),
+    NeedsCrossOriginIsolation = needs_cross_origin_isolation(Path),
     MimeType =
         case lists:reverse(Filename) of
             "sj." ++ _ -> "text/javascript";
@@ -121,8 +121,8 @@ resolve_filename(["build" | _] = Path) ->
 resolve_filename(Path) ->
     lists:flatten(["../examples/emscripten/" | lists:join($/, Path)]).
 
-needs_cross_origin_isolation(Path, Filename) ->
-    not (lists:member("nosmp", Path) orelse string:str(Filename, "emscripten_nosmp") =/= 0).
+needs_cross_origin_isolation(Path) ->
+    not (lists:member("nosmp", Path) orelse lists:member("emscripten_nosmp", Path)).
 
 maybe_cross_origin_isolation_headers(true) ->
     [

@@ -14,6 +14,7 @@ on:
       - 'CMakeModules/**'
       - 'libs/**'
       - 'src/platforms/emscripten/**'
+      - 'src/platforms/emscripten_nosmp/**'
       - 'src/libAtomVM/**'
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - 'CMakeModules/**'
       - 'libs/**'
       - 'src/platforms/emscripten/**'
+      - 'src/platforms/emscripten_nosmp/**'
       - 'src/libAtomVM/**'
 
 permissions:
@@ -71,7 +73,7 @@ jobs:
         cd build
         cmake .. -G Ninja -DAVM_WARNINGS_ARE_ERRORS=ON
         # test_eavmlib does not work with wasm due to http + ssl test
-        ninja AtomVM atomvmlib atomvmlib-emscripten erlang_test_modules test_etest test_alisp test_estdlib hello_world run_script call_cast html5_events wasm_webserver
+        ninja AtomVM atomvmlib atomvmlib-emscripten atomvmlib-emscripten_nosmp erlang_test_modules test_etest test_alisp test_estdlib hello_world run_script call_cast html5_events wasm_webserver
 
     - name: "Perform CodeQL Analysis"
       uses: github/codeql-action/analyze@v4
@@ -101,6 +103,23 @@ jobs:
         name: emscripten-test-modules
         path: |
             src/platforms/emscripten/build/**/*.beam
+        retention-days: 1
+
+    - name: Compile emscripten_nosmp test modules
+      run: |
+        set -e
+        cd src/platforms/emscripten_nosmp
+        mkdir -p build/tests/src/
+        cd build/tests/src
+        cmake ../../../tests/src -G Ninja
+        ninja emscripten_nosmp_erlang_test_modules
+
+    - name: Upload emscripten_nosmp test modules
+      uses: actions/upload-artifact@v4
+      with:
+        name: emscripten-nosmp-test-modules
+        path: |
+            src/platforms/emscripten_nosmp/build/**/*.beam
         retention-days: 1
 
   wasm_build_and_test_node:
@@ -292,3 +311,83 @@ jobs:
           src/platforms/emscripten/build/src/AtomVM-web-${{ github.ref_name }}.js.sha256
           src/platforms/emscripten/build/src/AtomVM-web-${{ github.ref_name }}.wasm
           src/platforms/emscripten/build/src/AtomVM-web-${{ github.ref_name }}.wasm.sha256
+
+  wasm_build_web_nosmp:
+    runs-on: ubuntu-24.04
+    container: emscripten/emsdk
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: "Install deps"
+      run: sudo apt update -y && sudo apt install -y cmake gperf
+
+    - name: Build wasm build for web (nosmp)
+      shell: bash
+      working-directory: ./src/platforms/emscripten_nosmp/
+      run: |
+        set -euo pipefail
+        mkdir build
+        cd build
+        emcmake cmake .. -DAVM_EMSCRIPTEN_ENV=web
+        emmake make -j
+
+    - name: Upload wasm build for web (nosmp)
+      uses: actions/upload-artifact@v4
+      with:
+        name: atomvm-js-web-nosmp
+        path: |
+            src/platforms/emscripten_nosmp/build/**/*.wasm
+            src/platforms/emscripten_nosmp/build/**/*.js
+        retention-days: 1
+
+  wasm_test_web_nosmp:
+    needs: [compile_tests, wasm_build_web_nosmp]
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Download AtomVM and test modules
+      uses: actions/download-artifact@v4
+      with:
+        name: atomvm-and-test-modules
+        path: build
+
+    - name: Download wasm build for web (nosmp)
+      uses: actions/download-artifact@v4
+      with:
+        name: atomvm-js-web-nosmp
+        path: src/platforms/emscripten_nosmp/build
+
+    - name: Download emscripten_nosmp test modules
+      uses: actions/download-artifact@v4
+      with:
+        name: emscripten-nosmp-test-modules
+        path: src/platforms/emscripten_nosmp/build
+
+    - name: Start Docker echo server for CI
+      run: |
+        docker run -d --name echo-server -p 9090:8080 jmalloc/echo-server
+        sleep 5
+
+    - name: Test using cypress (nosmp)
+      shell: bash
+      run: |
+        set -euxo pipefail
+        cd build
+        chmod +x ./src/AtomVM
+        ./src/AtomVM examples/emscripten/wasm_webserver.avm &
+        cd ../src/platforms/emscripten_nosmp/tests/
+        docker run --network host -v $PWD:/mnt -w /mnt -e CYPRESS_CI=true cypress/included:12.17.1 --browser chrome
+        killall AtomVM
+
+    - name: "Publish screenshots of failures (nosmp)"
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: cypress-screenshots-nosmp
+        path: |
+            src/platforms/emscripten_nosmp/tests/cypress/screenshots/**/*.png
+        retention-days: 7
