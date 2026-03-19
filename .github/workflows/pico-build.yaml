@@ -256,8 +256,10 @@ jobs:
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/') && matrix.board != 'pico_w' && matrix.board != 'pico2_w' && matrix.platform == '' && matrix.jit == ''
       with:
-        draft: true
+        draft: ${{ !endsWith(github.ref_name, '-latest') }}
+        prerelease: ${{ endsWith(github.ref_name, '-latest') }}
         fail_on_unmatched_files: true
+        overwrite_files: ${{ endsWith(github.ref_name, '-latest') }}
         files: |
           src/platforms/rp2/build/src/AtomVM-${{ matrix.board }}-${{ github.ref_name }}.uf2
           src/platforms/rp2/build/src/AtomVM-${{ matrix.board }}-${{ github.ref_name }}.uf2.sha256
@@ -270,8 +272,10 @@ jobs:
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/') && (matrix.board == 'pico_w' || matrix.board == 'pico2_w') && matrix.platform == '' && matrix.jit == ''
       with:
-        draft: true
+        draft: ${{ !endsWith(github.ref_name, '-latest') }}
+        prerelease: ${{ endsWith(github.ref_name, '-latest') }}
         fail_on_unmatched_files: true
+        overwrite_files: ${{ endsWith(github.ref_name, '-latest') }}
         files: |
           src/platforms/rp2/build/src/AtomVM-${{ matrix.board }}-${{ github.ref_name }}.uf2
           src/platforms/rp2/build/src/AtomVM-${{ matrix.board }}-${{ github.ref_name }}.uf2.sha256

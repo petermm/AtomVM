@@ -162,8 +162,10 @@ jobs:
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        draft: true
+        draft: ${{ !endsWith(github.ref_name, '-latest') }}
+        prerelease: ${{ endsWith(github.ref_name, '-latest') }}
         fail_on_unmatched_files: true
+        overwrite_files: ${{ endsWith(github.ref_name, '-latest') }}
         files: |
           src/platforms/emscripten/build/src/AtomVM-node-${{ github.ref_name }}.js
           src/platforms/emscripten/build/src/AtomVM-node-${{ github.ref_name }}.js.sha256
@@ -285,8 +287,10 @@ jobs:
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        draft: true
+        draft: ${{ !endsWith(github.ref_name, '-latest') }}
+        prerelease: ${{ endsWith(github.ref_name, '-latest') }}
         fail_on_unmatched_files: true
+        overwrite_files: ${{ endsWith(github.ref_name, '-latest') }}
         files: |
           src/platforms/emscripten/build/src/AtomVM-web-${{ github.ref_name }}.js
           src/platforms/emscripten/build/src/AtomVM-web-${{ github.ref_name }}.js.sha256
