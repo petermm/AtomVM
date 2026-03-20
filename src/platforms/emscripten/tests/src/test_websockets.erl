@@ -80,7 +80,7 @@ start() ->
             [
                 <<"window.document.getElementById('result').innerHTML = 'Test success';">>
             ],
-            [main_thread, async]
+            [main_thread]
         ),
         io:format("OK\n")
     catch
@@ -91,7 +91,7 @@ start() ->
                     escape_js_str(lists:flatten(io_lib:format("~p\n~p\n~p", [T, V, S]))),
                     <<"\";">>
                 ],
-                [main_thread, async]
+                [main_thread]
             )
     end.
 

@@ -28,6 +28,8 @@
 #include <term.h>
 #include <term_typedef.h>
 
+#include <string.h>
+
 #include <emscripten.h>
 #include <emscripten/websocket.h>
 
@@ -39,11 +41,17 @@
 #include "platform_defaultatoms.h"
 #include "websocket_nifs.h"
 
+static void sys_websocket_send_message(GlobalContext *global, int32_t process_id, term message)
+{
 #ifdef AVM_TASK_DRIVER_ENABLED
-#define AVM_WEBSOCKET_SEND_MESSAGE(global, process_id, term) globalcontext_send_message_from_task(global, process_id, NormalMessage, term)
+    globalcontext_send_message_from_task(global, process_id, NormalMessage, message);
 #else
-#define AVM_WEBSOCKET_SEND_MESSAGE(global, process_id, term) globalcontext_send_message(global, process_id, term)
+    globalcontext_send_message(global, process_id, message);
 #endif
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    emscripten_nosmp_schedule_pump(0);
+#endif
+}
 
 struct WebsocketResource
 {
@@ -52,6 +60,12 @@ struct WebsocketResource
     ErlNifMonitor controlling_process_monitor;
     EMSCRIPTEN_WEBSOCKET_T websocket;
     bool closed;
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    bool close_event_delivered;
+    bool close_poll_active;
+    unsigned short close_code;
+    char *close_reason;
+#endif
 };
 
 enum
@@ -77,11 +91,77 @@ static const AtomStringIntPair ready_state_table[] = {
     SELECT_INT_DEFAULT(UNKNOWN_TABLE_VALUE)
 };
 
+#define TERM_WEBSOCKET_RESOURCE_SIZE (TERM_BOXED_RESOURCE_SIZE + REF_SIZE + TUPLE_SIZE(3))
+
+static term term_make_websocket_resource(struct WebsocketResource *rsrc, Heap *heap);
+
+static void websocket_send_close_message(struct WebsocketResource *websocket_rsrc, bool was_clean, unsigned short code, const char *reason)
+{
+    struct RefcBinary *refc = refc_binary_from_data(websocket_rsrc);
+    GlobalContext *global = refc->resource_type->global;
+    size_t reason_len = reason ? strlen(reason) : 0;
+
+    Heap heap;
+    if (UNLIKELY(memory_init_heap(&heap, TUPLE_SIZE(3) + TERM_WEBSOCKET_RESOURCE_SIZE + TUPLE_SIZE(3) + TERM_BINARY_HEAP_SIZE(reason_len)) != MEMORY_GC_OK)) {
+        fprintf(stderr, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
+        AVM_ABORT();
+    }
+
+    term event_term = term_alloc_tuple(3, &heap);
+    term_put_tuple_element(event_term, 0, WEBSOCKET_CLOSE_ATOM);
+    term_put_tuple_element(event_term, 1, term_make_websocket_resource(websocket_rsrc, &heap));
+    term close_reason_term = term_alloc_tuple(3, &heap);
+    term_put_tuple_element(close_reason_term, 0, was_clean ? TRUE_ATOM : FALSE_ATOM);
+    term_put_tuple_element(close_reason_term, 1, term_from_int(code));
+    term_put_tuple_element(close_reason_term, 2, term_from_literal_binary(reason ? reason : "", reason_len, &heap, global));
+    term_put_tuple_element(event_term, 2, close_reason_term);
+
+    sys_websocket_send_message(global, websocket_rsrc->controlling_process_pid, event_term);
+
+    memory_destroy_heap(&heap, global);
+}
+
+#ifdef AVM_EMSCRIPTEN_NOSMP
+static void websocket_clear_pending_close(struct WebsocketResource *websocket_rsrc)
+{
+    if (websocket_rsrc->close_reason) {
+        free(websocket_rsrc->close_reason);
+        websocket_rsrc->close_reason = NULL;
+    }
+}
+
+static void websocket_poll_close(void *userData)
+{
+    struct WebsocketResource *websocket_rsrc = userData;
+
+    if (!websocket_rsrc->close_poll_active) {
+        enif_release_resource(websocket_rsrc);
+        return;
+    }
+
+    if (websocket_rsrc->close_event_delivered) {
+        websocket_rsrc->close_poll_active = false;
+        websocket_clear_pending_close(websocket_rsrc);
+        enif_release_resource(websocket_rsrc);
+        return;
+    }
+
+    websocket_send_close_message(websocket_rsrc, true, websocket_rsrc->close_code, websocket_rsrc->close_reason);
+    websocket_rsrc->close_event_delivered = true;
+    websocket_rsrc->close_poll_active = false;
+    websocket_clear_pending_close(websocket_rsrc);
+    enif_release_resource(websocket_rsrc);
+}
+#endif
+
 static void websocket_dtor(ErlNifEnv *caller_env, void *obj)
 {
     UNUSED(caller_env);
 
     struct WebsocketResource *websocket_rsrc = (struct WebsocketResource *) obj;
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    websocket_clear_pending_close(websocket_rsrc);
+#endif
     if (!websocket_rsrc->closed) {
         emscripten_websocket_close(websocket_rsrc->websocket, CLOSE_STATUS_GARBAGE_COLLECTED_CLOSURE, "");
     }
@@ -99,9 +179,10 @@ static void websocket_down(ErlNifEnv *caller_env, void *obj, ErlNifPid *pid, Erl
         emscripten_websocket_close(websocket_rsrc->websocket, CLOSE_STATUS_GARBAGE_COLLECTED_CLOSURE, "");
         websocket_rsrc->closed = true;
     }
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    websocket_clear_pending_close(websocket_rsrc);
+#endif
 }
-
-#define TERM_WEBSOCKET_RESOURCE_SIZE (TERM_BOXED_RESOURCE_SIZE + REF_SIZE + TUPLE_SIZE(3))
 
 static term term_make_websocket_resource(struct WebsocketResource *rsrc, Heap *heap)
 {
@@ -154,7 +235,7 @@ static bool websocket_open_callback_func(int eventType, const EmscriptenWebSocke
     term_put_tuple_element(event_term, 0, WEBSOCKET_OPEN_ATOM);
     term_put_tuple_element(event_term, 1, term_make_websocket_resource(websocket_rsrc, &heap));
 
-    AVM_WEBSOCKET_SEND_MESSAGE(global, websocket_rsrc->controlling_process_pid, event_term);
+    sys_websocket_send_message(global, websocket_rsrc->controlling_process_pid, event_term);
 
     END_WITH_STACK_HEAP(heap, global)
 
@@ -182,7 +263,7 @@ static bool websocket_message_callback_func(int eventType, const EmscriptenWebSo
     term_put_tuple_element(event_term, 1, term_make_websocket_resource(websocket_rsrc, &heap));
     term_put_tuple_element(event_term, 2, term_from_literal_binary(websocketEvent->data, numBytes, &heap, global));
 
-    AVM_WEBSOCKET_SEND_MESSAGE(global, websocket_rsrc->controlling_process_pid, event_term);
+    sys_websocket_send_message(global, websocket_rsrc->controlling_process_pid, event_term);
 
     memory_destroy_heap(&heap, global);
 
@@ -198,14 +279,14 @@ static bool websocket_error_callback_func(int eventType, const EmscriptenWebSock
     struct RefcBinary *refc = refc_binary_from_data(userData);
     GlobalContext *global = refc->resource_type->global;
 
-    // {websocket_open, Socket}
+    // {websocket_error, Socket}
     BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + TERM_WEBSOCKET_RESOURCE_SIZE, heap)
 
-    term event_term = term_alloc_tuple(3, &heap);
+    term event_term = term_alloc_tuple(2, &heap);
     term_put_tuple_element(event_term, 0, WEBSOCKET_ERROR_ATOM);
     term_put_tuple_element(event_term, 1, term_make_websocket_resource(websocket_rsrc, &heap));
 
-    AVM_WEBSOCKET_SEND_MESSAGE(global, websocket_rsrc->controlling_process_pid, event_term);
+    sys_websocket_send_message(global, websocket_rsrc->controlling_process_pid, event_term);
 
     END_WITH_STACK_HEAP(heap, global)
 
@@ -217,30 +298,18 @@ static bool websocket_close_callback_func(int eventType, const EmscriptenWebSock
     UNUSED(eventType);
 
     struct WebsocketResource *websocket_rsrc = (struct WebsocketResource *) userData;
-    struct RefcBinary *refc = refc_binary_from_data(userData);
-    GlobalContext *global = refc->resource_type->global;
-
-    size_t reason_len = strlen(websocketEvent->reason);
-
-    // {websocket_close, Socket, {Clean, Code, Reason}}
-    Heap heap;
-    if (UNLIKELY(memory_init_heap(&heap, TUPLE_SIZE(3) + TERM_WEBSOCKET_RESOURCE_SIZE + TUPLE_SIZE(3) + TERM_BINARY_HEAP_SIZE(reason_len)) != MEMORY_GC_OK)) {
-        fprintf(stderr, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
-        AVM_ABORT();
+    websocket_rsrc->closed = true;
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    if (websocket_rsrc->close_event_delivered) {
+        websocket_rsrc->close_poll_active = false;
+        websocket_clear_pending_close(websocket_rsrc);
+        return true;
     }
-
-    term event_term = term_alloc_tuple(3, &heap);
-    term_put_tuple_element(event_term, 0, WEBSOCKET_CLOSE_ATOM);
-    term_put_tuple_element(event_term, 1, term_make_websocket_resource(websocket_rsrc, &heap));
-    term close_reason_term = term_alloc_tuple(3, &heap);
-    term_put_tuple_element(close_reason_term, 0, websocketEvent->wasClean ? TRUE_ATOM : FALSE_ATOM);
-    term_put_tuple_element(close_reason_term, 1, term_from_int(websocketEvent->code));
-    term_put_tuple_element(close_reason_term, 2, term_from_literal_binary(websocketEvent->reason, reason_len, &heap, global));
-    term_put_tuple_element(event_term, 2, close_reason_term);
-
-    AVM_WEBSOCKET_SEND_MESSAGE(global, websocket_rsrc->controlling_process_pid, event_term);
-
-    memory_destroy_heap(&heap, global);
+    websocket_rsrc->close_event_delivered = true;
+    websocket_rsrc->close_poll_active = false;
+    websocket_clear_pending_close(websocket_rsrc);
+#endif
+    websocket_send_close_message(websocket_rsrc, websocketEvent->wasClean, websocketEvent->code, websocketEvent->reason);
 
     return true;
 }
@@ -268,6 +337,12 @@ static term nif_websocket_new(Context *ctx, int argc, term argv[])
     rsrc_obj->controlling_process_pid = term_to_local_process_id(argv[2]);
     rsrc_obj->closed = true;
     rsrc_obj->websocket = 0;
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    rsrc_obj->close_event_delivered = false;
+    rsrc_obj->close_poll_active = false;
+    rsrc_obj->close_code = 0;
+    rsrc_obj->close_reason = NULL;
+#endif
     ErlNifEnv *env = erl_nif_env_from_context(ctx);
     if (UNLIKELY(enif_monitor_process(env, rsrc_obj, &ctx->process_id, &rsrc_obj->controlling_process_monitor) != 0)) {
         free(url);
@@ -328,6 +403,12 @@ static term nif_websocket_ready_state(Context *ctx, int argc, term argv[])
     if (IS_NULL_PTR(rsrc_obj)) {
         RAISE_ERROR(BADARG_ATOM);
     }
+
+#ifdef AVM_EMSCRIPTEN_NOSMP
+    if (rsrc_obj->close_event_delivered) {
+        return interop_atom_term_select_atom(ready_state_table, READY_STATE_CLOSED, ctx->global);
+    }
+#endif
 
     unsigned short ready_state;
     EMSCRIPTEN_RESULT err = emscripten_websocket_get_ready_state(rsrc_obj->websocket, &ready_state);
@@ -557,16 +638,30 @@ static term nif_websocket_close(Context *ctx, int argc, term argv[])
 
     struct WebsocketResource *rsrc_obj = get_websocket_resource(ctx, argv[0]);
     if (IS_NULL_PTR(rsrc_obj)) {
+        free(reason);
         RAISE_ERROR(BADARG_ATOM);
     }
 
     if (!rsrc_obj->closed) {
         EMSCRIPTEN_RESULT err = emscripten_websocket_close(rsrc_obj->websocket, status_code, reason);
-        rsrc_obj->closed = true;
         if (err != EMSCRIPTEN_RESULT_SUCCESS) {
+            free(reason);
             RAISE_ERROR(BADARG_ATOM);
         }
+        rsrc_obj->closed = true;
+#ifdef AVM_EMSCRIPTEN_NOSMP
+        websocket_clear_pending_close(rsrc_obj);
+        rsrc_obj->close_event_delivered = false;
+        rsrc_obj->close_code = status_code;
+        rsrc_obj->close_reason = *reason ? strdup(reason) : NULL;
+        if (!rsrc_obj->close_poll_active) {
+            rsrc_obj->close_poll_active = true;
+            enif_keep_resource(rsrc_obj);
+            emscripten_async_call(websocket_poll_close, rsrc_obj, 0);
+        }
+#endif
     }
+    free(reason);
 
     return OK_ATOM;
 }
