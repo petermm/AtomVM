@@ -92,6 +92,7 @@ static void do_run_script_async(void *arg)
     char *script = arg;
     emscripten_run_script(script);
     free(script);
+    emscripten_nosmp_pending_async_finish();
 }
 #else
 static void do_run_script(GlobalContext *global, char *script, int sync, int sync_caller_pid)
@@ -132,6 +133,7 @@ static term nif_emscripten_run_script(Context *ctx, int argc, term argv[])
     if (main_thread) {
         if (async) {
 #ifdef AVM_EMSCRIPTEN_NOSMP
+            emscripten_nosmp_pending_async_start();
             emscripten_async_call(do_run_script_async, str, 0);
 #else
             // str will be freed as it's passed as satellite

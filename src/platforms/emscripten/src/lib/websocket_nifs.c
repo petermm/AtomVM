@@ -139,6 +139,7 @@ static void websocket_deliver_close(void *userData)
     struct WebsocketResource *websocket_rsrc = userData;
 
     if (!websocket_rsrc->close_delivery_scheduled) {
+        emscripten_nosmp_pending_async_finish();
         enif_release_resource(websocket_rsrc);
         return;
     }
@@ -148,6 +149,7 @@ static void websocket_deliver_close(void *userData)
     websocket_rsrc->close_delivery_deferred = false;
     websocket_send_close_message(websocket_rsrc, websocket_rsrc->close_was_clean, websocket_rsrc->close_code, websocket_rsrc->close_reason);
     websocket_clear_pending_close(websocket_rsrc);
+    emscripten_nosmp_pending_async_finish();
     enif_release_resource(websocket_rsrc);
 }
 
@@ -156,6 +158,7 @@ static void websocket_schedule_close_delivery(struct WebsocketResource *websocke
     if (!websocket_rsrc->close_delivery_scheduled) {
         websocket_rsrc->close_delivery_scheduled = true;
         enif_keep_resource(websocket_rsrc);
+        emscripten_nosmp_pending_async_start();
         emscripten_async_call(websocket_deliver_close, websocket_rsrc, 0);
     }
 }

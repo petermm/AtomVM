@@ -51,6 +51,7 @@ static bool entry_started = false;
 static bool pump_scheduled = false;
 static int scheduled_pump_delay_ms = -1;
 static uintptr_t pump_token = 0;
+static int pending_async_callbacks = 0;
 
 static void atomvm_pump(void *token_ptr);
 
@@ -118,6 +119,7 @@ static void destroy_runtime(void)
     entry_started = false;
     pump_scheduled = false;
     scheduled_pump_delay_ms = -1;
+    pending_async_callbacks = 0;
 }
 
 static int finalize_runtime(void)
@@ -190,6 +192,22 @@ void emscripten_nosmp_schedule_pump(int timeout_ms)
     emscripten_async_call(atomvm_pump, (void *) (uintptr_t) pump_token, timeout_ms);
 }
 
+void emscripten_nosmp_pending_async_start(void)
+{
+    pending_async_callbacks++;
+}
+
+void emscripten_nosmp_pending_async_finish(void)
+{
+    if (pending_async_callbacks > 0) {
+        pending_async_callbacks--;
+    }
+
+    if (!IS_NULL_PTR(global) && global->scheduler_stop_all) {
+        emscripten_nosmp_schedule_pump(0);
+    }
+}
+
 static void atomvm_pump(void *token_ptr)
 {
     if (IS_NULL_PTR(global) || (uintptr_t) token_ptr != pump_token) {
@@ -211,6 +229,10 @@ static void atomvm_pump(void *token_ptr)
     }
 
     if (global->scheduler_stop_all) {
+        if (pending_async_callbacks > 0) {
+            emscripten_nosmp_schedule_pump(0);
+            return;
+        }
         emscripten_force_exit(finalize_runtime());
         return;
     }

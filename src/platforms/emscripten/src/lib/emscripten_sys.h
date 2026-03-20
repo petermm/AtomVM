@@ -144,6 +144,8 @@ void sys_promise_resolve_str_and_destroy(em_promise_t promise, em_promise_result
 
 #ifdef AVM_EMSCRIPTEN_NOSMP
 void emscripten_nosmp_schedule_pump(int timeout_ms);
+void emscripten_nosmp_pending_async_start(void);
+void emscripten_nosmp_pending_async_finish(void);
 #endif
 
 #endif
