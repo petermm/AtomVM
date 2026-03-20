@@ -60,6 +60,7 @@ set(HEADER_FILES
     resources.h
     ryu/common.h
     ryu/d2s_full_table.h
+    ryu/d2s_small_table.h
     ryu/d2s_intrinsics.h
     ryu/digit_table.h
     ryu/ryu.h
