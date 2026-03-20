@@ -1,7 +1,7 @@
 /*
  * This file is part of AtomVM.
  *
- * Copyright 2023 by Paul Guyot <pguyot@kallisys.net>
+ * Copyright 2026 by Paul Guyot <pguyot@kallisys.net>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,16 @@
  *
  * SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
  */
-const { registerExamplesTests } = require("./examples.shared");
+const {
+  registerExamplesTests,
+} = require("../../../../emscripten/tests/cypress/e2e/examples.shared");
 
 registerExamplesTests({
-  label: "emscripten",
-  homepage: "/",
-  helloWorldAvm: "/hello_world_avm.html",
-  helloWorldBeam: "/hello_world_beam.html",
-  runScript: "/run_script.html",
-  callCast: "/call_cast.html",
-  html5Events: "/html5_events.html",
+  label: "emscripten nosmp",
+  homepage: "/tests/nosmp/src/examples_index.html",
+  helloWorldAvm: "/tests/nosmp/src/hello_world_avm.html",
+  helloWorldBeam: "/tests/nosmp/src/hello_world_beam.html",
+  runScript: "/tests/nosmp/src/run_script.html",
+  callCast: "/tests/nosmp/src/call_cast.html",
+  html5Events: "/tests/nosmp/src/html5_events.html",
 });
