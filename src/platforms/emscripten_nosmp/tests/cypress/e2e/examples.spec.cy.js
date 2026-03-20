@@ -19,7 +19,7 @@
  */
 const {
   registerExamplesTests,
-} = require("../../../../emscripten/tests/cypress/e2e/examples.shared");
+} = require("./examples.shared");
 
 registerExamplesTests({
   label: "emscripten nosmp",
