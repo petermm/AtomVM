@@ -67,6 +67,16 @@ else()
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults.in ${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults @ONLY)
 endif()
 
+option(AVM_USE_RYU "Enable vendored Ryu backend for short float formatting." ON)
+if(DEFINED CONFIG_AVM_USE_RYU)
+    if(CONFIG_AVM_USE_RYU)
+        set(AVM_USE_RYU ON CACHE BOOL "Enable vendored Ryu backend for short float formatting." FORCE)
+    else()
+        set(AVM_USE_RYU OFF CACHE BOOL "Enable vendored Ryu backend for short float formatting." FORCE)
+    endif()
+endif()
+set(AVM_RYU_OPTIMIZE_SIZE ON)
+
 project(atomvm-esp32)
 
 # JIT is only supported on RISC-V targets (ESP32-C2, ESP32-C3, ESP32-C6, ESP32-H2, ESP32-P4)

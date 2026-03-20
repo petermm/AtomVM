@@ -26,8 +26,14 @@ set(host_atomvm_jit_target "--target=jit")
 else()
 set(host_atomvm_jit_target "")
 endif()
+if(NOT DEFINED AVM_USE_RYU)
+set(host_atomvm_use_ryu ON)
+else()
+set(host_atomvm_use_ryu ${AVM_USE_RYU})
+endif()
 ExternalProject_Add(HostAtomVM
     SOURCE_DIR ../../../../../../../../
+    CMAKE_ARGS -DAVM_USE_RYU:BOOL=${host_atomvm_use_ryu}
     INSTALL_COMMAND cmake -E echo "Skipping install step."
     BUILD_COMMAND cmake --build . --target=atomvmlib-esp32 ${host_atomvm_jit_target} --target=PackBEAM
 )
@@ -61,6 +67,7 @@ endfunction()
 compile_erlang(test_esp_partition)
 compile_erlang(test_esp_timer_get_time)
 compile_erlang(test_file)
+compile_erlang(test_float_short)
 compile_erlang(test_wifi_example)
 compile_erlang(test_wifi_managed)
 compile_erlang(test_list_to_atom)
@@ -83,6 +90,7 @@ set(erlang_test_beams
     test_esp_partition.beam
     test_esp_timer_get_time.beam
     test_file.beam
+    test_float_short.beam
     test_wifi_example.beam
     test_wifi_managed.beam
     test_list_to_atom.beam

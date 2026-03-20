@@ -73,6 +73,16 @@ else()
     message(STATUS "JIT compilation disabled")
 endif()
 
+option(AVM_USE_RYU "Enable vendored Ryu backend for short float formatting." ON)
+if(DEFINED CONFIG_AVM_USE_RYU)
+    if(CONFIG_AVM_USE_RYU)
+        set(AVM_USE_RYU ON CACHE BOOL "Enable vendored Ryu backend for short float formatting." FORCE)
+    else()
+        set(AVM_USE_RYU OFF CACHE BOOL "Enable vendored Ryu backend for short float formatting." FORCE)
+    endif()
+endif()
+set(AVM_RYU_OPTIMIZE_SIZE ON)
+
 project(atomvm-esp32-test)
 
 # esp-idf does not use compile_feature but instead sets version in

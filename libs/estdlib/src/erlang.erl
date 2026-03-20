@@ -200,6 +200,7 @@
 -type float_format_option() ::
     {decimals, Decimals :: 0..57}
     | {scientific, Decimals :: 0..57}
+    | short
     | compact.
 
 -type demonitor_option() :: flush | {flush, boolean()} | info | {info, boolean()}.

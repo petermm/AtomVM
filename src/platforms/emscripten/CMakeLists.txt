@@ -32,6 +32,7 @@ endif ()
 option(AVM_ENABLE_OLD_OTP_VERSIONS "Enable OTP version < 26" OFF)
 option(AVM_DISABLE_SMP "Disable SMP." OFF)
 option(AVM_USE_32BIT_FLOAT "Use 32 bit floats." OFF)
+option(AVM_USE_RYU "Enable vendored Ryu backend for short float formatting." ON)
 option(AVM_VERBOSE_ABORT "Print module and line number on VM abort" OFF)
 option(AVM_CREATE_STACKTRACES "Create stacktraces" ON)
 
