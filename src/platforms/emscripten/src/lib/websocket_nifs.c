@@ -61,8 +61,10 @@ struct WebsocketResource
     EMSCRIPTEN_WEBSOCKET_T websocket;
     bool closed;
 #ifdef AVM_EMSCRIPTEN_NOSMP
+    bool close_delivery_deferred;
+    bool close_delivery_scheduled;
     bool close_event_delivered;
-    bool close_poll_active;
+    bool close_was_clean;
     unsigned short close_code;
     char *close_reason;
 #endif
@@ -122,6 +124,8 @@ static void websocket_send_close_message(struct WebsocketResource *websocket_rsr
 }
 
 #ifdef AVM_EMSCRIPTEN_NOSMP
+static void websocket_schedule_close_delivery(struct WebsocketResource *websocket_rsrc);
+
 static void websocket_clear_pending_close(struct WebsocketResource *websocket_rsrc)
 {
     if (websocket_rsrc->close_reason) {
@@ -130,27 +134,30 @@ static void websocket_clear_pending_close(struct WebsocketResource *websocket_rs
     }
 }
 
-static void websocket_poll_close(void *userData)
+static void websocket_deliver_close(void *userData)
 {
     struct WebsocketResource *websocket_rsrc = userData;
 
-    if (!websocket_rsrc->close_poll_active) {
+    if (!websocket_rsrc->close_delivery_scheduled) {
         enif_release_resource(websocket_rsrc);
         return;
     }
 
-    if (websocket_rsrc->close_event_delivered) {
-        websocket_rsrc->close_poll_active = false;
-        websocket_clear_pending_close(websocket_rsrc);
-        enif_release_resource(websocket_rsrc);
-        return;
-    }
-
-    websocket_send_close_message(websocket_rsrc, true, websocket_rsrc->close_code, websocket_rsrc->close_reason);
+    websocket_rsrc->close_delivery_scheduled = false;
     websocket_rsrc->close_event_delivered = true;
-    websocket_rsrc->close_poll_active = false;
+    websocket_rsrc->close_delivery_deferred = false;
+    websocket_send_close_message(websocket_rsrc, websocket_rsrc->close_was_clean, websocket_rsrc->close_code, websocket_rsrc->close_reason);
     websocket_clear_pending_close(websocket_rsrc);
     enif_release_resource(websocket_rsrc);
+}
+
+static void websocket_schedule_close_delivery(struct WebsocketResource *websocket_rsrc)
+{
+    if (!websocket_rsrc->close_delivery_scheduled) {
+        websocket_rsrc->close_delivery_scheduled = true;
+        enif_keep_resource(websocket_rsrc);
+        emscripten_async_call(websocket_deliver_close, websocket_rsrc, 0);
+    }
 }
 #endif
 
@@ -301,13 +308,26 @@ static bool websocket_close_callback_func(int eventType, const EmscriptenWebSock
     websocket_rsrc->closed = true;
 #ifdef AVM_EMSCRIPTEN_NOSMP
     if (websocket_rsrc->close_event_delivered) {
-        websocket_rsrc->close_poll_active = false;
+        websocket_rsrc->close_delivery_deferred = false;
+        websocket_rsrc->close_delivery_scheduled = false;
         websocket_clear_pending_close(websocket_rsrc);
         return true;
     }
+    if (websocket_rsrc->close_delivery_deferred) {
+        websocket_clear_pending_close(websocket_rsrc);
+        websocket_rsrc->close_was_clean = websocketEvent->wasClean;
+        websocket_rsrc->close_code = websocketEvent->code;
+        if (websocketEvent->reason[0] != '\0') {
+            websocket_rsrc->close_reason = strdup(websocketEvent->reason);
+            if (UNLIKELY(IS_NULL_PTR(websocket_rsrc->close_reason))) {
+                fprintf(stderr, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
+                AVM_ABORT();
+            }
+        }
+        websocket_schedule_close_delivery(websocket_rsrc);
+        return true;
+    }
     websocket_rsrc->close_event_delivered = true;
-    websocket_rsrc->close_poll_active = false;
-    websocket_clear_pending_close(websocket_rsrc);
 #endif
     websocket_send_close_message(websocket_rsrc, websocketEvent->wasClean, websocketEvent->code, websocketEvent->reason);
 
@@ -338,8 +358,10 @@ static term nif_websocket_new(Context *ctx, int argc, term argv[])
     rsrc_obj->closed = true;
     rsrc_obj->websocket = 0;
 #ifdef AVM_EMSCRIPTEN_NOSMP
+    rsrc_obj->close_delivery_deferred = false;
+    rsrc_obj->close_delivery_scheduled = false;
     rsrc_obj->close_event_delivered = false;
-    rsrc_obj->close_poll_active = false;
+    rsrc_obj->close_was_clean = false;
     rsrc_obj->close_code = 0;
     rsrc_obj->close_reason = NULL;
 #endif
@@ -407,6 +429,9 @@ static term nif_websocket_ready_state(Context *ctx, int argc, term argv[])
 #ifdef AVM_EMSCRIPTEN_NOSMP
     if (rsrc_obj->close_event_delivered) {
         return interop_atom_term_select_atom(ready_state_table, READY_STATE_CLOSED, ctx->global);
+    }
+    if (rsrc_obj->close_delivery_deferred) {
+        return interop_atom_term_select_atom(ready_state_table, READY_STATE_CLOSING, ctx->global);
     }
 #endif
 
@@ -643,23 +668,22 @@ static term nif_websocket_close(Context *ctx, int argc, term argv[])
     }
 
     if (!rsrc_obj->closed) {
+#ifdef AVM_EMSCRIPTEN_NOSMP
+        websocket_clear_pending_close(rsrc_obj);
+        rsrc_obj->close_delivery_deferred = true;
+        rsrc_obj->close_event_delivered = false;
+        rsrc_obj->close_was_clean = false;
+        rsrc_obj->close_code = 0;
+#endif
         EMSCRIPTEN_RESULT err = emscripten_websocket_close(rsrc_obj->websocket, status_code, reason);
         if (err != EMSCRIPTEN_RESULT_SUCCESS) {
+#ifdef AVM_EMSCRIPTEN_NOSMP
+            rsrc_obj->close_delivery_deferred = false;
+#endif
             free(reason);
             RAISE_ERROR(BADARG_ATOM);
         }
         rsrc_obj->closed = true;
-#ifdef AVM_EMSCRIPTEN_NOSMP
-        websocket_clear_pending_close(rsrc_obj);
-        rsrc_obj->close_event_delivered = false;
-        rsrc_obj->close_code = status_code;
-        rsrc_obj->close_reason = *reason ? strdup(reason) : NULL;
-        if (!rsrc_obj->close_poll_active) {
-            rsrc_obj->close_poll_active = true;
-            enif_keep_resource(rsrc_obj);
-            emscripten_async_call(websocket_poll_close, rsrc_obj, 0);
-        }
-#endif
     }
     free(reason);
 
