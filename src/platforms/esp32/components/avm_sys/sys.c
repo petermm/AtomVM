@@ -865,6 +865,7 @@ void sys_mbedtls_ctr_drbg_context_unlock(GlobalContext *global)
     UNUSED(global);
 #endif
 }
+#endif
 
 #ifndef AVM_NO_JIT
 #include <soc/soc.h>
@@ -889,5 +890,4 @@ ModuleNativeEntryPoint sys_map_native_code(const uint8_t *native_code, size_t si
 
     return (ModuleNativeEntryPoint) addr;
 }
-#endif
 #endif
