@@ -64,6 +64,7 @@ X(WORDSIZE_ATOM, "\x8", "wordsize")
 
 X(DECIMALS_ATOM, "\x8", "decimals")
 X(SCIENTIFIC_ATOM, "\xA", "scientific")
+X(SHORT_ATOM, "\x5", "short")
 X(DEFAULTATOMS_COMPACT_ATOM, "\x7", "compact")
 
 X(LOW_ENTROPY_ATOM, "\xB", "low_entropy")

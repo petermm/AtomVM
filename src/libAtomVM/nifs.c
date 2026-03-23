@@ -26,10 +26,12 @@
 
 #include <errno.h>
 #include <fenv.h>
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -64,6 +66,9 @@
 #include "term_typedef.h"
 #include "unicode.h"
 #include "utils.h"
+#ifdef AVM_USE_RYU
+#include "ryu/ryu.h"
+#endif
 #ifdef WITH_ZLIB
 #include "zlib.h"
 #endif
@@ -2661,10 +2666,158 @@ static term nif_erlang_integer_to_list_2(Context *ctx, int argc, term argv[])
     return ret;
 }
 
-static int format_float(term value, int scientific, int decimals, int compact, char *out_buf, int outbuf_len)
+enum FloatFormatMode
+{
+    FloatFormatModeScientific = 0,
+    FloatFormatModeDecimals,
+    FloatFormatModeShort
+};
+
+struct FloatFormatOptions
+{
+    enum FloatFormatMode mode;
+    int decimals;
+    bool compact;
+};
+
+static inline void init_float_format_opts(struct FloatFormatOptions *opts)
+{
+    opts->mode = FloatFormatModeScientific;
+    opts->decimals = 20;
+    opts->compact = false;
+}
+
+static int compact_formatted_float(char *out_buf)
+{
+    int start = 0;
+    int len = strlen(out_buf);
+    for (int i = 0; i < len; i++) {
+        if (out_buf[i] == '.') {
+            start = i + 2;
+            break;
+        }
+    }
+    if (start > 1) {
+        int zero_seq_len = 0;
+        for (int i = start; i < len; i++) {
+            if (out_buf[i] == '0') {
+                if (zero_seq_len == 0) {
+                    start = i;
+                }
+                zero_seq_len++;
+            } else {
+                zero_seq_len = 0;
+            }
+        }
+        if (zero_seq_len) {
+            out_buf[start] = 0;
+        }
+    }
+
+    return strlen(out_buf);
+}
+
+#ifdef AVM_USE_SINGLE_PRECISION
+// The vendored erlang/ryu fork only exposes the double shortest-format path.
+// Single-precision builds therefore use a local roundtrip-based formatter here
+// instead of a vendored f2s entrypoint.
+static inline uint32_t float32_to_bits(float value)
+{
+    uint32_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+static int normalize_short_float_output(char *out_buf, int outbuf_len)
+{
+    char *exponent = strchr(out_buf, 'e');
+    if (exponent) {
+        int exp_value = atoi(exponent + 1);
+        *exponent = '\0';
+        if (!strchr(out_buf, '.')) {
+            size_t len = strlen(out_buf);
+            if (((int) len + 2) >= outbuf_len) {
+                return -1;
+            }
+            out_buf[len] = '.';
+            out_buf[len + 1] = '0';
+            out_buf[len + 2] = '\0';
+        }
+
+        size_t mantissa_len = strlen(out_buf);
+        int exp_len = snprintf(out_buf + mantissa_len, outbuf_len - mantissa_len, "e%d", exp_value);
+        if ((exp_len < 0) || ((int) mantissa_len + exp_len >= outbuf_len)) {
+            return -1;
+        }
+        return mantissa_len + exp_len;
+    }
+
+    if (!strchr(out_buf, '.')) {
+        size_t len = strlen(out_buf);
+        if (((int) len + 2) >= outbuf_len) {
+            return -1;
+        }
+        out_buf[len] = '.';
+        out_buf[len + 1] = '0';
+        out_buf[len + 2] = '\0';
+        return len + 2;
+    }
+
+    return strlen(out_buf);
+}
+
+static bool roundtrips_to_same_float32(float value, const char *candidate)
+{
+    char *endptr;
+    errno = 0;
+    float parsed = strtof(candidate, &endptr);
+    return (errno == 0) && (endptr != NULL) && (*endptr == '\0') && (float32_to_bits(parsed) == float32_to_bits(value));
+}
+
+static int format_float_short_float32(float float_value, char *out_buf, int outbuf_len)
+{
+    if (isnan(float_value)) {
+        if (outbuf_len < 4) {
+            return -1;
+        }
+        memcpy(out_buf, "NaN", 4);
+        return 3;
+    }
+    if (isinf(float_value)) {
+        const char *special = signbit(float_value) ? "-Infinity" : "Infinity";
+        int len = strlen(special);
+        if (len >= outbuf_len) {
+            return -1;
+        }
+        memcpy(out_buf, special, len + 1);
+        return len;
+    }
+
+    char candidate_buf[FLOAT_BUF_SIZE];
+    for (int precision = 1; precision <= 9; precision++) {
+        int len = snprintf(candidate_buf, FLOAT_BUF_SIZE, "%.*g", precision, (double) float_value);
+        if ((len <= 0) || (len >= FLOAT_BUF_SIZE)) {
+            continue;
+        }
+        if (roundtrips_to_same_float32(float_value, candidate_buf)) {
+            memcpy(out_buf, candidate_buf, len + 1);
+            return normalize_short_float_output(out_buf, outbuf_len);
+        }
+    }
+
+    int len = snprintf(out_buf, outbuf_len, "%.*g", 9, (double) float_value);
+    if ((len <= 0) || (len >= outbuf_len)) {
+        return -1;
+    }
+    return normalize_short_float_output(out_buf, outbuf_len);
+}
+#endif
+
+static int format_float_standard(term value, const struct FloatFormatOptions *opts, char *out_buf, int outbuf_len)
 {
     // %lf and %f are the same since C99 due to double promotion.
     const char *format;
+    bool scientific = opts->mode == FloatFormatModeScientific;
     if (scientific) {
         format = "%.*e";
     } else {
@@ -2673,39 +2826,55 @@ static int format_float(term value, int scientific, int decimals, int compact, c
 
     avm_float_t float_value = term_to_float(value);
 
-    snprintf(out_buf, outbuf_len, format, decimals, float_value);
-
-    if (compact && !scientific) {
-        int start = 0;
-        int len = strlen(out_buf);
-        for (int i = 0; i < len; i++) {
-            if (out_buf[i] == '.') {
-                start = i + 2;
-                break;
-            }
-        }
-        if (start > 1) {
-            int zero_seq_len = 0;
-            for (int i = start; i < len; i++) {
-                if (out_buf[i] == '0') {
-                    if (zero_seq_len == 0) {
-                        start = i;
-                    }
-                    zero_seq_len++;
-                } else {
-                    zero_seq_len = 0;
-                }
-            }
-            if (zero_seq_len) {
-                out_buf[start] = 0;
-            }
-        }
+    int written = snprintf(out_buf, outbuf_len, format, opts->decimals, float_value);
+    if ((written < 0) || (written >= outbuf_len)) {
+        return -1;
     }
 
-    return strlen(out_buf);
+    if (opts->compact && !scientific) {
+        return compact_formatted_float(out_buf);
+    }
+
+    return written;
 }
 
-int get_float_format_opts(term opts, int *scientific, int *decimals, int *compact)
+static int format_float_short(term value, char *out_buf, int outbuf_len)
+{
+#ifdef AVM_USE_RYU
+#ifdef AVM_USE_SINGLE_PRECISION
+    return format_float_short_float32(term_to_float(value), out_buf, outbuf_len);
+#else
+    int len = d2s_buffered_n(term_to_float(value), out_buf);
+    if ((len < 0) || (len >= outbuf_len)) {
+        return -1;
+    }
+    out_buf[len] = '\0';
+    return len;
+#endif
+#else
+    struct FloatFormatOptions fallback_opts = {
+        .mode = FloatFormatModeDecimals,
+        .decimals = 10,
+        .compact = true
+    };
+    return format_float_standard(value, &fallback_opts, out_buf, outbuf_len);
+#endif
+}
+
+static int format_float(term value, const struct FloatFormatOptions *opts, char *out_buf, int outbuf_len)
+{
+    switch (opts->mode) {
+        case FloatFormatModeShort:
+            return format_float_short(value, out_buf, outbuf_len);
+        case FloatFormatModeScientific:
+        case FloatFormatModeDecimals:
+            return format_float_standard(value, opts, out_buf, outbuf_len);
+        default:
+            return -1;
+    }
+}
+
+int get_float_format_opts(term opts, struct FloatFormatOptions *float_format_opts)
 {
     term t = opts;
 
@@ -2717,24 +2886,29 @@ int get_float_format_opts(term opts, int *scientific, int *decimals, int *compac
             if (!term_is_integer(val_term)) {
                 return 0;
             }
-            *decimals = term_to_int(val_term);
-            if ((*decimals < 0) || (*decimals > FLOAT_BUF_SIZE - 7)) {
+            int decimals = term_to_int(val_term);
+            if ((decimals < 0) || (decimals > FLOAT_BUF_SIZE - 7)) {
                 return 0;
             }
 
             switch (term_get_tuple_element(head, 0)) {
                 case DECIMALS_ATOM:
-                    *scientific = 0;
+                    float_format_opts->mode = FloatFormatModeDecimals;
+                    float_format_opts->decimals = decimals;
                     break;
                 case SCIENTIFIC_ATOM:
-                    *scientific = 1;
+                    float_format_opts->mode = FloatFormatModeScientific;
+                    float_format_opts->decimals = decimals;
                     break;
                 default:
                     return 0;
             }
 
+        } else if (head == SHORT_ATOM) {
+            float_format_opts->mode = FloatFormatModeShort;
+
         } else if (head == DEFAULTATOMS_COMPACT_ATOM) {
-            *compact = 1;
+            float_format_opts->compact = true;
 
         } else {
             return 0;
@@ -2756,21 +2930,20 @@ static term nif_erlang_float_to_binary(Context *ctx, int argc, term argv[])
     term float_term = argv[0];
     VALIDATE_VALUE(float_term, term_is_float);
 
-    int scientific = 1;
-    int decimals = 20;
-    int compact = 0;
+    struct FloatFormatOptions opts;
+    init_float_format_opts(&opts);
 
-    term opts = argv[1];
     if (argc == 2) {
-        VALIDATE_VALUE(opts, term_is_list);
-        if (UNLIKELY(!get_float_format_opts(opts, &scientific, &decimals, &compact))) {
+        term opts_term = argv[1];
+        VALIDATE_VALUE(opts_term, term_is_list);
+        if (UNLIKELY(!get_float_format_opts(opts_term, &opts))) {
             RAISE_ERROR(BADARG_ATOM);
         }
     }
 
     char float_buf[FLOAT_BUF_SIZE];
-    int len = format_float(float_term, scientific, decimals, compact, float_buf, FLOAT_BUF_SIZE);
-    if (len > FLOAT_BUF_SIZE) {
+    int len = format_float(float_term, &opts, float_buf, FLOAT_BUF_SIZE);
+    if ((len < 0) || (len >= FLOAT_BUF_SIZE)) {
         RAISE_ERROR(BADARG_ATOM);
     }
 
@@ -2788,21 +2961,20 @@ static term nif_erlang_float_to_list(Context *ctx, int argc, term argv[])
     term float_term = argv[0];
     VALIDATE_VALUE(float_term, term_is_float);
 
-    int scientific = 1;
-    int decimals = 20;
-    int compact = 0;
+    struct FloatFormatOptions opts;
+    init_float_format_opts(&opts);
 
-    term opts = argv[1];
     if (argc == 2) {
-        VALIDATE_VALUE(opts, term_is_list);
-        if (UNLIKELY(!get_float_format_opts(opts, &scientific, &decimals, &compact))) {
+        term opts_term = argv[1];
+        VALIDATE_VALUE(opts_term, term_is_list);
+        if (UNLIKELY(!get_float_format_opts(opts_term, &opts))) {
             RAISE_ERROR(BADARG_ATOM);
         }
     }
 
     char float_buf[FLOAT_BUF_SIZE];
-    int len = format_float(float_term, scientific, decimals, compact, float_buf, FLOAT_BUF_SIZE);
-    if (len > FLOAT_BUF_SIZE) {
+    int len = format_float(float_term, &opts, float_buf, FLOAT_BUF_SIZE);
+    if ((len < 0) || (len >= FLOAT_BUF_SIZE)) {
         RAISE_ERROR(BADARG_ATOM);
     }
 
