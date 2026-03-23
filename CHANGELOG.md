@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added generic unix support for uart using POSIX nifs
 - Added RISC-V 64-bit (RV64IMAC) JIT backend
 - Added DWARF debug information support for JIT-compiled code
+- Added `timer:send_after/2`, `timer:send_after/3` and `timer:apply_after/4`
 
 ### Changed
 - ~10% binary size reduction by rewriting module loading logic
