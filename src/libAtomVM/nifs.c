@@ -2717,102 +2717,6 @@ static int compact_formatted_float(char *out_buf)
     return strlen(out_buf);
 }
 
-#ifdef AVM_USE_SINGLE_PRECISION
-// The vendored erlang/ryu fork only exposes the double shortest-format path.
-// Single-precision builds therefore use a local roundtrip-based formatter here
-// instead of a vendored f2s entrypoint.
-static inline uint32_t float32_to_bits(float value)
-{
-    uint32_t bits = 0;
-    memcpy(&bits, &value, sizeof(bits));
-    return bits;
-}
-
-static int normalize_short_float_output(char *out_buf, int outbuf_len)
-{
-    char *exponent = strchr(out_buf, 'e');
-    if (exponent) {
-        int exp_value = atoi(exponent + 1);
-        *exponent = '\0';
-        if (!strchr(out_buf, '.')) {
-            size_t len = strlen(out_buf);
-            if (((int) len + 2) >= outbuf_len) {
-                return -1;
-            }
-            out_buf[len] = '.';
-            out_buf[len + 1] = '0';
-            out_buf[len + 2] = '\0';
-        }
-
-        size_t mantissa_len = strlen(out_buf);
-        int exp_len = snprintf(out_buf + mantissa_len, outbuf_len - mantissa_len, "e%d", exp_value);
-        if ((exp_len < 0) || ((int) mantissa_len + exp_len >= outbuf_len)) {
-            return -1;
-        }
-        return mantissa_len + exp_len;
-    }
-
-    if (!strchr(out_buf, '.')) {
-        size_t len = strlen(out_buf);
-        if (((int) len + 2) >= outbuf_len) {
-            return -1;
-        }
-        out_buf[len] = '.';
-        out_buf[len + 1] = '0';
-        out_buf[len + 2] = '\0';
-        return len + 2;
-    }
-
-    return strlen(out_buf);
-}
-
-static bool roundtrips_to_same_float32(float value, const char *candidate)
-{
-    char *endptr;
-    errno = 0;
-    float parsed = strtof(candidate, &endptr);
-    return (errno == 0) && (endptr != NULL) && (*endptr == '\0') && (float32_to_bits(parsed) == float32_to_bits(value));
-}
-
-static int format_float_short_float32(float float_value, char *out_buf, int outbuf_len)
-{
-    if (isnan(float_value)) {
-        if (outbuf_len < 4) {
-            return -1;
-        }
-        memcpy(out_buf, "NaN", 4);
-        return 3;
-    }
-    if (isinf(float_value)) {
-        const char *special = signbit(float_value) ? "-Infinity" : "Infinity";
-        int len = strlen(special);
-        if (len >= outbuf_len) {
-            return -1;
-        }
-        memcpy(out_buf, special, len + 1);
-        return len;
-    }
-
-    char candidate_buf[FLOAT_BUF_SIZE];
-    for (int precision = 1; precision <= 9; precision++) {
-        int len = snprintf(candidate_buf, FLOAT_BUF_SIZE, "%.*g", precision, (double) float_value);
-        if ((len <= 0) || (len >= FLOAT_BUF_SIZE)) {
-            continue;
-        }
-        if (roundtrips_to_same_float32(float_value, candidate_buf)) {
-            memcpy(out_buf, candidate_buf, len + 1);
-            return normalize_short_float_output(out_buf, outbuf_len);
-        }
-    }
-
-    int len = snprintf(out_buf, outbuf_len, "%.*g", 9, (double) float_value);
-    if ((len <= 0) || (len >= outbuf_len)) {
-        return -1;
-    }
-    return normalize_short_float_output(out_buf, outbuf_len);
-}
-#endif
-
 static int format_float_standard(term value, const struct FloatFormatOptions *opts, char *out_buf, int outbuf_len)
 {
     // %lf and %f are the same since C99 due to double promotion.
@@ -2842,7 +2746,12 @@ static int format_float_short(term value, char *out_buf, int outbuf_len)
 {
 #ifdef AVM_USE_RYU
 #ifdef AVM_USE_SINGLE_PRECISION
-    return format_float_short_float32(term_to_float(value), out_buf, outbuf_len);
+    int len = f2s_buffered_n(term_to_float(value), out_buf);
+    if ((len < 0) || (len >= outbuf_len)) {
+        return -1;
+    }
+    out_buf[len] = '\0';
+    return len;
 #else
     int len = d2s_buffered_n(term_to_float(value), out_buf);
     if ((len < 0) || (len >= outbuf_len)) {
