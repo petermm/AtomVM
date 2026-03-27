@@ -59,6 +59,7 @@ jobs:
         # We only test several OTP versions with default compilers for supported OSes (gcc 11, gcc 13, clang 14, clang 18)
         cc: ["gcc-11", "gcc-13", "clang-14", "clang-18"]
         otp: ["26", "27", "28"]
+        mbedtls: ["default"]
 
         include:
         ### gcc
@@ -159,6 +160,12 @@ jobs:
           otp: "master"
           elixir_version: "main"
 
+        # Additional mbedtls@4 coverage with the default Linux toolchain
+        - cc: "cc"
+          cxx: "c++"
+          otp: "28"
+          mbedtls: "mbedtls@4"
+
         # Additional latest & -Os compiler builds
         - cc: "gcc-14"
           cxx: "g++-14"
@@ -217,6 +224,17 @@ jobs:
           cmake_opts_other: "-DAVM_DISABLE_JIT=OFF"
           jit_target_arch: "x86_64"
 
+        # JIT + DWARF build (x86_64)
+        - os: "ubuntu-24.04"
+          cc: "cc"
+          cxx: "c++"
+          cflags: ""
+          otp: "28"
+          elixir_version: "1.17"
+          rebar3_version: "3.24.0"
+          cmake_opts_other: "-DAVM_DISABLE_JIT=OFF -DAVM_DISABLE_JIT_DWARF=OFF"
+          jit_target_arch: "x86_64"
+
         # arm64 builds
         - os: "ubuntu-24.04-arm"
           cc: "cc"
@@ -226,6 +244,17 @@ jobs:
           cc: "cc"
           cxx: "c++"
           cmake_opts_other: "-DAVM_DISABLE_JIT=OFF"
+          jit_target_arch: "aarch64"
+
+        # JIT + DWARF build (aarch64)
+        - os: "ubuntu-24.04-arm"
+          cc: "cc"
+          cxx: "c++"
+          cflags: ""
+          otp: "28"
+          elixir_version: "1.17"
+          rebar3_version: "3.24.0"
+          cmake_opts_other: "-DAVM_DISABLE_JIT=OFF -DAVM_DISABLE_JIT_DWARF=OFF"
           jit_target_arch: "aarch64"
 
         # armhf builds
@@ -245,6 +274,20 @@ jobs:
           # otherwise readdir will fail due to 64 bits inode numbers with 32 bit ino_t
           cflags: "-mcpu=cortex-a7 -mfloat-abi=hard -O3 -mthumb -mthumb-interwork -D_FILE_OFFSET_BITS=64"
           cmake_opts_other: "-DAVM_DISABLE_JIT=OFF -DAVM_JIT_TARGET_ARCH=armv6m -DCMAKE_TOOLCHAIN_FILE=${RUNNER_TEMP}/armhf_toolchain.cmake"
+          compiler_pkgs: "crossbuild-essential-armhf libc6-dbg:armhf zlib1g-dev:armhf libmbedtls-dev:armhf qemu-user qemu-user-binfmt binfmt-support"
+          arch: "armhf"
+          library-arch: arm-linux-gnueabihf
+          jit_target_arch: "armv6m"
+
+        # JIT + DWARF build (armv6m)
+        - os: "ubuntu-24.04"
+          cc: "arm-linux-gnueabihf-gcc"
+          cxx: "arm-linux-gnueabihf-g++"
+          cflags: "-mcpu=cortex-a7 -mfloat-abi=hard -O2 -mthumb -mthumb-interwork -D_FILE_OFFSET_BITS=64"
+          otp: "28"
+          elixir_version: "1.17"
+          rebar3_version: "3.24.0"
+          cmake_opts_other: "-DAVM_DISABLE_JIT=OFF -DAVM_DISABLE_JIT_DWARF=OFF -DAVM_JIT_TARGET_ARCH=armv6m -DCMAKE_TOOLCHAIN_FILE=${RUNNER_TEMP}/armhf_toolchain.cmake"
           compiler_pkgs: "crossbuild-essential-armhf libc6-dbg:armhf zlib1g-dev:armhf libmbedtls-dev:armhf qemu-user qemu-user-binfmt binfmt-support"
           arch: "armhf"
           library-arch: arm-linux-gnueabihf
@@ -287,6 +330,20 @@ jobs:
           rebar3_version: "3.24.0"
           cmake_opts_other: "-DAVM_USE_LIBSODIUM=ON"
           compiler_pkgs: "libsodium-dev"
+
+        # JIT + DWARF build (riscv32)
+        - os: "ubuntu-24.04"
+          cc: "riscv32-unknown-linux-gnu-gcc"
+          cxx: "riscv32-unknown-linux-gnu-g++"
+          cflags: "-O2"
+          otp: "28"
+          elixir_version: "1.17"
+          rebar3_version: "3.24.0"
+          cmake_opts_other: "-DAVM_DISABLE_JIT=OFF -DAVM_DISABLE_JIT_DWARF=OFF -DAVM_JIT_TARGET_ARCH=riscv32 -DCMAKE_TOOLCHAIN_FILE=${RUNNER_TEMP}/riscv32_ilp32_toolchain.cmake"
+          compiler_pkgs: "qemu-user qemu-user-binfmt binfmt-support"
+          arch: "riscv32"
+          library-arch: riscv32-linux-gnu-ilp32
+          jit_target_arch: "riscv32"
 
     env:
       ImageOS: ${{ matrix.container == 'ubuntu:20.04' && 'ubuntu20' || matrix.os == 'ubuntu-20.04' && 'ubuntu20' || matrix.os == 'ubuntu-22.04' && 'ubuntu22' || matrix.os == 'ubuntu-24.04' && 'ubuntu24' || 'ubuntu24' }}
@@ -444,13 +501,26 @@ jobs:
       run: sudo apt update -y
 
     - name: "Install deps"
-      if: matrix.container != ''
-      run: sudo apt install -y ${{ matrix.compiler_pkgs}} cmake gperf zlib1g-dev doxygen valgrind libmbedtls-dev
+      if: matrix.container != '' && matrix.mbedtls != 'mbedtls@4'
+      run: |
+        sudo apt install -y ${{ matrix.compiler_pkgs}} cmake gperf zlib1g-dev doxygen valgrind libmbedtls-dev
+
+    - name: "Install deps (MbedTLS 4)"
+      if: matrix.container != '' && matrix.mbedtls == 'mbedtls@4'
+      run: |
+        sudo apt install -y ${{ matrix.compiler_pkgs}} cmake gperf zlib1g-dev doxygen valgrind
 
     - name: "Install deps"
-      if: matrix.container == ''
+      if: matrix.container == '' && matrix.mbedtls != 'mbedtls@4'
       run: |
-        sudo apt install -y ${{ matrix.compiler_pkgs}} cmake gperf zlib1g-dev doxygen libmbedtls-dev libc6-dbg
+        sudo apt install -y ${{ matrix.compiler_pkgs}} cmake gperf zlib1g-dev doxygen libc6-dbg libmbedtls-dev
+        # Get a more recent valgrind
+        sudo snap install valgrind --classic
+
+    - name: "Install deps (MbedTLS 4)"
+      if: matrix.container == '' && matrix.mbedtls == 'mbedtls@4'
+      run: |
+        sudo apt install -y ${{ matrix.compiler_pkgs}} cmake gperf zlib1g-dev doxygen libc6-dbg
         # Get a more recent valgrind
         sudo snap install valgrind --classic
 
@@ -486,6 +556,19 @@ jobs:
           https://repo.hex.pm
           https://cdn.jsdelivr.net/hex
 
+    - name: "Install specific MbedTLS version"
+      if: matrix.mbedtls == 'mbedtls@4'
+      run: |
+        git clone --depth 1 --branch mbedtls-4.0.0 --recurse-submodules https://github.com/Mbed-TLS/mbedtls
+        cd mbedtls
+        mkdir build
+        cd build
+        cmake -DENABLE_TESTING=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=On -DCMAKE_INSTALL_PREFIX=/usr/local ..
+        make -j$(nproc)
+        sudo make install
+        sudo ldconfig
+        echo "MBEDTLS_ROOT_DIR=/usr/local" >> $GITHUB_ENV
+
     # Builder info
     - name: "System info"
       run: |
@@ -513,12 +596,22 @@ jobs:
       id: cache
       with:
         path: 'build/tests/**/*.beam'
-        key: ${{ matrix.otp || env.DEFAULT_OTP_VERSION }}-${{ hashFiles('**/build-and-test.yaml', 'tests/**/*.erl', 'tests/**/*.hrl', 'tests/**/*.ex') }}-${{ matrix.jit_target_arch || 'nojit' }}
+        key: ${{ matrix.otp || env.DEFAULT_OTP_VERSION }}-${{ hashFiles('**/build-and-test.yaml', 'tests/**/*.erl', 'tests/**/*.hrl', 'tests/**/*.ex') }}-${{ matrix.jit_target_arch || 'nojit' }}-${{ contains(matrix.cmake_opts_other, 'AVM_DISABLE_JIT_DWARF=OFF') && 'dwarf' || 'nodwarf' }}
 
     - name: "Build: run cmake"
+      if: matrix.mbedtls != 'mbedtls@4'
       working-directory: build
       run: |
         cmake ${{ matrix.cmake_opts_fp }} ${{ matrix.cmake_opts_smp }} ${{ matrix.cmake_opts_other || env.DEFAULT_CMAKE_OPTS_OTHER }} ..
+        # git clone will use more recent timestamps than cached beam files
+        # touch them so we can benefit from the cache and avoid costly beam file rebuild.
+        find . -name '*.beam' -exec touch {} \;
+
+    - name: "Build: run cmake (MbedTLS 4)"
+      if: matrix.mbedtls == 'mbedtls@4'
+      working-directory: build
+      run: |
+        cmake -DMBEDTLS_ROOT_DIR=/usr/local ${{ matrix.cmake_opts_fp }} ${{ matrix.cmake_opts_smp }} ${{ matrix.cmake_opts_other || env.DEFAULT_CMAKE_OPTS_OTHER }} ..
         # git clone will use more recent timestamps than cached beam files
         # touch them so we can benefit from the cache and avoid costly beam file rebuild.
         find . -name '*.beam' -exec touch {} \;

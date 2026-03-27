@@ -27,13 +27,19 @@ macro(jit_precompile module_name)
             ${CMAKE_BINARY_DIR}/libs/jit/src/beams/jit.beam
             ${CMAKE_BINARY_DIR}/libs/jit/src/beams/jit_precompile.beam
             ${CMAKE_BINARY_DIR}/libs/jit/src/beams/jit_stream_binary.beam
+            ${CMAKE_BINARY_DIR}/libs/jit/src/beams/jit_dwarf.beam
             ${CMAKE_BINARY_DIR}/libs/jit/src/beams/jit_${AVM_JIT_TARGET_ARCH}.beam
             ${CMAKE_BINARY_DIR}/libs/jit/src/beams/jit_${AVM_JIT_TARGET_ARCH}_asm.beam
         )
+        if (NOT AVM_DISABLE_JIT_DWARF)
+            set(jit_precompile_dwarf_flag "dwarf")
+        else()
+            set(jit_precompile_dwarf_flag "")
+        endif()
         add_custom_command(
             OUTPUT ${AVM_JIT_TARGET_ARCH}/${module_name}.beam
             COMMAND mkdir -p ${AVM_JIT_TARGET_ARCH}
-                && erl -pa ${CMAKE_BINARY_DIR}/libs/jit/src/beams/ -noshell -s jit_precompile -s init stop -- ${AVM_JIT_TARGET_ARCH} ${AVM_JIT_TARGET_ARCH}/ ${module_name}.beam
+                && erl -pa ${CMAKE_BINARY_DIR}/libs/jit/src/beams/ -noshell -s jit_precompile -s init stop -- ${AVM_JIT_TARGET_ARCH} ${AVM_JIT_TARGET_ARCH}/ ${jit_precompile_dwarf_flag} ${module_name}.beam
             DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${module_name}.beam ${jit_compiler_modules} jit
             COMMENT "Compiling ${module_name}.beam to ${AVM_JIT_TARGET_ARCH}"
             VERBATIM
@@ -421,6 +427,7 @@ compile_erlang(test_binaries_ordering)
 compile_erlang(test_lists_ordering)
 compile_erlang(test_tuples_ordering)
 compile_erlang(test_types_ordering)
+compile_erlang(test_cmp_term)
 compile_erlang(test_bigintegers_ordering)
 compile_erlang(test_refs_ordering)
 compile_erlang(test_atom_ordering)
@@ -548,6 +555,8 @@ compile_erlang(bs_get_integer_fixed_size)
 compile_erlang(bs_get_float_dynamic_size)
 compile_erlang(test_is_not_equal)
 compile_assembler(test_is_not_equal_asm)
+compile_erlang(test_make_fun2)
+compile_erlang(test_allocate_zero)
 compile_erlang(test_has_map_fields)
 compile_erlang(test_bs_create_bin_accum)
 compile_assembler(test_bs_create_bin_accum_asm)
@@ -971,6 +980,7 @@ set(erlang_test_beams
     test_lists_ordering.beam
     test_tuples_ordering.beam
     test_types_ordering.beam
+    test_cmp_term.beam
     test_bigintegers_ordering.beam
     test_refs_ordering.beam
     test_atom_ordering.beam
@@ -1103,6 +1113,8 @@ set(erlang_test_beams
     bs_get_float_dynamic_size.beam
     test_is_not_equal.beam
     test_is_not_equal_asm.beam
+    test_make_fun2.beam
+    test_allocate_zero.beam
     test_has_map_fields.beam
     test_bs_create_bin_accum.beam
     bs_context_to_binary_with_offset.beam
