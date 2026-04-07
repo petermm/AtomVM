@@ -152,7 +152,7 @@ void context_destroy(Context *ctx)
 
     // Process any link/unlink/monitor/demonitor signal that arrived recently
     // Also process ProcessInfoRequestSignal so caller isn't trapped waiting
-    MailboxMessage *signal_message = mailbox_process_outer_list(&ctx->mailbox);
+    MailboxMessage *signal_message = mailbox_process_outer_list_locked(ctx);
     while (signal_message) {
         switch (signal_message->type) {
             case ProcessInfoRequestSignal: {
@@ -217,6 +217,7 @@ void context_destroy(Context *ctx)
             case MonitorDownSignal: // likewise
             case CodeServerResumeSignal:
                 break;
+            case AliasMessage:
             case NormalMessage: {
                 UNREACHABLE();
             }

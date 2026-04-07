@@ -55,6 +55,7 @@ start() ->
             ok = test_monitor_alias_explicit_unalias(fun spawn_and_monitor/2),
             ok = test_monitor_alias_reply_demonitor(fun spawn_monitor/2),
             ok = test_monitor_alias_reply_demonitor(fun spawn_and_monitor/2),
+            ok = test_monitor_alias_reply_demonitor_ordering(),
             ok = test_monitor_down_alias(fun spawn_monitor/2),
             ok = test_monitor_down_alias(fun spawn_and_monitor/2),
             ok;
@@ -317,6 +318,38 @@ test_monitor_alias_explicit_unalias(SpawnFun) ->
 test_monitor_alias_reply_demonitor(SpawnFun) ->
     {P, Mon} = SpawnFun(fun echo_loop/0, [{alias, reply_demonitor}]),
     do_test_alias(P, Mon, fun(_Mon) -> ok end),
+    P ! quit,
+    receive
+        {'DOWN', Mon, process, P, _Reason} -> unexpected_down
+    after 200 -> ok
+    end,
+    ok.
+
+test_monitor_alias_reply_demonitor_ordering() ->
+    TestProcess = self(),
+    MonitorTarget = spawn_opt(
+        fun() ->
+            receive
+                stop -> ok
+            end
+        end,
+        []
+    ),
+    P = spawn_opt(fun() -> delayed_alias_owner_loop(TestProcess, MonitorTarget) end, []),
+    {alias_ready, Mon} = recv_one(),
+    Mon ! alias_first,
+    P ! direct_second,
+    Mon ! alias_third,
+    P ! go,
+    ready = recv_one(),
+    alias_first = recv_one(),
+    direct_second = recv_one(),
+    receive
+        alias_third -> unexpected_alias_delivery
+    after 200 -> ok
+    end,
+    P ! quit,
+    MonitorTarget ! stop,
     ok.
 
 test_monitor_down_alias(SpawnFun) ->
@@ -377,6 +410,27 @@ echo_loop() ->
         {Msg, ReplyTo} ->
             ReplyTo ! Msg,
             echo_loop()
+    end.
+
+delayed_forward_loop(TestProcess) ->
+    receive
+        go ->
+            TestProcess ! ready,
+            forward_loop(TestProcess)
+    end.
+
+delayed_alias_owner_loop(TestProcess, MonitorTarget) ->
+    Mon = erlang:monitor(process, MonitorTarget, [{alias, reply_demonitor}]),
+    TestProcess ! {alias_ready, Mon},
+    delayed_forward_loop(TestProcess).
+
+forward_loop(TestProcess) ->
+    receive
+        quit ->
+            ok;
+        Msg ->
+            TestProcess ! Msg,
+            forward_loop(TestProcess)
     end.
 
 recv_one() ->

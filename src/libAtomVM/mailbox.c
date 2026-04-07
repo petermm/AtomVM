@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 
+#include "context.h"
 #include "memory.h"
 #include "scheduler.h"
 #include "synclist.h"
@@ -37,6 +38,29 @@
 #endif
 
 #define ADDITIONAL_PROCESSING_MEMORY_SIZE 4
+#define ALIAS_MESSAGE_METADATA_TERM_COUNT ((sizeof(uint64_t) + sizeof(term) - 1) / sizeof(term))
+
+union AliasMessageMetadata
+{
+    uint64_t ref_ticks;
+    term terms[ALIAS_MESSAGE_METADATA_TERM_COUNT];
+};
+
+struct AliasMessage
+{
+    MailboxMessage base;
+    term message;
+    term *heap_end;
+    union AliasMessageMetadata metadata;
+    term storage[];
+};
+
+struct MessageLike
+{
+    MailboxMessage base;
+    term message;
+    term *heap_end;
+};
 
 void mailbox_init(Mailbox *mbx)
 {
@@ -71,6 +95,16 @@ _Static_assert(offsetof(struct TermSignal, heap_end) == offsetof(HeapFragment, s
     "TermSignal.heap_end doesn't match HeapFragment.storage[1]");
 _Static_assert(sizeof(struct TermSignal) == sizeof(HeapFragment) + 2 * sizeof(term) ? 1 : 0,
     "sizeof(TermSignal) doesn't match sizeof(HeapFragment) + 2 terms");
+_Static_assert(offsetof(struct AliasMessage, message) == offsetof(struct MessageLike, message) ? 1 : 0,
+    "AliasMessage.message doesn't match MessageLike.message");
+_Static_assert(offsetof(struct AliasMessage, heap_end) == offsetof(struct MessageLike, heap_end) ? 1 : 0,
+    "AliasMessage.heap_end doesn't match MessageLike.heap_end");
+
+static inline term mailbox_message_payload(MailboxMessage *m)
+{
+    struct MessageLike *message = (struct MessageLike *) m;
+    return message->message;
+}
 
 HeapFragment *mailbox_message_to_heap_fragment(void *m, term *heap_end)
 {
@@ -84,6 +118,58 @@ HeapFragment *mailbox_message_to_heap_fragment(void *m, term *heap_end)
     return fragment;
 }
 
+static HeapFragment *mailbox_alias_message_to_heap_fragment(struct AliasMessage *alias_message)
+{
+    HeapFragment *fragment = mailbox_message_to_heap_fragment(alias_message, alias_message->heap_end);
+    for (size_t i = 0; i < ALIAS_MESSAGE_METADATA_TERM_COUNT; ++i) {
+        alias_message->metadata.terms[i] = term_nil();
+    }
+
+    return fragment;
+}
+
+static void mailbox_alias_message_dispose_unsent(struct AliasMessage *alias_message, GlobalContext *global, bool from_task)
+{
+    term mso_list = alias_message->storage[STORAGE_MSO_LIST_INDEX];
+    memory_sweep_mso_list(mso_list, global, from_task);
+    free(alias_message);
+}
+
+static void mailbox_reply_demonitor(Context *ctx, uint64_t ref_ticks, bool process_table_locked)
+{
+    bool is_monitoring = false;
+    term monitor_pid = context_get_monitor_pid(ctx, ref_ticks, &is_monitoring);
+    context_demonitor(ctx, ref_ticks);
+    if (LIKELY(is_monitoring) && LIKELY(!term_is_invalid_term(monitor_pid))) {
+        int local_process_id = term_to_local_process_id(monitor_pid);
+        Context *target = process_table_locked
+            ? globalcontext_get_process_nolock(ctx->global, local_process_id)
+            : globalcontext_get_process_lock(ctx->global, local_process_id);
+        if (target) {
+            mailbox_send_ref_signal(target, DemonitorSignal, ref_ticks);
+            if (!process_table_locked) {
+                globalcontext_get_process_unlock(ctx->global, target);
+            }
+        }
+    }
+}
+
+static size_t mailbox_message_size(MailboxMessage *msg)
+{
+    switch (msg->type) {
+        case NormalMessage: {
+            Message *normal_message = CONTAINER_OF(msg, Message, base);
+            return sizeof(Message) + (size_t) (normal_message->heap_end - normal_message->storage);
+        }
+        case AliasMessage: {
+            struct AliasMessage *alias_message = CONTAINER_OF(msg, struct AliasMessage, base);
+            return sizeof(struct AliasMessage) + (size_t) (alias_message->heap_end - alias_message->storage);
+        }
+        default:
+            return 0;
+    }
+}
+
 // Dispose message. Normal / signal messages are not destroyed, instead they
 // are appended to the current heap.
 void mailbox_message_dispose(MailboxMessage *m, Heap *heap)
@@ -93,6 +179,13 @@ void mailbox_message_dispose(MailboxMessage *m, Heap *heap)
             Message *normal_message = CONTAINER_OF(m, Message, base);
             term mso_list = normal_message->storage[STORAGE_MSO_LIST_INDEX];
             HeapFragment *fragment = mailbox_message_to_heap_fragment(normal_message, normal_message->heap_end);
+            memory_heap_append_fragment(heap, fragment, mso_list);
+            break;
+        }
+        case AliasMessage: {
+            struct AliasMessage *alias_message = CONTAINER_OF(m, struct AliasMessage, base);
+            term mso_list = alias_message->storage[STORAGE_MSO_LIST_INDEX];
+            HeapFragment *fragment = mailbox_alias_message_to_heap_fragment(alias_message);
             memory_heap_append_fragment(heap, fragment, mso_list);
             break;
         }
@@ -193,16 +286,12 @@ size_t mailbox_size(Mailbox *mbox)
     MailboxMessage *msg = mbox->outer_first;
     while (msg) {
         // We don't count signals.
-        if (msg->type == NormalMessage) {
-            Message *normal_message = CONTAINER_OF(msg, Message, base);
-            result += sizeof(Message) + normal_message->heap_end - normal_message->storage;
-        }
+        result += mailbox_message_size(msg);
         msg = msg->next;
     }
     msg = mbox->inner_first;
     while (msg) {
-        Message *normal_message = CONTAINER_OF(msg, Message, base);
-        result += sizeof(Message) + normal_message->heap_end - normal_message->storage;
+        result += mailbox_message_size(msg);
         msg = msg->next;
     }
     return result;
@@ -266,10 +355,35 @@ Message *mailbox_message_create_normal_message_from_term(term t)
     return CONTAINER_OF(message, Message, base);
 }
 
+static MailboxMessage *mailbox_message_create_alias_message_from_term(term t, uint64_t ref_ticks)
+{
+    unsigned long estimated_mem_usage = memory_estimate_usage(t) + 1; // mso_list
+
+    struct AliasMessage *msg = malloc(sizeof(struct AliasMessage) + estimated_mem_usage * sizeof(term));
+    if (IS_NULL_PTR(msg)) {
+        fprintf(stderr, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
+        return NULL;
+    }
+
+    msg->base.type = AliasMessage;
+    msg->message = memory_copy_term_tree_to_storage(msg->storage, &msg->heap_end, t);
+    msg->metadata.ref_ticks = ref_ticks;
+
+    return &msg->base;
+}
+
 void mailbox_send(Context *c, term t)
 {
     MailboxMessage *msg = mailbox_message_create_from_term(NormalMessage, t);
     mailbox_post_message(c, msg);
+}
+
+void mailbox_send_alias(Context *c, term t, uint64_t ref_ticks)
+{
+    MailboxMessage *msg = mailbox_message_create_alias_message_from_term(t, ref_ticks);
+    if (LIKELY(msg != NULL)) {
+        mailbox_post_message(c, msg);
+    }
 }
 
 void mailbox_send_term_signal(Context *c, enum MessageType type, term t)
@@ -364,8 +478,9 @@ void mailbox_reset(Mailbox *mbox)
     mbox->receive_pointer_prev = NULL;
 }
 
-MailboxMessage *mailbox_process_outer_list(Mailbox *mbox)
+static MailboxMessage *mailbox_process_outer_list_maybe_locked(Context *ctx, bool process_table_locked)
 {
+    Mailbox *mbox = &ctx->mailbox;
     // Empty outer list using CAS
     MailboxMessage *current = mbox->outer_first;
 #if !defined(AVM_NO_SMP) || defined(AVM_TASK_DRIVER_ENABLED)
@@ -374,38 +489,64 @@ MailboxMessage *mailbox_process_outer_list(Mailbox *mbox)
 #else
     mbox->outer_first = NULL;
 #endif
-    // Reverse the list
-    MailboxMessage *previous_normal = NULL;
-    MailboxMessage *previous_signal = NULL;
-    MailboxMessage *last_normal = NULL;
+    // Reverse the detached LIFO outer list into received order first, so any
+    // alias side effects happen oldest-to-newest.
+    MailboxMessage *received_first = NULL;
     while (current) {
         MailboxMessage *next = current->next;
-        if (current->type == NormalMessage) {
-            // Get last normal to update inner_last.
-            if (last_normal == NULL) {
-                last_normal = current;
+        current->next = received_first;
+        received_first = current;
+        current = next;
+    }
+
+    MailboxMessage *first_normal = NULL;
+    MailboxMessage *last_normal = NULL;
+    MailboxMessage *first_signal = NULL;
+    MailboxMessage *last_signal = NULL;
+    current = received_first;
+    while (current) {
+        MailboxMessage *next = current->next;
+        if (current->type == NormalMessage || current->type == AliasMessage) {
+            if (current->type == AliasMessage) {
+                struct AliasMessage *alias_message = CONTAINER_OF(current, struct AliasMessage, base);
+                struct MonitorAlias *alias = context_find_alias(ctx, alias_message->metadata.ref_ticks);
+                if (IS_NULL_PTR(alias)) {
+                    mailbox_alias_message_dispose_unsent(alias_message, ctx->global, false);
+                    current = next;
+                    continue;
+                }
+                if (alias->alias_type == ContextMonitorAliasReplyDemonitor) {
+                    mailbox_reply_demonitor(ctx, alias_message->metadata.ref_ticks, process_table_locked);
+                }
             }
-            current->next = previous_normal;
-            previous_normal = current;
+            current->next = NULL;
+            if (first_normal == NULL) {
+                first_normal = current;
+            } else {
+                last_normal->next = current;
+            }
+            last_normal = current;
         } else {
-            current->next = previous_signal;
-            previous_signal = current;
+            current->next = NULL;
+            if (first_signal == NULL) {
+                first_signal = current;
+            } else {
+                last_signal->next = current;
+            }
+            last_signal = current;
         }
         current = next;
     }
-    // If we did enqueue some normal messages, lastNormal is the first
-    // one in outer list (last received one)
-    if (last_normal) {
-        // previousNormal is new list head
+    if (first_normal) {
         // If we had no receive_pointer, it should be this list head
         if (mbox->receive_pointer == NULL) {
-            mbox->receive_pointer = previous_normal;
+            mbox->receive_pointer = first_normal;
             // If we had a prev, set the prev's next to the new current.
             if (mbox->receive_pointer_prev) {
-                mbox->receive_pointer_prev->next = previous_normal;
+                mbox->receive_pointer_prev->next = first_normal;
             } else if (mbox->inner_first == NULL) {
                 // If we had no first, this is the first message.
-                mbox->inner_first = previous_normal;
+                mbox->inner_first = first_normal;
             }
         }
 
@@ -414,12 +555,22 @@ MailboxMessage *mailbox_process_outer_list(Mailbox *mbox)
         if (mbox->inner_last) {
             // This may be mbox->receive_pointer_prev which we
             // are updating a second time here.
-            mbox->inner_last->next = previous_normal;
+            mbox->inner_last->next = first_normal;
         }
         mbox->inner_last = last_normal;
     }
 
-    return previous_signal;
+    return first_signal;
+}
+
+MailboxMessage *mailbox_process_outer_list(Context *ctx)
+{
+    return mailbox_process_outer_list_maybe_locked(ctx, false);
+}
+
+MailboxMessage *mailbox_process_outer_list_locked(Context *ctx)
+{
+    return mailbox_process_outer_list_maybe_locked(ctx, true);
 }
 
 void mailbox_next(Mailbox *mbox)
@@ -443,11 +594,10 @@ bool mailbox_peek(Context *c, term *out)
         return false;
     }
 
-    Message *data_message = CONTAINER_OF(m, Message, base);
+    term message = mailbox_message_payload(m);
+    TRACE("Pid %i is peeking 0x%lx.\n", c->process_id, message);
 
-    TRACE("Pid %i is peeking 0x%lx.\n", c->process_id, data_message->message);
-
-    *out = data_message->message;
+    *out = message;
 
     return true;
 }
@@ -489,7 +639,7 @@ Message *mailbox_first(Mailbox *mbox)
     mailbox_reset(mbox);
     MailboxMessage *msg = mbox->receive_pointer;
     Message *result = NULL;
-    if (msg) {
+    if (LIKELY(msg != NULL) && LIKELY(msg->type == NormalMessage)) {
         result = CONTAINER_OF(msg, Message, base);
     }
     return result;
@@ -497,12 +647,11 @@ Message *mailbox_first(Mailbox *mbox)
 
 void mailbox_crashdump(Context *ctx)
 {
-    // Signal messages are now in reverse order but the process crashed anyway
-    ctx->mailbox.outer_first = mailbox_process_outer_list(&ctx->mailbox);
+    // Move any pending outer-list items into the mailbox lists before dumping.
+    ctx->mailbox.outer_first = mailbox_process_outer_list(ctx);
     MailboxMessage *msg = ctx->mailbox.inner_first;
     while (msg) {
-        Message *data_message = CONTAINER_OF(msg, Message, base);
-        term_display(stderr, data_message->message, ctx);
+        term_display(stderr, mailbox_message_payload(msg), ctx);
         fprintf(stderr, "\n");
         msg = msg->next;
     }

@@ -1171,9 +1171,12 @@ static NativeHandlerResult process_echo_mailbox(Context *ctx)
 {
     NativeHandlerResult result = NativeContinue;
 
-    Message *msg = mailbox_first(&ctx->mailbox);
-    term pid = term_get_tuple_element(msg->message, 0);
-    term val = term_get_tuple_element(msg->message, 1);
+    term msg;
+    if (UNLIKELY(!mailbox_peek(ctx, &msg))) {
+        return result;
+    }
+    term pid = term_get_tuple_element(msg, 0);
+    term val = term_get_tuple_element(msg, 1);
 
     if (val == CLOSE_ATOM) {
         if (UNLIKELY(memory_ensure_free_with_roots(ctx, TUPLE_SIZE(2), 1, &pid, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
@@ -1281,11 +1284,10 @@ static NativeHandlerResult process_console_mailbox(Context *ctx)
 {
     NativeHandlerResult result = NativeContinue;
     while (result == NativeContinue) {
-        Message *message = mailbox_first(&ctx->mailbox);
-        if (message == NULL) {
+        term msg;
+        if (!mailbox_peek(ctx, &msg)) {
             break;
         }
-        term msg = message->message;
 
         result = process_console_message(ctx, msg);
 
@@ -1673,19 +1675,7 @@ static term nif_erlang_send_2(Context *ctx, int argc, term argv[])
         globalcontext_send_message(glb, local_process_id, argv[1]);
 
     } else if (term_is_process_reference(target)) {
-        int32_t process_id = term_process_ref_to_process_id(target);
-        int64_t ref_ticks = term_to_ref_ticks(target);
-        Context *p = globalcontext_get_process_lock(glb, process_id);
-        if (p) {
-            struct MonitorAlias *alias = context_find_alias(p, ref_ticks);
-            if (alias != NULL) {
-                if (alias->alias_type == ContextMonitorAliasReplyDemonitor) {
-                    context_unalias(alias);
-                }
-                mailbox_send(p, argv[1]);
-            }
-            globalcontext_get_process_unlock(glb, p);
-        }
+        globalcontext_send_message_to_alias(glb, target, argv[1]);
     } else if (term_is_atom(target)) {
         // We need to hold a lock on the processes_table until the message is sent to avoid a race condition,
         // otherwise the receiving process could be killed at any point between checking it is registered,

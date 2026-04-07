@@ -82,6 +82,7 @@ typedef struct Message Message;
 enum MessageType
 {
     NormalMessage,
+    AliasMessage,
     KillSignal,
     GCSignal,
     ProcessInfoRequestSignal,
@@ -214,10 +215,21 @@ size_t mailbox_size(Mailbox *mbox);
  * @brief Process the outer list of messages.
  *
  * @details To be called from the process only
- * @param mbox the mailbox to work with
+ * @param ctx the owner of the mailbox
  * @return the signal messages in received order.
  */
-MailboxMessage *mailbox_process_outer_list(Mailbox *mbox);
+MailboxMessage *mailbox_process_outer_list(Context *ctx);
+
+/**
+ * @brief Process the outer list of messages while the process table is locked.
+ *
+ * @details To be called from the process only while holding the global
+ * process table lock for the owning context.
+ *
+ * @param ctx the owner of the mailbox
+ * @return the signal messages in received order.
+ */
+MailboxMessage *mailbox_process_outer_list_locked(Context *ctx);
 
 /**
  * @brief Sends a message to a certain mailbox.
@@ -228,6 +240,18 @@ MailboxMessage *mailbox_process_outer_list(Mailbox *mbox);
  * @param t the term that will be sent.
  */
 void mailbox_send(Context *c, term t);
+
+/**
+ * @brief Sends a message to a process alias.
+ *
+ * @details The alias is resolved by the recipient when it processes incoming
+ * mailbox items, so monitor list mutations stay on the owning thread.
+ *
+ * @param c the process context.
+ * @param t the term that will be sent.
+ * @param ref_ticks the alias reference ticks.
+ */
+void mailbox_send_alias(Context *c, term t, uint64_t ref_ticks);
 
 /**
  * @brief Sends a term-based signal to a certain mailbox.
@@ -375,7 +399,7 @@ MailboxMessage *mailbox_take_message(Mailbox *mbox);
  * be removed later. Used by ports & drivers. To be called from the process
  * only.
  * @param mbox the mailbox to get the current message from.
- * @returns first message or NULL.
+ * @returns first normal message or NULL.
  */
 Message *mailbox_first(Mailbox *mbox);
 

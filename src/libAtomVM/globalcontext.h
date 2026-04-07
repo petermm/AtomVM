@@ -257,6 +257,18 @@ bool globalcontext_process_exists(GlobalContext *glb, int32_t process_id);
 void globalcontext_send_message(GlobalContext *glb, int32_t process_id, term t);
 
 /**
+ * @brief Send a message to a process alias.
+ *
+ * @details The alias is resolved by the target process on its own thread when
+ * it processes incoming mailbox items.
+ *
+ * @param glb the global context (that owns the process table).
+ * @param alias the target process reference / alias.
+ * @param t the message to send.
+ */
+void globalcontext_send_message_to_alias(GlobalContext *glb, term alias, term t);
+
+/**
  * @brief Send a message to a process from another process.
  * There should be a lock on the process table. This variant can be used by
  * listener handlers as an optimization (instead of sending a message to the

@@ -362,6 +362,17 @@ void globalcontext_send_message(GlobalContext *glb, int32_t process_id, term t)
     }
 }
 
+void globalcontext_send_message_to_alias(GlobalContext *glb, term alias, term t)
+{
+    int32_t process_id = term_process_ref_to_process_id(alias);
+    uint64_t ref_ticks = term_to_ref_ticks(alias);
+    Context *p = globalcontext_get_process_lock(glb, process_id);
+    if (p) {
+        mailbox_send_alias(p, t, ref_ticks);
+        globalcontext_get_process_unlock(glb, p);
+    }
+}
+
 void globalcontext_send_message_nolock(GlobalContext *glb, int32_t process_id, term t)
 {
     Context *p = globalcontext_get_process_nolock(glb, process_id);
