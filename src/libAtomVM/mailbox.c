@@ -99,6 +99,10 @@ _Static_assert(offsetof(struct AliasMessage, message) == offsetof(struct Message
     "AliasMessage.message doesn't match MessageLike.message");
 _Static_assert(offsetof(struct AliasMessage, heap_end) == offsetof(struct MessageLike, heap_end) ? 1 : 0,
     "AliasMessage.heap_end doesn't match MessageLike.heap_end");
+_Static_assert(offsetof(struct AliasMessage, message) == offsetof(struct Message, message) ? 1 : 0,
+    "AliasMessage.message doesn't match Message.message");
+_Static_assert(offsetof(struct AliasMessage, heap_end) == offsetof(struct Message, heap_end) ? 1 : 0,
+    "AliasMessage.heap_end doesn't match Message.heap_end");
 
 static inline term mailbox_message_payload(MailboxMessage *m)
 {
@@ -639,7 +643,7 @@ Message *mailbox_first(Mailbox *mbox)
     mailbox_reset(mbox);
     MailboxMessage *msg = mbox->receive_pointer;
     Message *result = NULL;
-    if (LIKELY(msg != NULL) && LIKELY(msg->type == NormalMessage)) {
+    if (LIKELY(msg != NULL) && LIKELY(msg->type == NormalMessage || msg->type == AliasMessage)) {
         result = CONTAINER_OF(msg, Message, base);
     }
     return result;

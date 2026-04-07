@@ -399,7 +399,8 @@ MailboxMessage *mailbox_take_message(Mailbox *mbox);
  * be removed later. Used by ports & drivers. To be called from the process
  * only.
  * @param mbox the mailbox to get the current message from.
- * @returns first normal message or NULL.
+ * @returns first normal or alias message as a Message pointer, or NULL.
+ * Callers must only access the `message` field (not `storage`).
  */
 Message *mailbox_first(Mailbox *mbox);
 
