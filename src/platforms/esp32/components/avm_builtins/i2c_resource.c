@@ -85,6 +85,36 @@ static term create_error_tuple(Context *ctx, term reason)
     return create_pair(ctx, ERROR_ATOM, reason);
 }
 
+static bool is_i2c_resource_open(const struct I2CResource *rsrc_obj)
+{
+    return rsrc_obj->i2c_num != I2C_NUM_MAX;
+}
+
+static void reset_i2c_transmission_state(struct I2CResource *rsrc_obj)
+{
+    if (rsrc_obj->cmd != NULL) {
+        i2c_cmd_link_delete(rsrc_obj->cmd);
+        rsrc_obj->cmd = NULL;
+    }
+    rsrc_obj->transmitting_pid = term_invalid_term();
+}
+
+static esp_err_t close_i2c_resource(struct I2CResource *rsrc_obj)
+{
+    reset_i2c_transmission_state(rsrc_obj);
+
+    if (!is_i2c_resource_open(rsrc_obj)) {
+        return ESP_OK;
+    }
+
+    esp_err_t err = i2c_driver_delete(rsrc_obj->i2c_num);
+    if (err == ESP_OK) {
+        rsrc_obj->i2c_num = I2C_NUM_MAX;
+    }
+
+    return err;
+}
+
 static bool is_i2c_resource(GlobalContext *global, term t)
 {
     bool ret = term_is_tuple(t)
@@ -108,6 +138,15 @@ static bool to_i2c_resource(term i2c_resource, struct I2CResource **rsrc_obj, Co
     *rsrc_obj = (struct I2CResource *) rsrc_obj_ptr;
 
     return true;
+}
+
+static bool to_open_i2c_resource(term i2c_resource, struct I2CResource **rsrc_obj, Context *ctx)
+{
+    if (!to_i2c_resource(i2c_resource, rsrc_obj, ctx)) {
+        return false;
+    }
+
+    return is_i2c_resource_open(*rsrc_obj);
 }
 
 //
@@ -214,10 +253,11 @@ static term nif_i2c_open(Context *ctx, int argc, term argv[])
     }
     rsrc_obj->transmitting_pid = term_invalid_term();
     rsrc_obj->i2c_num = i2c_num;
+    rsrc_obj->cmd = NULL;
     rsrc_obj->send_timeout_ms = send_timeout_ms_val;
 
     if (UNLIKELY(memory_ensure_free(ctx, TERM_BOXED_RESOURCE_SIZE) != MEMORY_GC_OK)) {
-        i2c_driver_delete(i2c_num);
+        close_i2c_resource(rsrc_obj);
         enif_release_resource(rsrc_obj);
         ESP_LOGW(TAG, "Failed to allocate memory: %s:%i.", __FILE__, __LINE__);
         RAISE_ERROR(OUT_OF_MEMORY_ATOM);
@@ -232,7 +272,7 @@ static term nif_i2c_open(Context *ctx, int argc, term argv[])
     // {'$i2c', Resource :: resource(), Ref :: reference()} :: i2c()
     size_t requested_size = TUPLE_SIZE(3) + REF_SIZE;
     if (UNLIKELY(memory_ensure_free_with_roots(ctx, requested_size, 1, &obj, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
-        i2c_driver_delete(i2c_num);
+        close_i2c_resource(rsrc_obj);
         ESP_LOGW(TAG, "Failed to allocate memory: %s:%i.", __FILE__, __LINE__);
         RAISE_ERROR(OUT_OF_MEMORY_ATOM);
     }
@@ -261,14 +301,14 @@ static term nif_i2c_close(Context *ctx, int argc, term argv[])
     //
     term i2c_resource = argv[0];
     struct I2CResource *rsrc_obj;
-    if (UNLIKELY(!to_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
+    if (UNLIKELY(!to_open_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
         ESP_LOGE(TAG, "Failed to convert i2c_resource");
         RAISE_ERROR(BADARG_ATOM);
     }
 
     esp_err_t err;
 
-    err = i2c_driver_delete(rsrc_obj->i2c_num);
+    err = close_i2c_resource(rsrc_obj);
     CHECK_ERROR(ctx, err, "nif_close; Failed to delete driver");
 
     return OK_ATOM;
@@ -289,7 +329,7 @@ static term nif_i2c_write_bytes(Context *ctx, int argc, term argv[])
     //
     term i2c_resource = argv[0];
     struct I2CResource *rsrc_obj;
-    if (UNLIKELY(!to_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
+    if (UNLIKELY(!to_open_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
         ESP_LOGE(TAG, "Failed to convert i2c_resource");
         RAISE_ERROR(BADARG_ATOM);
     }
@@ -395,7 +435,7 @@ static term nif_i2c_read_bytes(Context *ctx, int argc, term argv[])
     //
     term i2c_resource = argv[0];
     struct I2CResource *rsrc_obj;
-    if (UNLIKELY(!to_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
+    if (UNLIKELY(!to_open_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
         ESP_LOGE(TAG, "Failed to convert i2c_resource");
         RAISE_ERROR(BADARG_ATOM);
     }
@@ -502,7 +542,7 @@ static term nif_i2c_begin_transmission(Context *ctx, int argc, term argv[])
     //
     term i2c_resource = argv[0];
     struct I2CResource *rsrc_obj;
-    if (UNLIKELY(!to_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
+    if (UNLIKELY(!to_open_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
         ESP_LOGE(TAG, "Failed to convert i2c_resource");
         RAISE_ERROR(BADARG_ATOM);
     }
@@ -567,7 +607,7 @@ static term nif_i2c_enqueue_write_bytes(Context *ctx, int argc, term argv[])
     //
     term i2c_resource = argv[0];
     struct I2CResource *rsrc_obj;
-    if (UNLIKELY(!to_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
+    if (UNLIKELY(!to_open_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
         ESP_LOGE(TAG, "Failed to convert i2c_resource");
         RAISE_ERROR(BADARG_ATOM);
     }
@@ -620,7 +660,7 @@ static term nif_i2c_end_transmission(Context *ctx, int argc, term argv[])
     //
     term i2c_resource = argv[0];
     struct I2CResource *rsrc_obj;
-    if (UNLIKELY(!to_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
+    if (UNLIKELY(!to_open_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
         ESP_LOGE(TAG, "Failed to convert i2c_resource");
         RAISE_ERROR(BADARG_ATOM);
     }
@@ -655,9 +695,9 @@ static term nif_i2c_end_transmission(Context *ctx, int argc, term argv[])
 
     err = i2c_master_cmd_begin(rsrc_obj->i2c_num, rsrc_obj->cmd, MS_TO_TICKS(rsrc_obj->send_timeout_ms));
     i2c_cmd_link_delete(rsrc_obj->cmd);
-    CHECK_ERROR(ctx, err, "nif_write_bytes; run the command");
-
+    rsrc_obj->cmd = NULL;
     rsrc_obj->transmitting_pid = term_invalid_term();
+    CHECK_ERROR(ctx, err, "nif_write_bytes; run the command");
 
     return OK_ATOM;
 }
@@ -671,7 +711,7 @@ static void i2c_resource_dtor(ErlNifEnv *caller_env, void *obj)
     UNUSED(caller_env);
     struct I2CResource *rsrc_obj = (struct I2CResource *) obj;
 
-    esp_err_t err = i2c_driver_delete(rsrc_obj->i2c_num);
+    esp_err_t err = close_i2c_resource(rsrc_obj);
     if (UNLIKELY(err != ESP_OK)) {
         ESP_LOGW(TAG, "Failed to delete driver in resource d'tor.  err=%i", err);
     }
