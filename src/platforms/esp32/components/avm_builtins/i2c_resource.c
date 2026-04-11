@@ -410,27 +410,49 @@ static term nif_i2c_write_bytes(Context *ctx, int argc, term argv[])
 
     esp_err_t err;
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    {
-        err = i2c_master_start(cmd);
-        CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue start bit");
 
-        err = i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, ACK_ENABLE);
-        CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue I2C bus address");
-
-        if (!term_is_invalid_term(register_)) {
-            err = i2c_master_write_byte(cmd, register_address, ACK_ENABLE);
-            CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue register address");
-        }
-
-        err = i2c_master_write(cmd, buf, data_len, ACK_ENABLE);
-        CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue write data");
-
-        err = i2c_master_stop(cmd);
-        CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue stop bit");
+    err = i2c_master_start(cmd);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_write_bytes; enqueue start bit: err: %i.", err);
+        goto cleanup_write;
     }
+
+    err = i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, ACK_ENABLE);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_write_bytes; enqueue I2C bus address: err: %i.", err);
+        goto cleanup_write;
+    }
+
+    if (!term_is_invalid_term(register_)) {
+        err = i2c_master_write_byte(cmd, register_address, ACK_ENABLE);
+        if (UNLIKELY(err != ESP_OK)) {
+            ESP_LOGE(TAG, "nif_write_bytes; enqueue register address: err: %i.", err);
+            goto cleanup_write;
+        }
+    }
+
+    err = i2c_master_write(cmd, buf, data_len, ACK_ENABLE);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_write_bytes; enqueue write data: err: %i.", err);
+        goto cleanup_write;
+    }
+
+    err = i2c_master_stop(cmd);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_write_bytes; enqueue stop bit: err: %i.", err);
+        goto cleanup_write;
+    }
+
     err = i2c_master_cmd_begin(rsrc_obj->i2c_num, cmd, MS_TO_TICKS(rsrc_obj->send_timeout_ms));
+
+cleanup_write:
     i2c_cmd_link_delete(cmd);
-    CHECK_ERROR(ctx, err, "nif_write_bytes; run the command");
+    if (UNLIKELY(err != ESP_OK)) {
+        if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2)) != MEMORY_GC_OK)) {
+            return OUT_OF_MEMORY_ATOM;
+        }
+        return create_error_tuple(ctx, esp_err_to_term(ctx->global, err));
+    }
 
     //
     // return result
@@ -515,28 +537,59 @@ static term nif_i2c_read_bytes(Context *ctx, int argc, term argv[])
 
     esp_err_t err;
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    {
-        err = i2c_master_start(cmd);
-        CHECK_ERROR(ctx, err, "nif_read_bytes; enqueue start bit");
 
-        if (!term_is_invalid_term(register_)) {
-            err = i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, ACK_ENABLE);
-            err = i2c_master_write_byte(cmd, register_address, ACK_ENABLE);
-            err = i2c_master_start(cmd);
-        }
-
-        err = i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_READ, ACK_ENABLE);
-        CHECK_ERROR(ctx, err, "nif_read_bytes; enqueue I2C bus address");
-
-        err = i2c_master_read(cmd, buf, read_count, I2C_MASTER_LAST_NACK);
-        CHECK_ERROR(ctx, err, "nif_read_bytes; enqueue write data");
-
-        err = i2c_master_stop(cmd);
-        CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue stop bit");
+    err = i2c_master_start(cmd);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_read_bytes; enqueue start bit: err: %i.", err);
+        goto cleanup_read;
     }
+
+    if (!term_is_invalid_term(register_)) {
+        err = i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, ACK_ENABLE);
+        if (UNLIKELY(err != ESP_OK)) {
+            ESP_LOGE(TAG, "nif_read_bytes; enqueue write address: err: %i.", err);
+            goto cleanup_read;
+        }
+        err = i2c_master_write_byte(cmd, register_address, ACK_ENABLE);
+        if (UNLIKELY(err != ESP_OK)) {
+            ESP_LOGE(TAG, "nif_read_bytes; enqueue register address: err: %i.", err);
+            goto cleanup_read;
+        }
+        err = i2c_master_start(cmd);
+        if (UNLIKELY(err != ESP_OK)) {
+            ESP_LOGE(TAG, "nif_read_bytes; enqueue repeated start: err: %i.", err);
+            goto cleanup_read;
+        }
+    }
+
+    err = i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_READ, ACK_ENABLE);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_read_bytes; enqueue I2C bus address: err: %i.", err);
+        goto cleanup_read;
+    }
+
+    err = i2c_master_read(cmd, buf, read_count, I2C_MASTER_LAST_NACK);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_read_bytes; enqueue read data: err: %i.", err);
+        goto cleanup_read;
+    }
+
+    err = i2c_master_stop(cmd);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_read_bytes; enqueue stop bit: err: %i.", err);
+        goto cleanup_read;
+    }
+
     err = i2c_master_cmd_begin(rsrc_obj->i2c_num, cmd, MS_TO_TICKS(rsrc_obj->send_timeout_ms));
+
+cleanup_read:
     i2c_cmd_link_delete(cmd);
-    CHECK_ERROR(ctx, err, "nif_write_bytes; run the command");
+    if (UNLIKELY(err != ESP_OK)) {
+        if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2)) != MEMORY_GC_OK)) {
+            return OUT_OF_MEMORY_ATOM;
+        }
+        return create_error_tuple(ctx, esp_err_to_term(ctx->global, err));
+    }
 
     //
     // return result
@@ -598,17 +651,30 @@ static term nif_i2c_begin_transmission(Context *ctx, int argc, term argv[])
 
     esp_err_t err;
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    {
-        err = i2c_master_start(cmd);
-        CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue start bit");
 
-        err = i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, ACK_ENABLE);
-        CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue I2C bus address");
+    err = i2c_master_start(cmd);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_begin_transmission; enqueue start bit: err: %i.", err);
+        goto cleanup_begin;
     }
+
+    err = i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, ACK_ENABLE);
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_begin_transmission; enqueue I2C bus address: err: %i.", err);
+        goto cleanup_begin;
+    }
+
     rsrc_obj->transmitting_pid = term_from_local_process_id(ctx->process_id);
     rsrc_obj->cmd = cmd;
 
     return OK_ATOM;
+
+cleanup_begin:
+    i2c_cmd_link_delete(cmd);
+    if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2)) != MEMORY_GC_OK)) {
+        return OUT_OF_MEMORY_ATOM;
+    }
+    return create_error_tuple(ctx, esp_err_to_term(ctx->global, err));
 }
 
 //
@@ -658,7 +724,14 @@ static term nif_i2c_enqueue_write_bytes(Context *ctx, int argc, term argv[])
     esp_err_t err;
     for (size_t i = 0; i < len; ++i) {
         err = i2c_master_write_byte(rsrc_obj->cmd, buf[i], ACK_ENABLE);
-        CHECK_ERROR(ctx, err, "nif_enqueue_write_bytes; enqueue i2c_master_write_byte");
+        if (UNLIKELY(err != ESP_OK)) {
+            ESP_LOGE(TAG, "nif_enqueue_write_bytes; enqueue i2c_master_write_byte: err: %i.", err);
+            reset_i2c_transmission_state(rsrc_obj);
+            if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2)) != MEMORY_GC_OK)) {
+                return OUT_OF_MEMORY_ATOM;
+            }
+            return create_error_tuple(ctx, esp_err_to_term(ctx->global, err));
+        }
     }
 
     return OK_ATOM;
@@ -710,13 +783,23 @@ static term nif_i2c_end_transmission(Context *ctx, int argc, term argv[])
 
     esp_err_t err;
     err = i2c_master_stop(rsrc_obj->cmd);
-    CHECK_ERROR(ctx, err, "nif_write_bytes; enqueue stop bit");
+    if (UNLIKELY(err != ESP_OK)) {
+        ESP_LOGE(TAG, "nif_end_transmission; enqueue stop bit: err: %i.", err);
+        goto cleanup_end;
+    }
 
     err = i2c_master_cmd_begin(rsrc_obj->i2c_num, rsrc_obj->cmd, MS_TO_TICKS(rsrc_obj->send_timeout_ms));
+
+cleanup_end:
     i2c_cmd_link_delete(rsrc_obj->cmd);
     rsrc_obj->cmd = NULL;
     rsrc_obj->transmitting_pid = term_invalid_term();
-    CHECK_ERROR(ctx, err, "nif_write_bytes; run the command");
+    if (UNLIKELY(err != ESP_OK)) {
+        if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2)) != MEMORY_GC_OK)) {
+            return OUT_OF_MEMORY_ATOM;
+        }
+        return create_error_tuple(ctx, esp_err_to_term(ctx->global, err));
+    }
 
     return OK_ATOM;
 }
