@@ -101,8 +101,6 @@ static void reset_i2c_transmission_state(struct I2CResource *rsrc_obj)
 
 static esp_err_t close_i2c_resource(struct I2CResource *rsrc_obj)
 {
-    reset_i2c_transmission_state(rsrc_obj);
-
     if (!is_i2c_resource_open(rsrc_obj)) {
         return ESP_OK;
     }
@@ -110,6 +108,7 @@ static esp_err_t close_i2c_resource(struct I2CResource *rsrc_obj)
     esp_err_t err = i2c_driver_delete(rsrc_obj->i2c_num);
     if (err == ESP_OK) {
         rsrc_obj->i2c_num = I2C_NUM_MAX;
+        reset_i2c_transmission_state(rsrc_obj);
     }
 
     return err;
