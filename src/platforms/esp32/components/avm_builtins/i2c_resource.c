@@ -294,6 +294,7 @@ static term nif_i2c_close(Context *ctx, int argc, term argv[])
 {
     TRACE("nif_close\n");
     UNUSED(argc);
+    GlobalContext *global = ctx->global;
 
     //
     // extract the resource
@@ -303,6 +304,25 @@ static term nif_i2c_close(Context *ctx, int argc, term argv[])
     if (UNLIKELY(!to_open_i2c_resource(i2c_resource, &rsrc_obj, ctx))) {
         ESP_LOGE(TAG, "Failed to convert i2c_resource");
         RAISE_ERROR(BADARG_ATOM);
+    }
+
+    //
+    // reject close if another process has an active transmission
+    //
+    if (UNLIKELY(!term_is_invalid_term(rsrc_obj->transmitting_pid))) {
+        ESP_LOGE(TAG, "nif_close: A process is in the process of transmitting.");
+
+        // {error, {einprogress, Pid :: pid()}}
+        if (UNLIKELY(memory_ensure_free(ctx, 2 * TUPLE_SIZE(2)) != MEMORY_GC_OK)) {
+            ESP_LOGW(TAG, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
+            return OUT_OF_MEMORY_ATOM;
+        }
+        term reason = create_pair(
+            ctx,
+            globalcontext_make_atom(global, EINPROGRESS_ATOMSTR),
+            rsrc_obj->transmitting_pid
+        );
+        return create_error_tuple(ctx, reason);
     }
 
     esp_err_t err;
