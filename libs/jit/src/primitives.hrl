@@ -98,6 +98,8 @@
 -define(PRIM_RAW_RAISE, 75).
 -define(PRIM_RAISE_ERROR_MFA, 76).
 -define(PRIM_TRY_CASE, 77).
+-define(PRIM_IS_DIVISIBLE, 78).
+
 
 % Parameters to ?PRIM_MEMORY_ENSURE_FREE_WITH_ROOTS
 % -define(MEMORY_NO_SHRINK, 0).

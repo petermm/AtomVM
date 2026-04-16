@@ -249,6 +249,8 @@ struct ModuleNativeInterface
     Context *(*raise_error_mfa)(
         Context *ctx, JITState *jit_state, int offset, int function_atom_index, int arity);
     void (*try_case)(Context *ctx);
+    bool (*is_divisible)(size_t value, size_t unit);
+
 };
 
 extern const ModuleNativeInterface module_native_interface;

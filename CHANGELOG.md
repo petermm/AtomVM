@@ -195,7 +195,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `maps:from_keys/2` (and `sets:from_list/1`, which is built on top of it) not
   deduplicating structurally equal but separately-allocated boxed terms, such as tuples
 - Fixed `bs_get_binary2` unit/size arithmetic so byte-aligned bitstring matches work correctly
-  (e.g. `<<Matched:16/bitstring, Rest/bits>>` where size × unit is divisible by 8)
+  (e.g. `<<Matched:16/bitstring, Rest/bits>>` where size × unit is divisible by 8);
+  also enforce unit alignment for `all` size (e.g. `<<Matched/binary-unit:16>>`)
 
 ## [0.7.0-alpha.1] - 2026-04-06
 

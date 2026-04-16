@@ -4553,6 +4553,10 @@ schedule_in:
                     size_val = size_in_bits / 8;
                 } else if (size == ALL_ATOM) {
                     size_val = remaining_bytes;
+                    if (unit != 1 && (remaining_bytes * 8) % unit != 0) {
+                        TRACE("bs_get_binary2: all: remaining size %zu not divisible by unit %u\n", remaining_bytes, (unsigned) unit);
+                        JUMP_TO_ADDRESS(mod->labels[fail]);
+                    }
                 } else {
                     TRACE("bs_get_binary2: size is neither an integer nor the atom `all`\n");
                     RAISE_ERROR(BADARG_ATOM);
