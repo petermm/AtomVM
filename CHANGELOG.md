@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated network type db() to dbm() to reflect the actual representation of the type
 
 ### Fixed
+- Fixed `bs_get_binary2` unit/size arithmetic so byte-aligned bitstring matches work correctly
+  (e.g. `<<Matched:16/bitstring, Rest/bits>>` where size × unit is divisible by 8)
 - Stop using deprecated `term_from_int32` on STM32 platform
 - Stop using deprecated `term_from_int32` on RP2 platform
 - Stop using deprecated `term_from_int32` on ESP32 platform

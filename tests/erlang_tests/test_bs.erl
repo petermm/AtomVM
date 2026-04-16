@@ -106,6 +106,8 @@ start() ->
     ok = test_bs_variable_size_bitstring(),
     ok = test_float(),
 
+    ok = test_bs_match_bitstring_modifier(),
+
     0.
 
 test_pack_small_ints({A, B, C}, Expect) ->
@@ -695,3 +697,59 @@ ext_id(X) -> X.
 
 join(X, Y) ->
     <<X/binary, Y/binary>>.
+
+test_bs_match_bitstring_modifier() ->
+    %% Dynamic size — non-byte-aligned (unsupported, should fail)
+    error = bitstring_match(<<1, 2, 3>>, 15),
+    %% Dynamic size — byte-aligned via unit=1
+    {<<1, 2>>, <<3>>} = bitstring_match(<<1, 2, 3>>, 16),
+    %% Dynamic size with offset
+    {<<2>>, <<3>>} = bitstring_match_offset(<<1, 2, 3>>, 8),
+    %% Dynamic size = 0 (empty match)
+    {<<>>, <<1, 2, 3>>} = bitstring_match(<<1, 2, 3>>, 0),
+    %% Negative dynamic size (should fail gracefully)
+    error = bitstring_match(<<1, 2, 3>>, -8),
+    %% Constant size
+    {<<1, 2>>, <<3>>} = bitstring_match_const_16(<<1, 2, 3>>),
+    %% Constant size with offset
+    {<<2>>, <<3>>} = bitstring_match_offset_const(<<1, 2, 3>>),
+    %% Unit=8 fast path (binary modifier with explicit unit)
+    {<<1, 2>>, <<3>>} = binary_match_unit8_offset(<<0, 1, 2, 3>>, 2),
+    %% All-remaining match
+    <<1, 2, 3>> = bitstring_match_all(<<1, 2, 3>>),
+    <<2, 3>> = bitstring_match_all_offset(<<1, 2, 3>>),
+    %% Unit=8 exact boundary
+    {<<1, 2, 3>>, <<>>} = binary_match_unit8_offset(<<0, 1, 2, 3>>, 3),
+    ok.
+
+bitstring_match(Bin, Size) ->
+    try
+        <<Matched:Size/bitstring, Rest/bits>> = Bin,
+        {Matched, Rest}
+    catch
+        error:_ -> error
+    end.
+
+bitstring_match_offset(Bin, Size) ->
+    <<_:8, Matched:Size/bitstring, Rest/bits>> = Bin,
+    {Matched, Rest}.
+
+bitstring_match_const_16(Bin) ->
+    <<Matched:16/bitstring, Rest/bits>> = Bin,
+    {Matched, Rest}.
+
+bitstring_match_offset_const(Bin) ->
+    <<_:8, Matched:8/bitstring, Rest/bits>> = Bin,
+    {Matched, Rest}.
+
+binary_match_unit8_offset(Bin, Size) ->
+    <<_:8, Matched:Size/binary, Rest/binary>> = Bin,
+    {Matched, Rest}.
+
+bitstring_match_all(Bin) ->
+    <<Matched/bitstring>> = Bin,
+    Matched.
+
+bitstring_match_all_offset(Bin) ->
+    <<_:8, Matched/bitstring>> = Bin,
+    Matched.
