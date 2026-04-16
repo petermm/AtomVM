@@ -15,12 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated network type db() to dbm() to reflect the actual representation of the type
 
 ### Fixed
-- Fixed `bs_get_binary2` unit/size arithmetic so byte-aligned bitstring matches work correctly
-  (e.g. `<<Matched:16/bitstring, Rest/bits>>` where size × unit is divisible by 8)
 - Stop using deprecated `term_from_int32` on STM32 platform
 - Stop using deprecated `term_from_int32` on RP2 platform
 - Stop using deprecated `term_from_int32` on ESP32 platform
 - Fixed improper cast of ESP32 `event_data` for `WIFI_EVENT_AP_STA(DIS)CONNECTED` events
+- Fixed `bs_get_binary2` unit/size arithmetic so byte-aligned bitstring matches work correctly
+  (e.g. `<<Matched:16/bitstring, Rest/bits>>` where size × unit is divisible by 8);
+  also enforce unit alignment for `all` size (e.g. `<<Matched/binary-unit:16>>`)
 
 ## [0.7.0-alpha.1] - 2026-04-06
 

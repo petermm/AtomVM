@@ -1980,6 +1980,15 @@ static term jit_stacktrace_build(Context *ctx)
     return stacktrace_build(ctx, ctx->x, 1);
 }
 
+static bool jit_is_divisible(size_t value, size_t unit)
+{
+    if (unit == 0) {
+        return false;
+    }
+
+    return value % unit == 0;
+}
+
 const ModuleNativeInterface module_native_interface = {
     jit_raise_error,
     jit_return,
@@ -2057,7 +2066,8 @@ const ModuleNativeInterface module_native_interface = {
     jit_alloc_big_integer_fragment,
     jit_bitstring_insert_float,
     jit_raw_raise,
-    jit_raise_error_mfa
+    jit_raise_error_mfa,
+    jit_is_divisible
 };
 
 #endif

@@ -1373,40 +1373,84 @@ first_pass(<<?OP_BS_GET_BINARY2, Rest0/binary>>, MMod, MSt0, State0) ->
         if
             Size =:= ?ALL_ATOM ->
                 MSt11 = MMod:sub(MSt10, SizeReg, BSOffsetReg1),
-                {MSt11, SizeReg};
+                MSt12 =
+                    case unit_divisor_for_binary_all(Unit) of
+                        1 ->
+                            MSt11;
+                        Divisor when Divisor band (Divisor - 1) =:= 0 ->
+                            MMod:if_block(
+                                MSt11, {SizeReg, '&', Divisor - 1, '!=', 0}, fun(BlockSt) ->
+                                    MMod:jump_to_label(BlockSt, Fail)
+                                end
+                            );
+                        Divisor ->
+                            check_divisible_or_jump(MMod, MSt11, SizeReg, Divisor, Fail)
+                    end,
+                {MSt12, SizeReg};
             is_integer(Size) ->
-                % SizeReg is binary size
+                % SizeReg contains binary size in raw bytes (not a term)
                 % Size is a tagged integer: (N bsl 4) bor 0xF
-                % SizeInUnits is the raw size in units
+                % SizeInUnits is the raw count in units
                 SizeInUnits = Size bsr 4,
-                SizeBytes = (SizeInUnits * Unit) div 8,
-                0 = (SizeInUnits * Unit) rem 8,
-                MSt11 = MMod:sub(MSt10, SizeReg, SizeBytes),
+                MSt11 =
+                    if
+                        (SizeInUnits * Unit) rem 8 =/= 0 ->
+                            MMod:call_primitive_last(MSt10, ?PRIM_RAISE_ERROR, [
+                                ctx, jit_state, offset, ?UNSUPPORTED_ATOM
+                            ]);
+                        true ->
+                            MMod:sub(MSt10, SizeReg, (SizeInUnits * Unit) div 8)
+                    end,
                 MSt12 = cond_jump_to_label({{free, SizeReg}, '<', BSOffsetReg1}, Fail, MMod, MSt11),
-                {MSt12, SizeBytes};
+                {MSt12, (SizeInUnits * Unit) div 8};
             true ->
-                {MSt11, SizeInUnitsReg} = MMod:move_to_native_register(MSt10, Size),
+                {MSt11, SizeValReg} = MMod:move_to_native_register(MSt10, Size),
                 MSt12 = MMod:if_else_block(
                     MSt11,
-                    {SizeInUnitsReg, '==', ?ALL_ATOM},
+                    {SizeValReg, '==', ?ALL_ATOM},
                     fun(BSt0) ->
                         BSt1 = MMod:sub(BSt0, SizeReg, BSOffsetReg1),
-                        MMod:free_native_registers(BSt1, [SizeInUnitsReg])
+                        BSt2 =
+                            case unit_divisor_for_binary_all(Unit) of
+                                1 ->
+                                    BSt1;
+                                Divisor when Divisor band (Divisor - 1) =:= 0 ->
+                                    MMod:if_block(
+                                        BSt1, {SizeReg, '&', Divisor - 1, '!=', 0}, fun(BlockSt) ->
+                                            MMod:jump_to_label(BlockSt, Fail)
+                                        end
+                                    );
+                                Divisor ->
+                                    check_divisible_or_jump(MMod, BSt1, SizeReg, Divisor, Fail)
+                            end,
+                        MMod:free_native_registers(BSt2, [SizeValReg])
                     end,
                     fun(BSt0) ->
-                        {BSt1, SizeInUnitsReg} = term_to_int(SizeInUnitsReg, 0, MMod, BSt0),
-                        BSt2 = if
-                            Unit =:= 8 ->
-                                BSt1;
-                            true ->
-                                {BSt1a, SizeInUnitsReg} = MMod:mul(BSt1, SizeInUnitsReg, Unit),
-                                {BSt1b, SizeInUnitsReg} = MMod:shift_right(BSt1a, SizeInUnitsReg, 3),
-                                BSt1b
-                        end,
-                        BSt3 = MMod:sub(BSt2, SizeReg, SizeInUnitsReg),
+                        {BSt1, SizeInUnitsReg} = term_to_int(SizeValReg, 0, MMod, BSt0),
+                        {BSt2, SizeInBytesReg} =
+                            if
+                                Unit =:= 8 ->
+                                    {BSt1, SizeInUnitsReg};
+                                true ->
+                                    % mul/3 converts units to bits in-place;
+                                    % after this, SizeInUnitsReg actually holds bits
+                                    BBSt1 = MMod:mul(BSt1, SizeInUnitsReg, Unit),
+                                    BBSt2 = MMod:if_block(
+                                        BBSt1, {SizeInUnitsReg, '&', 16#7, '!=', 0}, fun(BlockSt) ->
+                                            MMod:call_primitive_last(BlockSt, ?PRIM_RAISE_ERROR, [
+                                                ctx, jit_state, offset, ?UNSUPPORTED_ATOM
+                                            ])
+                                        end
+                                    ),
+                                    MMod:shift_right(BBSt2, {free, SizeInUnitsReg}, 3)
+                            end,
+                        % Note: negative SizeInBytesReg is safe — sub makes SizeReg
+                        % wrap/overflow so the unsigned '<' comparison below will
+                        % detect it as out-of-bounds and jump to Fail.
+                        BSt3 = MMod:sub(BSt2, SizeReg, SizeInBytesReg),
                         BSt4 = cond_jump_to_label({SizeReg, '<', BSOffsetReg1}, Fail, MMod, BSt3),
-                        BSt5 = MMod:move_to_native_register(BSt4, SizeInUnitsReg, SizeReg),
-                        MMod:free_native_registers(BSt5, [SizeInUnitsReg])
+                        BSt5 = MMod:move_to_native_register(BSt4, SizeInBytesReg, SizeReg),
+                        MMod:free_native_registers(BSt5, [SizeInBytesReg])
                     end
                 ),
                 {MSt12, SizeReg}
@@ -3033,9 +3077,17 @@ first_pass_bs_match_ensure_at_least(
                 if
                     Unit > 1 ->
                         MSt4b = MMod:sub(MSt4, Reg, Stride),
-                        {MSt5, UnitReg} = MMod:and_(MSt4b, {free, Reg}, Unit - 1),
-                        MSt6 = cond_jump_to_label({{free, UnitReg}, '!=', 0}, Fail, MMod, MSt5),
-                        MSt6;
+                        case Unit band (Unit - 1) of
+                            0 ->
+                                {MSt5, UnitReg} = MMod:and_(MSt4b, {free, Reg}, Unit - 1),
+                                MSt6 = cond_jump_to_label(
+                                    {{free, UnitReg}, '!=', 0}, Fail, MMod, MSt5
+                                ),
+                                MMod:free_native_registers(MSt6, [UnitReg]);
+                            _ ->
+                                MSt5 = check_divisible_or_jump(MMod, MSt4b, Reg, Unit, Fail),
+                                MMod:free_native_registers(MSt5, [Reg])
+                        end;
                     true ->
                         MMod:free_native_registers(MSt4, [Reg])
                 end,
@@ -4995,6 +5047,20 @@ term_put_tuple_element({free, TupleReg}, PosReg, {free, Value}, MMod, MSt0) ->
     {MSt1, TupleReg} = MMod:and_(MSt0, {free, TupleReg}, ?TERM_PRIMARY_CLEAR_MASK),
     MSt2 = MMod:move_to_array_element(MSt1, Value, TupleReg, PosReg, 1),
     MMod:free_native_registers(MSt2, [TupleReg, Value]).
+
+check_divisible_or_jump(MMod, MSt0, ValueReg, Unit, Fail) ->
+    {MSt1, IsDivisible} = MMod:call_primitive(MSt0, ?PRIM_IS_DIVISIBLE, [ValueReg, Unit]),
+    MMod:if_block(MSt1, {'(bool)', {free, IsDivisible}, '==', false}, fun(BlockSt) ->
+        MMod:jump_to_label(BlockSt, Fail)
+    end).
+
+unit_divisor_for_binary_all(Unit) ->
+    Unit div gcd(Unit, 8).
+
+gcd(A, 0) ->
+    A;
+gcd(A, B) ->
+    gcd(B, A rem B).
 
 %% @doc Get the stream module
 %% @return The stream module for jit on this platform
