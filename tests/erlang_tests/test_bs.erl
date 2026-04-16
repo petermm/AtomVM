@@ -105,7 +105,6 @@ start() ->
 
     ok = test_bs_variable_size_bitstring(),
     ok = test_float(),
-
     ok = test_bs_match_bitstring_modifier(),
 
     0.
@@ -686,6 +685,134 @@ test_integer_outside_float_limits() ->
 
 create_float_binary(Value, Size) ->
     <<Value:Size/float>>.
+test_bs_match_bitstring_modifier() ->
+    ok =
+        try
+            bitstring_match(id(<<123, 234, 245>>), id(15)),
+            case erlang:system_info(machine) of
+                "BEAM" -> ok;
+                "ATOM" -> unexpected
+            end
+        catch
+            error:unsupported -> ok
+        end,
+
+    {<<123, 234>>, <<245>>} = bitstring_match(id(<<123, 234, 245>>), id(16)),
+
+    %% Non-zero offset + dynamic size
+    {<<234, 245>>, <<>>} = bitstring_match_offset(id(<<123, 234, 245>>), id(16)),
+
+    %% Size=0 — matched should be empty binary
+    {<<>>, <<1, 2, 3>>} = bitstring_match(id(<<1, 2, 3>>), id(0)),
+
+    %% Negative dynamic size — should raise an error
+    ok =
+        try
+            bitstring_match(id(<<1, 2, 3>>), id(-1)),
+            unexpected
+        catch
+            error:{badmatch, _} -> ok;
+            error:badarg -> ok;
+            error:unsupported -> ok
+        end,
+
+    %% Constant size with unit=1, byte-aligned (compile-time)
+    {<<1, 2>>, <<3>>} = bitstring_match_const_16(id(<<1, 2, 3>>)),
+
+    %% Non-zero offset + constant size
+    {<<2, 3>>, <<4>>} = bitstring_match_offset_const(id(<<1, 2, 3, 4>>)),
+
+    %% Dynamic size with unit=8 — exercises the JIT Unit=8 fast path
+    {<<2, 3>>, <<4>>} = binary_match_unit8_offset(id(<<1, 2, 3, 4>>), id(2)),
+
+    %% `all` should consume all remaining bytes
+    <<1, 2, 3>> = bitstring_match_all(id(<<1, 2, 3>>)),
+    <<2, 3, 4>> = bitstring_match_all_offset(id(<<1, 2, 3, 4>>)),
+
+    %% Exact boundary: consume exactly the remaining bytes after offset
+    {<<2, 3>>, <<>>} = binary_match_unit8_offset(id(<<1, 2, 3>>), id(2)),
+
+    %% unit:16 explicit size — 1 unit = 2 bytes
+    {<<1, 2>>, <<3, 4>>} = binary_match_unit16(id(<<1, 2, 3, 4>>), id(1)),
+
+    %% unit:16 `all` — success when remaining is divisible by 16 bits
+    <<1, 2, 3, 4>> = binary_match_all_unit16(id(<<1, 2, 3, 4>>)),
+
+    %% unit:16 `all` with offset — remaining 2 bytes = 16 bits, divisible
+    <<2, 3>> = binary_match_all_unit16_offset(id(<<1, 2, 3>>)),
+
+    %% unit:16 `all` — fail when remaining is not divisible by 16 bits
+    ok =
+        try
+            binary_match_all_unit16(id(<<1, 2, 3>>)),
+            unexpected
+        catch
+            error:{badmatch, _} -> ok
+        end,
+
+    %% unit:16 `all` with offset — remaining 3 bytes = 24 bits, not divisible by 16
+    ok =
+        try
+            binary_match_all_unit16_offset(id(<<1, 2, 3, 4>>)),
+            unexpected
+        catch
+            error:{badmatch, _} -> ok
+        end,
+
+    %% unit:24 (non-power-of-two) — 3 bytes = 24 bits, divisible
+    <<1, 2, 3>> = binary_match_all_unit24(id(<<1, 2, 3>>)),
+
+    %% unit:24 — 4 bytes = 32 bits, not divisible by 24
+    ok = expect_error(
+        fun() -> binary_match_all_unit24(id(<<1, 2, 3, 4>>)) end,
+        fun(Tag, Value) -> Tag =:= error andalso element(1, Value) =:= badmatch end
+    ),
+
+    ok.
+
+bitstring_match(BS, Size) ->
+    <<Matched:Size/bitstring, Rest/bits>> = BS,
+    {Matched, Rest}.
+
+bitstring_match_offset(BS, Size) ->
+    <<_Skip:8, Matched:Size/bitstring, Rest/bits>> = BS,
+    {Matched, Rest}.
+
+bitstring_match_const_16(BS) ->
+    <<Matched:16/bitstring, Rest/bits>> = BS,
+    {Matched, Rest}.
+
+bitstring_match_offset_const(BS) ->
+    <<_Skip:8, Matched:16/bitstring, Rest/bits>> = BS,
+    {Matched, Rest}.
+
+binary_match_unit8_offset(BS, Size) ->
+    <<_Skip:8, Matched:Size/binary, Rest/binary>> = BS,
+    {Matched, Rest}.
+
+bitstring_match_all(BS) ->
+    <<Matched/bitstring>> = BS,
+    Matched.
+
+bitstring_match_all_offset(BS) ->
+    <<_Skip:8, Matched/bitstring>> = BS,
+    Matched.
+
+binary_match_unit16(BS, Size) ->
+    <<Matched:Size/binary-unit:16, Rest/binary>> = BS,
+    {Matched, Rest}.
+
+binary_match_all_unit16(BS) ->
+    <<Matched/binary-unit:16>> = BS,
+    Matched.
+
+binary_match_all_unit16_offset(BS) ->
+    <<_Skip:8, Matched/binary-unit:16>> = BS,
+    Matched.
+
+binary_match_all_unit24(BS) ->
+    <<Matched/binary-unit:24>> = BS,
+    Matched.
 
 check_x86_64_jt(<<>>) -> ok;
 check_x86_64_jt(<<16#e9, _Offset:32/little, Tail/binary>>) -> check_x86_64_jt(Tail);
@@ -697,59 +824,3 @@ ext_id(X) -> X.
 
 join(X, Y) ->
     <<X/binary, Y/binary>>.
-
-test_bs_match_bitstring_modifier() ->
-    %% Dynamic size — non-byte-aligned (unsupported, should fail)
-    error = bitstring_match(<<1, 2, 3>>, 15),
-    %% Dynamic size — byte-aligned via unit=1
-    {<<1, 2>>, <<3>>} = bitstring_match(<<1, 2, 3>>, 16),
-    %% Dynamic size with offset
-    {<<2>>, <<3>>} = bitstring_match_offset(<<1, 2, 3>>, 8),
-    %% Dynamic size = 0 (empty match)
-    {<<>>, <<1, 2, 3>>} = bitstring_match(<<1, 2, 3>>, 0),
-    %% Negative dynamic size (should fail gracefully)
-    error = bitstring_match(<<1, 2, 3>>, -8),
-    %% Constant size
-    {<<1, 2>>, <<3>>} = bitstring_match_const_16(<<1, 2, 3>>),
-    %% Constant size with offset
-    {<<2>>, <<3>>} = bitstring_match_offset_const(<<1, 2, 3>>),
-    %% Unit=8 fast path (binary modifier with explicit unit)
-    {<<1, 2>>, <<3>>} = binary_match_unit8_offset(<<0, 1, 2, 3>>, 2),
-    %% All-remaining match
-    <<1, 2, 3>> = bitstring_match_all(<<1, 2, 3>>),
-    <<2, 3>> = bitstring_match_all_offset(<<1, 2, 3>>),
-    %% Unit=8 exact boundary
-    {<<1, 2, 3>>, <<>>} = binary_match_unit8_offset(<<0, 1, 2, 3>>, 3),
-    ok.
-
-bitstring_match(Bin, Size) ->
-    try
-        <<Matched:Size/bitstring, Rest/bits>> = Bin,
-        {Matched, Rest}
-    catch
-        error:_ -> error
-    end.
-
-bitstring_match_offset(Bin, Size) ->
-    <<_:8, Matched:Size/bitstring, Rest/bits>> = Bin,
-    {Matched, Rest}.
-
-bitstring_match_const_16(Bin) ->
-    <<Matched:16/bitstring, Rest/bits>> = Bin,
-    {Matched, Rest}.
-
-bitstring_match_offset_const(Bin) ->
-    <<_:8, Matched:8/bitstring, Rest/bits>> = Bin,
-    {Matched, Rest}.
-
-binary_match_unit8_offset(Bin, Size) ->
-    <<_:8, Matched:Size/binary, Rest/binary>> = Bin,
-    {Matched, Rest}.
-
-bitstring_match_all(Bin) ->
-    <<Matched/bitstring>> = Bin,
-    Matched.
-
-bitstring_match_all_offset(Bin) ->
-    <<_:8, Matched/bitstring>> = Bin,
-    Matched.

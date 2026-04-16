@@ -4469,17 +4469,18 @@ schedule_in:
 
                 avm_int_t size_val = 0;
                 if (term_is_integer(size)) {
-                    // size_val is in bits; negative size_val is safe — the
-                    // unsigned comparison below will treat it as a very large
-                    // value and take the fail branch.
                     size_val = term_to_int(size) * unit;
-                    if (size_val % 8 != 0) {
-                        TRACE("bs_get_binary2: size*unit (%" PRIdPTR ") is not divisible by 8\n", size_val);
+                    if (size_val % 8) {
+                        TRACE("bs_get_binary2: Unsupported: size must be divisible by 8, got: %ld\n", size_val);
                         RAISE_ERROR(UNSUPPORTED_ATOM);
                     }
-                    size_val /= 8;
+                    size_val = size_val / 8;
                 } else if (size == ALL_ATOM) {
                     size_val = term_binary_size(bs_bin) - bs_offset / 8;
+                    if (unit != 1 && (size_val * 8) % unit != 0) {
+                        TRACE("bs_get_binary2: all: remaining size %ld not divisible by unit %u\n", (long) size_val, (unsigned) unit);
+                        JUMP_TO_ADDRESS(mod->labels[fail]);
+                    }
                 } else {
                     TRACE("bs_get_binary2: size is neither an integer nor the atom `all`\n");
                     RAISE_ERROR(BADARG_ATOM);
@@ -4487,6 +4488,9 @@ schedule_in:
 
                 TRACE("bs_get_binary2/7, fail=%u src=%p live=%u unit=%u\n", (unsigned) fail, (void *) bs_bin, (unsigned) live, (unsigned) unit);
 
+                // Note: negative size_val (from a runtime register) is safe here —
+                // the cast to unsigned makes it a large value that exceeds binary size,
+                // so the match correctly fails via the fail label.
                 if ((unsigned int) (bs_offset / 8 + size_val) > term_binary_size(bs_bin)) {
                     TRACE("bs_get_binary2: insufficient capacity -- bs_offset = %d, size_val = %d\n", (int) bs_offset, (int) size_val);
                     JUMP_TO_ADDRESS(mod->labels[fail]);
