@@ -4524,9 +4524,13 @@ schedule_in:
                 term bs_bin = term_get_match_state_binary(src);
                 avm_int_t bs_offset = term_get_match_state_offset(src);
 
-                if (unit != 8) {
-                    TRACE("bs_get_binary2: Unsupported: unit must be 8.\n");
+                if (flags_value != 0) {
+                    TRACE("bs_get_binary2: neither signed nor native or little endian encoding supported.\n");
                     RAISE_ERROR(UNSUPPORTED_ATOM);
+                }
+                if (bs_offset % 8 != 0) {
+                    TRACE("bs_get_binary2: Unsupported.  Offset on binary read must be aligned on byte boundaries.\n");
+                    RAISE_ERROR(BADARG_ATOM);
                 }
                 size_t bs_capacity = term_binary_size(bs_bin);
                 if ((size_t) bs_offset / 8 > bs_capacity) {
@@ -4536,24 +4540,22 @@ schedule_in:
                 size_t remaining_bytes = bs_capacity - bs_offset / 8;
                 size_t size_val = 0;
                 if (term_is_any_integer(size)) {
-                    // A negative or oversized size fails the match, as on BEAM
-                    if (!bs_scaled_size(size, 1, remaining_bytes, &size_val)) {
+                    // size counts units: scale it to bits, then convert to bytes
+                    size_t size_in_bits;
+                    if (!bs_scaled_size(size, unit, remaining_bytes * 8, &size_in_bits)) {
                         TRACE("bs_get_binary2: size is negative or exceeds the remaining capacity\n");
                         JUMP_TO_ADDRESS(mod->labels[fail]);
                     }
+                    if (size_in_bits % 8 != 0) {
+                        TRACE("bs_get_binary2: size*unit (%zu) is not divisible by 8\n", size_in_bits);
+                        RAISE_ERROR(UNSUPPORTED_ATOM);
+                    }
+                    size_val = size_in_bits / 8;
                 } else if (size == ALL_ATOM) {
                     size_val = remaining_bytes;
                 } else {
                     TRACE("bs_get_binary2: size is neither an integer nor the atom `all`\n");
                     RAISE_ERROR(BADARG_ATOM);
-                }
-                if (bs_offset % unit != 0) {
-                    TRACE("bs_get_binary2: Unsupported.  Offset on binary read must be aligned on byte boundaries.\n");
-                    RAISE_ERROR(BADARG_ATOM);
-                }
-                if (flags_value != 0) {
-                    TRACE("bs_get_binary2: neither signed nor native or little endian encoding supported.\n");
-                    RAISE_ERROR(UNSUPPORTED_ATOM);
                 }
 
                 TRACE("bs_get_binary2/7, fail=%u src=%p live=%u unit=%u\n", (unsigned) fail, (void *) bs_bin, (unsigned) live, (unsigned) unit);
@@ -4562,7 +4564,7 @@ schedule_in:
                     TRACE("bs_get_binary2: insufficient capacity -- bs_offset = %d, size_val = %zu\n", (int) bs_offset, size_val);
                     JUMP_TO_ADDRESS(mod->labels[fail]);
                 } else {
-                    term_set_match_state_offset(src, bs_offset + size_val * unit);
+                    term_set_match_state_offset(src, bs_offset + size_val * 8);
 
                     TRIM_LIVE_REGS(live);
                     // there is always room for a MAX_REG + 1 register, used as working register
@@ -4577,7 +4579,7 @@ schedule_in:
 
                     bs_bin = x_regs[live];
 
-                    term t = term_maybe_create_sub_binary(bs_bin, bs_offset / unit, size_val, &ctx->heap, ctx->global);
+                    term t = term_maybe_create_sub_binary(bs_bin, bs_offset / 8, size_val, &ctx->heap, ctx->global);
                     WRITE_REGISTER(dreg, t);
                 }
                 break;
@@ -5737,7 +5739,8 @@ schedule_in:
                                         JUMP_TO_LABEL(mod, fail);
                                     }
                                 }
-                                segment_size = signed_size_value;
+                                segment_size = size_in_bytes;
+                                segment_unit = 8;
                             }
                             break;
                         }
