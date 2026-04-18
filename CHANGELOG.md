@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stop using deprecated `term_from_int32` on RP2 platform
 - Stop using deprecated `term_from_int32` on ESP32 platform
 - Fixed improper cast of ESP32 `event_data` for `WIFI_EVENT_AP_STA(DIS)CONNECTED` events
+- Fixed ESP32 I2C driver resource leaks, half-closed state, and close-during-transmission errors
 
 ## [0.7.0-alpha.1] - 2026-04-06
 
