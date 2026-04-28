@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added more reset reasons and ensured `esp:reset_reason/0` doesn't return `undefined`
 - Added I2C and SPI APIs to stm32 platform
 - Added `Transfer-Encoding: chunked` response support to `ahttp_client`, including HTTP trailers
+- Added `{bssid, BSSID}` STA configuration option to the ESP32 network driver to allow connecting
+  to a specific access point by its SSID and BSSID.
 
 ### Changed
 - Updated network type db() to dbm() to reflect the actual representation of the type

@@ -83,6 +83,7 @@ static const char *const ap_sta_connected_atom = ATOM_STR("\x10", "ap_sta_connec
 static const char *const ap_sta_disconnected_atom = ATOM_STR("\x13", "ap_sta_disconnected");
 static const char *const ap_sta_ip_assigned_atom = ATOM_STR("\x12", "ap_sta_ip_assigned");
 static const char *const ap_started_atom = ATOM_STR("\xA", "ap_started");
+static const char *const bssid_atom = ATOM_STR("\x5", "bssid");
 static const char *const dhcp_hostname_atom = ATOM_STR("\xD", "dhcp_hostname");
 static const char *const host_atom = ATOM_STR("\x4", "host");
 static const char *const managed_atom = ATOM_STR("\x7", "managed");
@@ -935,11 +936,26 @@ static wifi_config_t *get_sta_wifi_config(term sta_config, GlobalContext *global
     }
     term ssid_term = interop_kv_get_value(sta_config, ssid_atom, global);
     term pass_term = interop_kv_get_value(sta_config, psk_atom, global);
+    term bssid_term = interop_kv_get_value(sta_config, bssid_atom, global);
     term managed_term = interop_kv_get_value_default(sta_config, managed_atom, FALSE_ATOM, global);
 
     bool roaming = false;
     if ((!term_is_invalid_term(managed_term)) && (managed_term != FALSE_ATOM)) {
         roaming = true;
+    }
+
+    //
+    // Validate BSSID early (if provided): must be a 6-byte binary
+    //
+    bool have_bssid = false;
+    uint8_t bssid_bytes[6];
+    if (!term_is_invalid_term(bssid_term)) {
+        if (!term_is_binary(bssid_term) || term_binary_size(bssid_term) != 6) {
+            ESP_LOGE(TAG, "get_sta_wifi_config: BSSID must be a 6-byte binary");
+            return NULL;
+        }
+        memcpy(bssid_bytes, term_binary_data(bssid_term), 6);
+        have_bssid = true;
     }
 
     //
@@ -952,10 +968,13 @@ static wifi_config_t *get_sta_wifi_config(term sta_config, GlobalContext *global
         return NULL;
     }
     int ok = 0;
-    char *ssid = interop_term_to_string(ssid_term, &ok);
-    if (!ok || IS_NULL_PTR(ssid)) {
-        ESP_LOGE(TAG, "get_sta_wifi_config: Invalid SSID");
-        return NULL;
+    char *ssid = NULL;
+    if (!term_is_invalid_term(ssid_term)) {
+        ssid = interop_term_to_string(ssid_term, &ok);
+        if (!ok || IS_NULL_PTR(ssid)) {
+            ESP_LOGE(TAG, "get_sta_wifi_config: Invalid SSID");
+            return NULL;
+        }
     }
 
     char *psk = NULL;
@@ -978,7 +997,7 @@ static wifi_config_t *get_sta_wifi_config(term sta_config, GlobalContext *global
         ESP_LOGE(TAG, "Failed to allocate wifi_config_t for sta");
         return NULL;
     }
-    if (UNLIKELY(strlen(ssid) > sizeof(wifi_config->sta.ssid))) {
+    if (!IS_NULL_PTR(ssid) && UNLIKELY(strlen(ssid) > sizeof(wifi_config->sta.ssid))) {
         ESP_LOGE(TAG, "ssid cannot be more than %d characters", sizeof(wifi_config->sta.ssid));
         free(ssid);
         free(psk);
@@ -995,17 +1014,30 @@ static wifi_config_t *get_sta_wifi_config(term sta_config, GlobalContext *global
     // Initialize the wifi_config structure
     //
     memset(wifi_config, 0, sizeof(wifi_config_t));
-    strcpy((char *) wifi_config->sta.ssid, ssid);
+    if (!IS_NULL_PTR(ssid)) {
+        strcpy((char *) wifi_config->sta.ssid, ssid);
+        free(ssid);
+    }
     if (!IS_NULL_PTR(psk)) {
         strcpy((char *) wifi_config->sta.password, psk);
         free(psk);
     }
-    free(ssid);
+    if (have_bssid) {
+        wifi_config->sta.bssid_set = true;
+        memcpy(wifi_config->sta.bssid, bssid_bytes, sizeof(wifi_config->sta.bssid));
+    }
 
     //
     // done
     //
-    ESP_LOGI(TAG, "STA ssid: %s", wifi_config->sta.ssid);
+    if (have_bssid) {
+        ESP_LOGI(TAG, "STA ssid: \"%s\" bssid: %02x:%02x:%02x:%02x:%02x:%02x",
+            wifi_config->sta.ssid,
+            bssid_bytes[0], bssid_bytes[1], bssid_bytes[2],
+            bssid_bytes[3], bssid_bytes[4], bssid_bytes[5]);
+    } else {
+        ESP_LOGI(TAG, "STA ssid: %s", wifi_config->sta.ssid);
+    }
     return wifi_config;
 }
 

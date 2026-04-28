@@ -60,6 +60,13 @@
 %% SSIDs can be strings or binary strings up to 32 characters long.
 
 -type ssid_config() :: {ssid, ssid()}.
+-type bssid_config() :: {bssid, bssid()}.
+%% A `bssid' may be specified to connect to a specific access point. This is useful when multiple
+%% access points share the same `ssid', and the application needs to connect to a specific one.
+%% Specifying a `bssid' will also speed up network connections, since the driver will stop
+%% scanning as soon as the matching `bssid' is found. The `bssid' is a 6-byte binary, in the same
+%% format returned by `wifi_scan/0,1'. The ESP32 driver requires `ssid' to be specified when
+%% connecting with a `bssid'.
 -type psk_config() :: {psk, string() | binary()}.
 -type app_managed_config() :: managed | {managed, boolean()}.
 %% Setting `{managed, true}' or including the atom `managed' in the `sta_config()' will signal to
@@ -102,6 +109,7 @@
 -type sta_config_property() ::
     app_managed_config()
     | ssid_config()
+    | bssid_config()
     | psk_config()
     | dhcp_hostname_config()
     | sta_scan_config()
@@ -1073,28 +1081,48 @@ update_config(OldConfig, NewConfig) ->
         NewSTA =
             case proplists:get_value(sta, NewConfig) of
                 undefined ->
-                    SSID =
-                        case proplists:get_value(ssid, NewConfig) of
-                            undefined ->
+                    NewSsid = proplists:get_value(ssid, NewConfig),
+                    NewBssid = proplists:get_value(bssid, NewConfig),
+                    SsidOpts =
+                        case {NewSsid, NewBssid} of
+                            {undefined, undefined} ->
+                                case
+                                    {
+                                        proplists:get_value(ssid, OldSTA),
+                                        proplists:get_value(bssid, OldSTA)
+                                    }
+                                of
+                                    {undefined, undefined} ->
+                                        error(no_ssid);
+                                    {OldSsid, undefined} ->
+                                        [{ssid, OldSsid}];
+                                    {undefined, _OldBssid} ->
+                                        error(no_ssid);
+                                    {OldSsid, OldBssid} ->
+                                        [{ssid, OldSsid}, {bssid, OldBssid}]
+                                end;
+                            {undefined, B} ->
                                 case proplists:get_value(ssid, OldSTA) of
                                     undefined ->
                                         error(no_ssid);
                                     OldSsid ->
-                                        OldSsid
+                                        [{ssid, OldSsid}, {bssid, B}]
                                 end;
-                            Ssid ->
-                                Ssid
+                            {S, undefined} ->
+                                [{ssid, S}];
+                            {S, B} ->
+                                [{ssid, S}, {bssid, B}]
                         end,
-                    case proplists:get_value(psk, NewConfig) of
-                        undefined ->
-                            update_opts(OldSTA, [{ssid, SSID}]);
-                        PSK ->
-                            update_opts(OldSTA, [{ssid, SSID}, {psk, PSK}])
-                    end;
+                    Opts =
+                        case proplists:get_value(psk, NewConfig) of
+                            undefined -> SsidOpts;
+                            PSK -> SsidOpts ++ [{psk, PSK}]
+                        end,
+                    update_opts(OldSTA, Opts);
                 NewSta ->
                     NewSta
             end,
-        STA = {sta, update_opts(OldSTA, NewSTA)},
+        STA = {sta, remove_stale_bssid(NewSTA, update_opts(OldSTA, NewSTA))},
         AP =
             case proplists:get_value(ap, OldConfig) of
                 undefined -> [];
@@ -1131,6 +1159,14 @@ update_opts(OldOpts, NewOpts) ->
     New = proplists:to_map(NewOpts),
     NewMap = maps:merge(Old, New),
     proplists:from_map(NewMap).
+
+%% @private
+remove_stale_bssid(NewSTA, UpdatedSTA) ->
+    case {proplists:get_value(ssid, NewSTA), proplists:get_value(bssid, NewSTA)} of
+        {undefined, _} -> UpdatedSTA;
+        {_, undefined} -> proplists:delete(bssid, UpdatedSTA);
+        {_, _} -> UpdatedSTA
+    end.
 
 %% @private
 wait_for_ip(Timeout) ->
