@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `ahttp_client` crash on non-numeric or negative `Content-Length` values
 - Fixed `ahttp_client` crash on headers with empty or all-whitespace values
 - Fixed a bug in `supervisor` handling of failing child
+- Fixed `erlang:localtime/1` memory leak, use-after-free, and TZ restore bugs on newlib/picolibc
 
 ## [0.7.0-alpha.1] - 2026-04-06
 
