@@ -20,15 +20,10 @@
 
 %% Force the compiler to use bs_test_unit opcode instead of the
 %% newer bs_match opcode (OTP 25+). On older OTP this is ignored.
-%% On OTP 29+, no_bs_match was removed but no_ssa_opt_bs_ensure
-%% prevents the SSA pass from converting bs_test_unit to bs_match
-%% with ensure_at_least.
+%% On OTP 29+, bs_test_unit is now gone.
 -ifdef(OTP_RELEASE).
 -if(?OTP_RELEASE =< 28).
 -compile([no_bs_match]).
--endif.
--if(?OTP_RELEASE >= 29).
--compile([no_ssa_opt_bs_ensure]).
 -endif.
 -endif.
 
