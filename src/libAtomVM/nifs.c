@@ -1949,21 +1949,23 @@ term nif_erlang_universaltime_0(Context *ctx, int argc, term argv[])
     return build_datetime_from_tm(ctx, gmtime_r(&ts.tv_sec, &broken_down_time));
 }
 
-// On newlib/picolibc, setenv leaks the old "NAME=value" string on every
-// overwrite. Some affected putenv implementations also funnel through setenv
-// instead of installing the caller-provided string, so they leak too.
+// setenv leaks the prior "TZ=value" string on overwrite (unbounded on
+// newlib/picolibc, bounded on glibc; some putenv impls leak similarly).
 // See: https://github.com/espressif/esp-idf/issues/3046
 //
-// Workaround: temporarily swap the environ pointer to a minimal array
-// containing only our TZ entry. This avoids all setenv/putenv calls
-// on the affected platforms. The swap is protected by env_spinlock. This
-// assumes AtomVM is the sole user of TZ -- no external threads should
-// read/write environ or call time functions during the temporary override.
-#if defined(__NEWLIB__) || defined(__PICOLIBC__)
-#define AVM_TZ_SETENV_LEAKS 1
+// Workaround: under env_spinlock, briefly swap environ to a minimal
+// {"TZ=...", NULL} array around tzset()/localtime_r(), then restore.
+// During the swap, any code reading environ without env_spinlock (e.g.
+// a concurrent posix_spawn) will see only the TZ entry.
+//
+// Define AVM_TZ_USE_SETENV_FALLBACK=1 to opt into the (leaky) setenv
+// path on platforms that don't expose a writable environ.
+#ifndef AVM_TZ_USE_SETENV_FALLBACK
+#define AVM_TZ_USE_SETENV_FALLBACK 0
+#endif
+
+#if !AVM_TZ_USE_SETENV_FALLBACK
 extern char **environ;
-#else
-#define AVM_TZ_SETENV_LEAKS 0
 #endif
 
 term nif_erlang_localtime(Context *ctx, int argc, term argv[])
@@ -1985,16 +1987,21 @@ term nif_erlang_localtime(Context *ctx, int argc, term argv[])
     struct tm storage;
     struct tm *localtime;
 
+#if !AVM_TZ_USE_SETENV_FALLBACK
+    char *tz_env_entry = NULL;
+    if (tz) {
+        size_t tz_len = strlen(tz);
+        tz_env_entry = malloc(tz_len + 4); // "TZ=" + tz + '\0'
+        if (UNLIKELY(tz_env_entry == NULL)) {
+            free(tz);
+            RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+        }
+        memcpy(tz_env_entry, "TZ=", 3);
+        memcpy(tz_env_entry + 3, tz, tz_len + 1);
+    }
+
     SMP_SPINLOCK_LOCK(&ctx->global->env_spinlock);
     if (tz) {
-#if AVM_TZ_SETENV_LEAKS
-        char tz_env_entry[64];
-        int n = snprintf(tz_env_entry, sizeof(tz_env_entry), "TZ=%s", tz);
-        if (UNLIKELY(n < 0 || n >= (int) sizeof(tz_env_entry))) {
-            SMP_SPINLOCK_UNLOCK(&ctx->global->env_spinlock);
-            free(tz);
-            RAISE_ERROR(BADARG_ATOM);
-        }
         char *tz_environ[] = { tz_env_entry, NULL };
         char **saved_environ = environ;
         environ = tz_environ;
@@ -2002,7 +2009,16 @@ term nif_erlang_localtime(Context *ctx, int argc, term argv[])
         localtime = localtime_r(&ts.tv_sec, &storage);
         environ = saved_environ;
         tzset();
+    } else {
+        tzset();
+        localtime = localtime_r(&ts.tv_sec, &storage);
+    }
+    SMP_SPINLOCK_UNLOCK(&ctx->global->env_spinlock);
+
+    free(tz_env_entry);
 #else
+    SMP_SPINLOCK_LOCK(&ctx->global->env_spinlock);
+    if (tz) {
         char *oldtz_env = getenv("TZ");
         char *oldtz = NULL;
         if (oldtz_env) {
@@ -2023,12 +2039,12 @@ term nif_erlang_localtime(Context *ctx, int argc, term argv[])
             unsetenv("TZ");
         }
         tzset();
-#endif
     } else {
         tzset();
         localtime = localtime_r(&ts.tv_sec, &storage);
     }
     SMP_SPINLOCK_UNLOCK(&ctx->global->env_spinlock);
+#endif
 
     free(tz);
 
