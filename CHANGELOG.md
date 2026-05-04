@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added I2C and SPI APIs to stm32 platform
 - Added `Transfer-Encoding: chunked` response support to `ahttp_client`, including HTTP trailers
 - Added `proc_lib:init_fail/2,3`
+- Added initial support for the OTP-compatible `atomics` module
 
 ### Changed
 - Updated network type db() to dbm() to reflect the actual representation of the type

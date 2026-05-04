@@ -22,6 +22,7 @@ cmake_minimum_required (VERSION 3.13)
 project (libAtomVM)
 
 set(HEADER_FILES
+    atomics.h
     atom.h
     atom_table.h
     avmpack.h
@@ -77,6 +78,7 @@ set(HEADER_FILES
 )
 
 set(SOURCE_FILES
+    atomics.c
     atom.c
     atom_table.c
     avmpack.c

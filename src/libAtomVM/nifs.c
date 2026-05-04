@@ -33,6 +33,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "atomics.h"
 #include "atom_table.h"
 #include "avm_version.h"
 #include "avmpack.h"
@@ -607,6 +608,61 @@ static const struct Nif flat_size_nif = {
 static const struct Nif erts_internal_cmp_term_nif = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_erts_internal_cmp_term
+};
+
+static const struct Nif erts_internal_atomics_new_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_atomics_new_2
+};
+
+static const struct Nif atomics_new_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_new_2
+};
+
+static const struct Nif atomics_put_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_put_3
+};
+
+static const struct Nif atomics_get_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_get_2
+};
+
+static const struct Nif atomics_add_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_add_3
+};
+
+static const struct Nif atomics_add_get_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_add_get_3
+};
+
+static const struct Nif atomics_sub_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_sub_3
+};
+
+static const struct Nif atomics_sub_get_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_sub_get_3
+};
+
+static const struct Nif atomics_exchange_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_exchange_3
+};
+
+static const struct Nif atomics_compare_exchange_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_compare_exchange_4
+};
+
+static const struct Nif atomics_info_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_atomics_info_1
 };
 
 static const struct Nif process_flag_nif = {

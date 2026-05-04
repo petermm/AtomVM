@@ -24,6 +24,7 @@ include(BuildErlang)
 
 set(ERLANG_MODULES
     application
+    atomics
     base64
     binary
     calendar
