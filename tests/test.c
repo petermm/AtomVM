@@ -625,6 +625,7 @@ struct Test tests[] = {
 
     TEST_CASE(test_raw_raise),
 
+    TEST_CASE(test_atomics),
     TEST_CASE(test_ets),
     TEST_CASE(test_node),
 
