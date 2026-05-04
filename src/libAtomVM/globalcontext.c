@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "atomics.h"
 #include "dist_nifs.h"
 #include "globalcontext.h"
 
@@ -128,10 +129,23 @@ GlobalContext *globalcontext_new(void)
 
     glb->node_name = NONODE_AT_NOHOST_ATOM;
     glb->creation = 0;
+#ifndef AVM_NO_SMP
+    smp_spinlock_init(&glb->atomics_spinlock);
+#endif
     synclist_init(&glb->dist_connections);
 
     ErlNifEnv env;
     erl_nif_env_partial_init_from_globalcontext(&env, glb);
+    glb->atomics_resource_type = enif_init_resource_type(&env, "atomics", &atomics_resource_type_init, ERL_NIF_RT_CREATE, NULL);
+    if (IS_NULL_PTR(glb->atomics_resource_type)) {
+#ifndef AVM_NO_SMP
+        smp_rwlock_destroy(glb->modules_lock);
+#endif
+        valueshashtable_destroy(glb->modules_table);
+        atom_table_destroy(glb->atom_table);
+        free(glb);
+        return NULL;
+    }
     glb->resource_binary_resource_type = enif_init_resource_type(&env, "resource_binary", &resource_binary_resource_type_init, ERL_NIF_RT_CREATE, NULL);
     glb->dist_connection_resource_type = enif_init_resource_type(&env, "dist_connection", &dist_connection_resource_type_init, ERL_NIF_RT_CREATE, NULL);
 
