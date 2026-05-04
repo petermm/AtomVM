@@ -595,6 +595,15 @@ defmodule Enum do
     end
   end
 
+  @doc false
+  def __in__(element, enumerable) when is_list(enumerable) do
+    :lists.member(element, enumerable)
+  end
+
+  def __in__(element, enumerable) do
+    member?(enumerable, element)
+  end
+
   ## all?
 
   defp all_list([h | t], fun) do
