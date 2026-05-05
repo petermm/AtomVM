@@ -31,6 +31,10 @@
 
 static void scheduler_timeout_callback(struct TimerListItem *it);
 static void scheduler_make_ready(Context *ctx);
+#ifndef AVM_NO_SMP
+static int scheduler_alloc_slot(GlobalContext *global);
+static void scheduler_release_slot(GlobalContext *global, int scheduler_id);
+#endif
 #ifdef AVM_TASK_DRIVER_ENABLED
 static void scheduler_make_ready_from_task(Context *ctx);
 #endif
@@ -57,6 +61,29 @@ static int update_timer_list(GlobalContext *global)
     }
     return (int) wait_timeout_ms;
 }
+
+#ifndef AVM_NO_SMP
+// running_schedulers is only a count; scheduler slots are explicit so a
+// shrink/grow cycle cannot reuse a slot still owned by a live thread.
+static int scheduler_alloc_slot(GlobalContext *global)
+{
+    for (int slot = 2; slot <= global->scheduler_slots_count; slot++) {
+        if (!global->scheduler_slots[slot]) {
+            global->scheduler_slots[slot] = 1;
+            return slot;
+        }
+    }
+
+    return 0;
+}
+
+static void scheduler_release_slot(GlobalContext *global, int scheduler_id)
+{
+    if (scheduler_id > 1 && scheduler_id <= global->scheduler_slots_count) {
+        global->scheduler_slots[scheduler_id] = 0;
+    }
+}
+#endif
 
 Context *scheduler_wait(Context *ctx)
 {
@@ -198,7 +225,9 @@ static Context *scheduler_run0(GlobalContext *global)
             if (!main_thread
                 && (global->scheduler_stop_all
                     || global->running_schedulers > global->online_schedulers)) {
+                int scheduler_id = smp_current_scheduler_id(global);
                 global->running_schedulers--;
+                scheduler_release_slot(global, scheduler_id);
                 if (is_waiting) {
                     global->waiting_scheduler = false;
                 } else {
@@ -363,8 +392,11 @@ static void scheduler_make_ready(Context *ctx)
             && global->running_schedulers > 0
             && global->running_schedulers < global->online_schedulers
             && !context_get_flags(ctx, Running)) {
-            global->running_schedulers++;
-            smp_scheduler_start(global);
+            int scheduler_id = scheduler_alloc_slot(global);
+            if (scheduler_id > 0) {
+                global->running_schedulers++;
+                smp_scheduler_start(global, scheduler_id);
+            }
         }
         SMP_MUTEX_UNLOCK(global->schedulers_mutex);
     }

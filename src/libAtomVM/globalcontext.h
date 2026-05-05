@@ -153,6 +153,8 @@ struct GlobalContext
 #ifndef AVM_NO_SMP
     int ATOMIC online_schedulers;
     int running_schedulers; // GUARDED_BY(schedulers_mutex)
+    uint8_t *scheduler_slots; // GUARDED_BY(schedulers_mutex)
+    int scheduler_slots_count;
     bool ATOMIC waiting_scheduler;
     Mutex *schedulers_mutex;
     CondVar *schedulers_cv;

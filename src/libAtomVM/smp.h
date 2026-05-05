@@ -253,8 +253,9 @@ int smp_get_online_processors(void);
  * @brief Start a new scheduler, calling `scheduler_entry_point` with the given
  * global context.
  * @param glb the global context
+ * @param scheduler_id scheduler slot assigned to the new scheduler
  */
-void smp_scheduler_start(GlobalContext *glb);
+void smp_scheduler_start(GlobalContext *glb, int scheduler_id);
 
 /**
  * @brief Wait for all scheduler sub-threads to fully exit.
