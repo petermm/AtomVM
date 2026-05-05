@@ -66,10 +66,13 @@ test_unsigned() ->
 test_shared() ->
     Ref = atomics:new(1, []),
     Parent = self(),
-    spawn_opt(fun() ->
-        ok = atomics:add(Ref, 1, 42),
-        Parent ! done
-    end, []),
+    spawn_opt(
+        fun() ->
+            ok = atomics:add(Ref, 1, 42),
+            Parent ! done
+        end,
+        []
+    ),
     receive
         done -> 42 = atomics:get(Ref, 1)
     end,
@@ -77,13 +80,17 @@ test_shared() ->
 
 test_info() ->
     SignedRef = atomics:new(2, []),
-    #{size := 2, min := SignedMin, max := SignedMax, memory := SignedMemory} = atomics:info(SignedRef),
+    #{size := 2, min := SignedMin, max := SignedMax, memory := SignedMemory} = atomics:info(
+        SignedRef
+    ),
     4 = map_size(atomics:info(SignedRef)),
     -(1 bsl 63) = SignedMin,
     (1 bsl 63) - 1 = SignedMax,
     true = SignedMemory > 0,
     UnsignedRef = atomics:new(1, [{signed, false}]),
-    #{size := 1, min := 0, max := UnsignedMax, memory := UnsignedMemory} = atomics:info(UnsignedRef),
+    #{size := 1, min := 0, max := UnsignedMax, memory := UnsignedMemory} = atomics:info(
+        UnsignedRef
+    ),
     (1 bsl 64) - 1 = UnsignedMax,
     true = UnsignedMemory > 0,
     ok.
