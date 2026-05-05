@@ -59,16 +59,19 @@ typedef uint64_t CountersCell;
 
 union CountersLine
 {
-    CountersCell cells[COUNTERS_CELLS_PER_CACHE_LINE];
+    _Alignas(COUNTERS_CACHE_LINE_SIZE) CountersCell cells[COUNTERS_CELLS_PER_CACHE_LINE];
     uint8_t cache_line[COUNTERS_CACHE_LINE_SIZE];
 };
+
+_Static_assert(sizeof(union CountersLine) == COUNTERS_CACHE_LINE_SIZE, "counter line must be one cache line");
+_Static_assert(_Alignof(union CountersLine) == COUNTERS_CACHE_LINE_SIZE, "counter line must be cache-line aligned");
 
 struct CountersRef
 {
     size_t size;
     size_t scheduler_count;
     size_t memory;
-    union CountersLine lines[];
+    size_t lines_offset;
 };
 
 const ErlNifResourceTypeInit counters_resource_type_init = {
@@ -92,6 +95,12 @@ static term raise_error(Context *ctx, term reason)
 static size_t div_ceil_size(size_t dividend, size_t divisor)
 {
     return (dividend + divisor - 1) / divisor;
+}
+
+static uintptr_t align_up_uintptr(uintptr_t value, size_t alignment)
+{
+    uintptr_t remainder = value % alignment;
+    return remainder == 0 ? value : value + alignment - remainder;
 }
 
 static bool get_resource(term ref, Context *ctx, struct CountersRef **counters)
@@ -144,11 +153,17 @@ static bool is_positive_integer(term value)
     return term_is_any_integer(value) && !term_is_any_neg_integer(value);
 }
 
+static union CountersLine *counter_lines(struct CountersRef *counters)
+{
+    return (union CountersLine *) ((uint8_t *) counters + counters->lines_offset);
+}
+
 static CountersCell *counter_cell(struct CountersRef *counters, size_t index, size_t slot)
 {
+    union CountersLine *lines = counter_lines(counters);
     size_t line_index = (index / COUNTERS_CELLS_PER_CACHE_LINE) * (counters->scheduler_count + 1) + slot;
     size_t cell_index = index % COUNTERS_CELLS_PER_CACHE_LINE;
-    return &counters->lines[line_index].cells[cell_index];
+    return &lines[line_index].cells[cell_index];
 }
 
 static void cell_init(CountersCell *cell, uint64_t value)
@@ -265,10 +280,11 @@ term nif_erts_internal_counters_new_1(Context *ctx, int argc, term argv[])
         return raise_error(ctx, SYSTEM_LIMIT_ATOM);
     }
     size_t line_count = line_groups * slots;
-    if (UNLIKELY(line_count > (SIZE_MAX - offsetof(struct CountersRef, lines)) / sizeof(union CountersLine))) {
+    if (UNLIKELY(sizeof(struct CountersRef) > SIZE_MAX - (COUNTERS_CACHE_LINE_SIZE - 1)
+            || line_count > (SIZE_MAX - sizeof(struct CountersRef) - (COUNTERS_CACHE_LINE_SIZE - 1)) / sizeof(union CountersLine))) {
         return raise_error(ctx, SYSTEM_LIMIT_ATOM);
     }
-    size_t bytes = offsetof(struct CountersRef, lines) + line_count * sizeof(union CountersLine);
+    size_t bytes = sizeof(struct CountersRef) + (COUNTERS_CACHE_LINE_SIZE - 1) + line_count * sizeof(union CountersLine);
     if (UNLIKELY(bytes > UINT_MAX)) {
         return raise_error(ctx, SYSTEM_LIMIT_ATOM);
     }
@@ -281,9 +297,11 @@ term nif_erts_internal_counters_new_1(Context *ctx, int argc, term argv[])
     counters->size = size;
     counters->scheduler_count = scheduler_count;
     counters->memory = bytes;
+    counters->lines_offset = (size_t) (align_up_uintptr((uintptr_t) counters + sizeof(struct CountersRef), COUNTERS_CACHE_LINE_SIZE) - (uintptr_t) counters);
+    union CountersLine *lines = counter_lines(counters);
     for (size_t line = 0; line < line_count; line++) {
         for (size_t cell = 0; cell < COUNTERS_CELLS_PER_CACHE_LINE; cell++) {
-            cell_init(&counters->lines[line].cells[cell], 0);
+            cell_init(&lines[line].cells[cell], 0);
         }
     }
 
