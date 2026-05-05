@@ -30,6 +30,7 @@ set(ERLANG_MODULES
     calendar
     code
     code_server
+    counters
     crypto
     dist_util
     erl_epmd
