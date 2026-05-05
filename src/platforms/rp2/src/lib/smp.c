@@ -81,6 +81,11 @@ bool smp_is_main_thread(GlobalContext *glb)
     return get_core_num() == 0;
 }
 
+int smp_current_scheduler_id(GlobalContext *glb)
+{
+    return smp_is_main_thread(glb) ? 1 : 2;
+}
+
 Mutex *smp_mutex_create()
 {
     Mutex *result = malloc(sizeof(Mutex));

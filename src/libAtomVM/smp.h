@@ -271,6 +271,13 @@ void smp_scheduler_join_all(void);
  */
 bool smp_is_main_thread(GlobalContext *glb);
 
+/**
+ * @brief Return the scheduler slot for the current scheduler thread.
+ *
+ * @details Slots start at 1. The main scheduler always uses slot 1.
+ */
+int smp_current_scheduler_id(GlobalContext *glb);
+
 #define SMP_SPINLOCK_LOCK(spinlock) smp_spinlock_lock(spinlock)
 #define SMP_SPINLOCK_TRYLOCK(spinlock) smp_spinlock_trylock(spinlock)
 #define SMP_SPINLOCK_UNLOCK(spinlock) smp_spinlock_unlock(spinlock)
