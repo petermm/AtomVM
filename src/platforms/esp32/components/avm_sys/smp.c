@@ -59,13 +59,22 @@ struct RWLock
 };
 
 // ESP-IDF SDK explicitly mentions support for C11 with "__thread" keyword
-static __thread bool g_sub_main_thread = false;
+static __thread int g_scheduler_id = 1;
 static uint32_t _Atomic g_pinned_cores = 0x1;
+
+struct SchedulerThreadArg
+{
+    GlobalContext *global;
+    int scheduler_id;
+};
 
 static void *scheduler_thread_entry_point(void *arg)
 {
-    g_sub_main_thread = true;
-    void *result = (void *) scheduler_entry_point((GlobalContext *) arg);
+    struct SchedulerThreadArg *thread_arg = (struct SchedulerThreadArg *) arg;
+    GlobalContext *global = thread_arg->global;
+    g_scheduler_id = thread_arg->scheduler_id;
+    free(thread_arg);
+    void *result = (void *) scheduler_entry_point(global);
 #if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0))
     BaseType_t core = xTaskGetCoreID(NULL);
 #else
@@ -83,6 +92,13 @@ static void *scheduler_thread_entry_point(void *arg)
 
 void smp_scheduler_start(GlobalContext *ctx)
 {
+    struct SchedulerThreadArg *arg = malloc(sizeof(*arg));
+    if (IS_NULL_PTR(arg)) {
+        AVM_ABORT();
+    }
+    arg->global = ctx;
+    arg->scheduler_id = ctx->running_schedulers;
+
     // When this function is called, the schedulers mutex is held and
     // therefore it is safe to call esp_pthread_set_default_config
     // g_pinned_cores is atomic in case another thread is being stopped.
@@ -114,7 +130,8 @@ void smp_scheduler_start(GlobalContext *ctx)
     }
 
     pthread_t thread;
-    if (UNLIKELY(pthread_create(&thread, &thread_attr, scheduler_thread_entry_point, ctx))) {
+    if (UNLIKELY(pthread_create(&thread, &thread_attr, scheduler_thread_entry_point, arg))) {
+        free(arg);
         AVM_ABORT();
     }
     if (UNLIKELY(pthread_detach(thread))) {
@@ -133,8 +150,13 @@ void smp_scheduler_join_all(void)
 
 bool smp_is_main_thread(GlobalContext *glb)
 {
+    return smp_current_scheduler_id(glb) == 1;
+}
+
+int smp_current_scheduler_id(GlobalContext *glb)
+{
     UNUSED(glb);
-    return !g_sub_main_thread;
+    return g_scheduler_id;
 }
 
 Mutex *smp_mutex_create()

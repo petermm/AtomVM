@@ -55,41 +55,59 @@ struct SchedulerThreadList
 static pthread_mutex_t scheduler_threads_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct SchedulerThreadList *scheduler_threads = NULL;
 
+struct SchedulerThreadArg
+{
+    GlobalContext *global;
+    int scheduler_id;
+};
+
 // Thread local storage with _Thread_local C11 keyword crashes on i386 with
 // valgrind (Ubutun 18 & 20, gcc 6-10). Use POSIX API instead.
 #ifdef __i386__
-static pthread_key_t g_sub_main_thread_key;
-static pthread_once_t g_sub_main_thread_key_once = PTHREAD_ONCE_INIT;
+static pthread_key_t g_scheduler_id_key;
+static pthread_once_t g_scheduler_id_key_once = PTHREAD_ONCE_INIT;
 
-static void sub_main_thread_make_key()
+static void scheduler_id_make_key()
 {
-    if (UNLIKELY(pthread_key_create(&g_sub_main_thread_key, NULL))) {
+    if (UNLIKELY(pthread_key_create(&g_scheduler_id_key, NULL))) {
         AVM_ABORT();
     }
 }
 #else
-static _Thread_local bool g_sub_main_thread = false;
+static _Thread_local int g_scheduler_id = 1;
 #endif
 
 static void *scheduler_thread_entry_point(void *arg)
 {
+    struct SchedulerThreadArg *thread_arg = (struct SchedulerThreadArg *) arg;
+    GlobalContext *global = thread_arg->global;
+    int scheduler_id = thread_arg->scheduler_id;
+    free(thread_arg);
 #ifdef __i386__
-    if (UNLIKELY(pthread_once(&g_sub_main_thread_key_once, sub_main_thread_make_key))) {
+    if (UNLIKELY(pthread_once(&g_scheduler_id_key_once, scheduler_id_make_key))) {
         AVM_ABORT();
     }
-    if (UNLIKELY(pthread_setspecific(g_sub_main_thread_key, (void *) 1))) {
+    if (UNLIKELY(pthread_setspecific(g_scheduler_id_key, (void *) (uintptr_t) scheduler_id))) {
         AVM_ABORT();
     }
 #else
-    g_sub_main_thread = true;
+    g_scheduler_id = scheduler_id;
 #endif
-    return (void *) (uintptr_t) scheduler_entry_point((GlobalContext *) arg);
+    return (void *) (uintptr_t) scheduler_entry_point(global);
 }
 
 void smp_scheduler_start(GlobalContext *ctx)
 {
+    struct SchedulerThreadArg *arg = malloc(sizeof(*arg));
+    if (IS_NULL_PTR(arg)) {
+        AVM_ABORT();
+    }
+    arg->global = ctx;
+    arg->scheduler_id = ctx->running_schedulers;
+
     pthread_t thread;
-    if (UNLIKELY(pthread_create(&thread, NULL, scheduler_thread_entry_point, ctx))) {
+    if (UNLIKELY(pthread_create(&thread, NULL, scheduler_thread_entry_point, arg))) {
+        free(arg);
         AVM_ABORT();
     }
     struct SchedulerThreadList *node = malloc(sizeof(*node));
@@ -120,12 +138,18 @@ void smp_scheduler_join_all(void)
 
 bool smp_is_main_thread(GlobalContext *glb)
 {
+    return smp_current_scheduler_id(glb) == 1;
+}
+
+int smp_current_scheduler_id(GlobalContext *glb)
+{
     UNUSED(glb);
 #ifdef __i386__
-    (void) pthread_once(&g_sub_main_thread_key_once, sub_main_thread_make_key);
-    return pthread_getspecific(g_sub_main_thread_key) == NULL;
+    (void) pthread_once(&g_scheduler_id_key_once, scheduler_id_make_key);
+    void *scheduler_id = pthread_getspecific(g_scheduler_id_key);
+    return scheduler_id == NULL ? 1 : (int) (uintptr_t) scheduler_id;
 #else
-    return !g_sub_main_thread;
+    return g_scheduler_id;
 #endif
 }
 
