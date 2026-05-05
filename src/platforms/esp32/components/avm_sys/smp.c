@@ -90,14 +90,14 @@ static void *scheduler_thread_entry_point(void *arg)
     return result;
 }
 
-void smp_scheduler_start(GlobalContext *ctx)
+void smp_scheduler_start(GlobalContext *ctx, int scheduler_id)
 {
     struct SchedulerThreadArg *arg = malloc(sizeof(*arg));
     if (IS_NULL_PTR(arg)) {
         AVM_ABORT();
     }
     arg->global = ctx;
-    arg->scheduler_id = ctx->running_schedulers;
+    arg->scheduler_id = scheduler_id;
 
     // When this function is called, the schedulers mutex is held and
     // therefore it is safe to call esp_pthread_set_default_config

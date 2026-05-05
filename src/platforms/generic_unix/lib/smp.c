@@ -96,14 +96,14 @@ static void *scheduler_thread_entry_point(void *arg)
     return (void *) (uintptr_t) scheduler_entry_point(global);
 }
 
-void smp_scheduler_start(GlobalContext *ctx)
+void smp_scheduler_start(GlobalContext *ctx, int scheduler_id)
 {
     struct SchedulerThreadArg *arg = malloc(sizeof(*arg));
     if (IS_NULL_PTR(arg)) {
         AVM_ABORT();
     }
     arg->global = ctx;
-    arg->scheduler_id = ctx->running_schedulers;
+    arg->scheduler_id = scheduler_id;
 
     pthread_t thread;
     if (UNLIKELY(pthread_create(&thread, NULL, scheduler_thread_entry_point, arg))) {

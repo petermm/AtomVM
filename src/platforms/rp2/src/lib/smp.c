@@ -53,6 +53,8 @@ struct RWLock
     mutex_t lock;
 };
 
+static int core1_scheduler_id = 2;
+
 static void scheduler_core1_entry_point(void)
 {
     _Static_assert(sizeof(uintptr_t) == sizeof(uint32_t), "Expected pointers to be 32 bits");
@@ -63,8 +65,9 @@ static void scheduler_core1_entry_point(void)
     multicore_lockout_victim_deinit();
 }
 
-void smp_scheduler_start(GlobalContext *ctx)
+void smp_scheduler_start(GlobalContext *ctx, int scheduler_id)
 {
+    core1_scheduler_id = scheduler_id;
     multicore_launch_core1(scheduler_core1_entry_point);
     multicore_fifo_push_blocking((uint32_t) ctx);
     multicore_lockout_victim_init();
@@ -83,7 +86,7 @@ bool smp_is_main_thread(GlobalContext *glb)
 
 int smp_current_scheduler_id(GlobalContext *glb)
 {
-    return smp_is_main_thread(glb) ? 1 : 2;
+    return smp_is_main_thread(glb) ? 1 : core1_scheduler_id;
 }
 
 Mutex *smp_mutex_create()
