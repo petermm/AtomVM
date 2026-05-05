@@ -20,10 +20,10 @@
 
 #include "atomics.h"
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <limits.h>
 #include <string.h>
 
 #if defined(HAVE_ATOMIC)

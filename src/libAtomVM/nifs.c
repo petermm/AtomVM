@@ -33,8 +33,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "atomics.h"
 #include "atom_table.h"
+#include "atomics.h"
 #include "avm_version.h"
 #include "avmpack.h"
 #include "bif.h"
