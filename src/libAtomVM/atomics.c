@@ -58,7 +58,8 @@ struct AtomicsRef
 {
     bool is_signed;
     size_t size;
-    AtomicsCell cells[];
+    size_t memory;
+    size_t cells_offset;
 };
 
 const ErlNifResourceTypeInit atomics_resource_type_init = {
@@ -234,57 +235,72 @@ static bool ensure_atomic_value_heap(Context *ctx, const struct AtomicsRef *atom
     }
 }
 
-static uint64_t cell_read(const struct AtomicsRef *atomics, size_t index)
+static uintptr_t align_up_uintptr(uintptr_t value, size_t alignment)
 {
-    UNUSED(atomics);
+    uintptr_t remainder = value % alignment;
+    return remainder == 0 ? value : value + alignment - remainder;
+}
+
+static AtomicsCell *atomics_cells(struct AtomicsRef *atomics)
+{
+    return (AtomicsCell *) ((uint8_t *) atomics + atomics->cells_offset);
+}
+
+static uint64_t cell_read(struct AtomicsRef *atomics, size_t index)
+{
+    AtomicsCell *cells = atomics_cells(atomics);
 #if defined(ATOMICS_USE_C11_64)
-    return atomic_load_explicit(&atomics->cells[index], memory_order_seq_cst);
+    return atomic_load_explicit(&cells[index], memory_order_seq_cst);
 #else
-    return atomics->cells[index];
+    return cells[index];
 #endif
 }
 
 static void cell_store(struct AtomicsRef *atomics, size_t index, uint64_t value)
 {
+    AtomicsCell *cells = atomics_cells(atomics);
 #if defined(ATOMICS_USE_C11_64)
-    atomic_store_explicit(&atomics->cells[index], value, memory_order_seq_cst);
+    atomic_store_explicit(&cells[index], value, memory_order_seq_cst);
 #else
-    atomics->cells[index] = value;
+    cells[index] = value;
 #endif
 }
 
 static uint64_t cell_add(struct AtomicsRef *atomics, size_t index, uint64_t incr)
 {
+    AtomicsCell *cells = atomics_cells(atomics);
 #if defined(ATOMICS_USE_C11_64)
-    return atomic_fetch_add_explicit(&atomics->cells[index], incr, memory_order_seq_cst) + incr;
+    return atomic_fetch_add_explicit(&cells[index], incr, memory_order_seq_cst) + incr;
 #else
-    atomics->cells[index] += incr;
-    return atomics->cells[index];
+    cells[index] += incr;
+    return cells[index];
 #endif
 }
 
 static uint64_t cell_exchange(struct AtomicsRef *atomics, size_t index, uint64_t desired)
 {
+    AtomicsCell *cells = atomics_cells(atomics);
 #if defined(ATOMICS_USE_C11_64)
-    return atomic_exchange_explicit(&atomics->cells[index], desired, memory_order_seq_cst);
+    return atomic_exchange_explicit(&cells[index], desired, memory_order_seq_cst);
 #else
-    uint64_t old = atomics->cells[index];
-    atomics->cells[index] = desired;
+    uint64_t old = cells[index];
+    cells[index] = desired;
     return old;
 #endif
 }
 
 static uint64_t cell_compare_exchange(struct AtomicsRef *atomics, size_t index, uint64_t expected, uint64_t desired)
 {
+    AtomicsCell *cells = atomics_cells(atomics);
 #if defined(ATOMICS_USE_C11_64)
     uint64_t old = expected;
     atomic_compare_exchange_strong_explicit(
-        &atomics->cells[index], &old, desired, memory_order_seq_cst, memory_order_seq_cst);
+        &cells[index], &old, desired, memory_order_seq_cst, memory_order_seq_cst);
     return old;
 #else
-    uint64_t old = atomics->cells[index];
+    uint64_t old = cells[index];
     if (old == expected) {
-        atomics->cells[index] = desired;
+        cells[index] = desired;
     }
     return old;
 #endif
@@ -304,11 +320,13 @@ static term atomics_new(Context *ctx, uint64_t size_value, bool is_signed)
         return raise_badarg(ctx);
     }
     size_t size = (size_t) size_value;
-    if (UNLIKELY(size > (SIZE_MAX - offsetof(struct AtomicsRef, cells)) / sizeof(AtomicsCell))) {
+    const size_t cells_alignment = _Alignof(AtomicsCell);
+    if (UNLIKELY(sizeof(struct AtomicsRef) > SIZE_MAX - (cells_alignment - 1)
+            || size > (SIZE_MAX - sizeof(struct AtomicsRef) - (cells_alignment - 1)) / sizeof(AtomicsCell))) {
         return raise_error(ctx, SYSTEM_LIMIT_ATOM);
     }
 
-    size_t bytes = offsetof(struct AtomicsRef, cells) + size * sizeof(AtomicsCell);
+    size_t bytes = sizeof(struct AtomicsRef) + (cells_alignment - 1) + size * sizeof(AtomicsCell);
     if (UNLIKELY(bytes > UINT_MAX)) {
         return raise_error(ctx, SYSTEM_LIMIT_ATOM);
     }
@@ -319,6 +337,8 @@ static term atomics_new(Context *ctx, uint64_t size_value, bool is_signed)
 
     atomics->is_signed = is_signed;
     atomics->size = size;
+    atomics->memory = bytes;
+    atomics->cells_offset = (size_t) (align_up_uintptr((uintptr_t) atomics + sizeof(struct AtomicsRef), cells_alignment) - (uintptr_t) atomics);
     for (size_t i = 0; i < size; i++) {
         cell_store(atomics, i, 0);
     }
@@ -548,7 +568,7 @@ term nif_atomics_info_1(Context *ctx, int argc, term argv[])
         return raise_badarg(ctx);
     }
 
-    uint64_t memory = offsetof(struct AtomicsRef, cells) + atomics->size * sizeof(AtomicsCell);
+    uint64_t memory = atomics->memory;
     uint64_t max = atomics->is_signed ? (uint64_t) INT64_MAX : UINT64_MAX;
     int64_t min = atomics->is_signed ? INT64_MIN : 0;
 

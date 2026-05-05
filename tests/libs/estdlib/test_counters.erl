@@ -77,7 +77,9 @@ test_shared(Type) ->
     Pid = spawn(fun() ->
         ok = counters:add(Ref, 1, 13),
         Parent ! {self(), done},
-        receive stop -> ok end
+        receive
+            stop -> ok
+        end
     end),
     receive
         {Pid, done} ->
@@ -141,13 +143,20 @@ start_workers(Ref, Ix, Workers, Rounds, Incr) ->
         spawn(fun() ->
             ok = worker_loop(Rounds, Ref, Ix, Incr),
             Parent ! {self(), done},
-            receive stop -> ok end
+            receive
+                stop -> ok
+            end
         end)
-        || _ <- lists:seq(1, Workers)
+     || _ <- lists:seq(1, Workers)
     ].
 
 wait_workers(Pids) ->
-    [receive {Pid, done} -> ok end || Pid <- Pids],
+    [
+        receive
+            {Pid, done} -> ok
+        end
+     || Pid <- Pids
+    ],
     ok.
 
 stop_workers(Pids) ->
