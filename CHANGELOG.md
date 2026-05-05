@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `proc_lib:init_fail/2,3`
 - Added initial support for the OTP-compatible `atomics` module
 - Added atomics-backed support for the OTP-compatible `counters` module
+- Added `write_concurrency` support for the OTP-compatible `counters` module
 
 ### Changed
 - Updated network type db() to dbm() to reflect the actual representation of the type

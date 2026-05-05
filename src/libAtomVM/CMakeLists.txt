@@ -29,6 +29,7 @@ set(HEADER_FILES
     bif.h
     bitstring.h
     context.h
+    counters.h
     debug.h
     defaultatoms.def
     defaultatoms.h
@@ -85,6 +86,7 @@ set(SOURCE_FILES
     bif.c
     bitstring.c
     context.c
+    counters.c
     debug.c
     defaultatoms.c
     dictionary.c

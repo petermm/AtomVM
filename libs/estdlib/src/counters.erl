@@ -20,8 +20,7 @@
 
 %%-----------------------------------------------------------------------------
 %% @doc A limited implementation of the Erlang/OTP `counters' module.
-%%      Atomics-backed counters are supported. The `write_concurrency' option is
-%%      not implemented.
+%%      Atomics-backed and write-concurrency counters are supported.
 %% @end
 %%-----------------------------------------------------------------------------
 -module(counters).
@@ -37,27 +36,33 @@
 
 -export_type([counters_ref/0]).
 
--opaque counters_ref() :: {atomics, atomics:atomics_ref()}.
+-opaque counters_ref() :: {atomics, atomics:atomics_ref()} | {write_concurrency, reference()}.
 
--type option() :: atomics.
+-type option() :: atomics | write_concurrency.
 
 -spec new(Size :: pos_integer(), Opts :: [option()]) -> counters_ref().
 new(Size, []) ->
     {atomics, atomics:new(Size, [{signed, true}])};
 new(Size, [atomics]) ->
     {atomics, atomics:new(Size, [{signed, true}])};
+new(Size, [write_concurrency]) ->
+    {write_concurrency, erts_internal:counters_new(Size)};
 new(_Size, _Opts) ->
     erlang:error(badarg).
 
 -spec get(Ref :: counters_ref(), Ix :: pos_integer()) -> integer().
 get({atomics, Ref}, Ix) ->
     atomics:get(Ref, Ix);
+get({write_concurrency, Ref}, Ix) ->
+    erts_internal:counters_get(Ref, Ix);
 get(_Ref, _Ix) ->
     erlang:error(badarg).
 
 -spec add(Ref :: counters_ref(), Ix :: pos_integer(), Incr :: integer()) -> ok.
 add({atomics, Ref}, Ix, Incr) ->
     atomics:add(Ref, Ix, Incr);
+add({write_concurrency, Ref}, Ix, Incr) ->
+    erts_internal:counters_add(Ref, Ix, Incr);
 add(_Ref, _Ix, _Incr) ->
     erlang:error(badarg).
 
@@ -67,6 +72,8 @@ sub(Ref, Ix, Decr) ->
     case Ref of
         {atomics, AtomicRef} ->
             atomics:add(AtomicRef, Ix, Incr);
+        {write_concurrency, CountersRef} ->
+            erts_internal:counters_add(CountersRef, Ix, Incr);
         _ ->
             erlang:error(badarg)
     end.
@@ -74,6 +81,8 @@ sub(Ref, Ix, Decr) ->
 -spec put(Ref :: counters_ref(), Ix :: pos_integer(), Value :: integer()) -> ok.
 put({atomics, Ref}, Ix, Value) ->
     atomics:put(Ref, Ix, Value);
+put({write_concurrency, Ref}, Ix, Value) ->
+    erts_internal:counters_put(Ref, Ix, Value);
 put(_Ref, _Ix, _Value) ->
     erlang:error(badarg).
 
@@ -84,5 +93,7 @@ put(_Ref, _Ix, _Value) ->
     }.
 info({atomics, Ref}) ->
     atomics:info(Ref);
+info({write_concurrency, Ref}) ->
+    erts_internal:counters_info(Ref);
 info(_Ref) ->
     erlang:error(badarg).

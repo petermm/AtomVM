@@ -40,6 +40,7 @@
 #include "bif.h"
 #include "bitstring.h"
 #include "context.h"
+#include "counters.h"
 #include "defaultatoms.h"
 #include "dictionary.h"
 #include "dist_nifs.h"
@@ -613,6 +614,31 @@ static const struct Nif erts_internal_cmp_term_nif = {
 static const struct Nif erts_internal_atomics_new_nif = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_erts_internal_atomics_new_2
+};
+
+static const struct Nif erts_internal_counters_new_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_new_1
+};
+
+static const struct Nif erts_internal_counters_get_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_get_2
+};
+
+static const struct Nif erts_internal_counters_add_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_add_3
+};
+
+static const struct Nif erts_internal_counters_put_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_put_3
+};
+
+static const struct Nif erts_internal_counters_info_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_info_1
 };
 
 static const struct Nif atomics_new_nif = {
