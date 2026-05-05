@@ -65,6 +65,29 @@ pack_lib(atomvmlib-stm32 ${ATOMVM_COMMON_LIBS} avm_stm32)
 pack_lib(atomvmlib-emscripten ${ATOMVM_COMMON_LIBS} avm_network avm_emscripten)
 
 if (Dialyzer_FOUND)
+    # Native-only modules are visible to Dialyzer through these stubs, but the
+    # stub beams are not packed into AtomVM libraries.
+    set(dialyzer_stubs_beam_dir ${CMAKE_CURRENT_BINARY_DIR}/dialyzer_stubs/beams)
+    add_custom_command(
+        OUTPUT ${dialyzer_stubs_beam_dir}/erts_internal.beam
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${dialyzer_stubs_beam_dir}
+        COMMAND
+            erlc +debug_info
+                -o ${dialyzer_stubs_beam_dir}
+                ${CMAKE_CURRENT_SOURCE_DIR}/dialyzer/erts_internal.erl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/dialyzer/erts_internal.erl
+        COMMENT "Compiling Dialyzer stub erts_internal.erl"
+        VERBATIM
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dialyzer_stub_beams.txt
+        DEPENDS ${dialyzer_stubs_beam_dir}/erts_internal.beam
+        COMMAND
+            ${CMAKE_COMMAND} -E echo
+                ${dialyzer_stubs_beam_dir}/erts_internal.beam
+                > ${CMAKE_CURRENT_BINARY_DIR}/dialyzer_stub_beams.txt
+    )
+
     # Helper macro to generate a beams list file from an archive
     macro(dialyzer_beams_list lib_name lib_path)
         get_filename_component(_beams_dir ${lib_path} DIRECTORY)
@@ -98,6 +121,7 @@ if (Dialyzer_FOUND)
             ${CMAKE_CURRENT_BINARY_DIR}/eavmlib_beams.txt
             ${CMAKE_CURRENT_BINARY_DIR}/alisp_beams.txt
             ${CMAKE_CURRENT_BINARY_DIR}/avm_network_beams.txt
+            ${CMAKE_CURRENT_BINARY_DIR}/dialyzer_stub_beams.txt
     )
     set(dialyzer_base_lists ${dialyzer_base_lists} ${CMAKE_CURRENT_BINARY_DIR}/jit_beams.txt)
 
