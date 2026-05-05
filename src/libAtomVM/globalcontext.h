@@ -169,8 +169,10 @@ struct GlobalContext
     uint32_t ATOMIC creation;
 #ifndef AVM_NO_SMP
     SpinLock atomics_spinlock;
+    SpinLock counters_spinlock;
 #endif
     ErlNifResourceType *atomics_resource_type;
+    ErlNifResourceType *counters_resource_type;
     ErlNifResourceType *resource_binary_resource_type;
     ErlNifResourceType *dist_connection_resource_type;
     struct SyncList dist_connections;

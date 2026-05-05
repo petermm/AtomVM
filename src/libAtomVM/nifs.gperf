@@ -171,6 +171,11 @@ erlang:list_to_bitstring/1, &list_to_bitstring_nif
 erts_debug:flat_size/1, &flat_size_nif
 erts_internal:cmp_term/2, &erts_internal_cmp_term_nif
 erts_internal:atomics_new/2, &erts_internal_atomics_new_nif
+erts_internal:counters_new/1, &erts_internal_counters_new_nif
+erts_internal:counters_get/2, &erts_internal_counters_get_nif
+erts_internal:counters_add/3, &erts_internal_counters_add_nif
+erts_internal:counters_put/3, &erts_internal_counters_put_nif
+erts_internal:counters_info/1, &erts_internal_counters_info_nif
 file:get_cwd/0, IF_HAVE_GETCWD_PATHMAX(&file_get_cwd_nif)
 ets:new/2, &ets_new_nif
 ets:lookup/2, &ets_lookup_nif
