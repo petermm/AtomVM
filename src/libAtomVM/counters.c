@@ -94,7 +94,9 @@ static term raise_error(Context *ctx, term reason)
 
 static size_t div_ceil_size(size_t dividend, size_t divisor)
 {
-    return (dividend + divisor - 1) / divisor;
+    /* Overflow-safe ceil division: avoid (dividend + divisor - 1) which
+     * wraps for dividends near SIZE_MAX. */
+    return dividend / divisor + (dividend % divisor != 0);
 }
 
 static uintptr_t align_up_uintptr(uintptr_t value, size_t alignment)
