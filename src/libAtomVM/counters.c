@@ -267,11 +267,13 @@ term nif_erts_internal_counters_new_1(Context *ctx, int argc, term argv[])
     size_t size = (size_t) size_value;
 
 #ifndef AVM_NO_SMP
-    int configured_schedulers = smp_get_online_processors();
-    if (UNLIKELY(configured_schedulers < 1)) {
-        configured_schedulers = 1;
+    /* Use the VM-wide scheduler slot namespace so that the per-cell layout
+     * here matches the slot ids returned by smp_current_scheduler_id(). */
+    int configured_slots = ctx->global->scheduler_slots_count;
+    if (UNLIKELY(configured_slots < 1)) {
+        configured_slots = 1;
     }
-    size_t scheduler_count = (size_t) configured_schedulers;
+    size_t scheduler_count = (size_t) configured_slots;
 #else
     size_t scheduler_count = 1;
 #endif

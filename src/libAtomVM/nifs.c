@@ -3383,7 +3383,7 @@ static term nif_erlang_system_info(Context *ctx, int argc, term argv[])
         char system_version[256];
         int len;
 #ifndef AVM_NO_SMP
-        len = snprintf(system_version, sizeof(system_version), "AtomVM %s [%d-bit] [smp:%d:%d]\n", ATOMVM_VERSION, TERM_BYTES * 8, ctx->global->online_schedulers, smp_get_online_processors());
+        len = snprintf(system_version, sizeof(system_version), "AtomVM %s [%d-bit] [smp:%d:%d]\n", ATOMVM_VERSION, TERM_BYTES * 8, ctx->global->online_schedulers, ctx->global->scheduler_slots_count);
 #else
         len = snprintf(system_version, sizeof(system_version), "AtomVM %s [%d-bit] [nosmp]\n", ATOMVM_VERSION, TERM_BYTES * 8);
 #endif
@@ -3412,7 +3412,7 @@ static term nif_erlang_system_info(Context *ctx, int argc, term argv[])
     }
     if (key == SCHEDULERS_ATOM) {
 #ifndef AVM_NO_SMP
-        return term_from_int11(smp_get_online_processors());
+        return term_from_int11(ctx->global->scheduler_slots_count);
 #else
         return term_from_int11(1);
 #endif
@@ -3451,8 +3451,8 @@ static term nif_erlang_system_flag(Context *ctx, int argc, term argv[])
         VALIDATE_VALUE(value, term_is_integer);
         int old_value = 0;
         int new_value = term_to_int(value);
-        int nb_processors = smp_get_online_processors();
-        if (UNLIKELY(new_value < 1) || UNLIKELY(new_value > nb_processors)) {
+        int max_slots = ctx->global->scheduler_slots_count;
+        if (UNLIKELY(new_value < 1) || UNLIKELY(new_value > max_slots)) {
             RAISE_ERROR(BADARG_ATOM);
         }
         while (!ATOMIC_COMPARE_EXCHANGE_WEAK_INT(&ctx->global->online_schedulers, &old_value, new_value)) {
