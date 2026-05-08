@@ -211,14 +211,15 @@ static size_t current_scheduler_slot(Context *ctx, const struct CountersRef *cou
 {
 #ifndef AVM_NO_SMP
     int scheduler_id = smp_current_scheduler_id(ctx->global);
-    if (UNLIKELY(scheduler_id < 1)) {
-        return 1;
+    /* Slot ids must be in [1, scheduler_count]; counters->scheduler_count is
+     * sized from the VM's fixed scheduler_slots_count, so any out-of-range
+     * id signals a real invariant violation in the scheduler layer. Aborting
+     * is preferable to silently aliasing two live schedulers onto the same
+     * cache-line-isolated cell, which would defeat write_concurrency. */
+    if (UNLIKELY(scheduler_id < 1 || (size_t) scheduler_id > counters->scheduler_count)) {
+        AVM_ABORT();
     }
-    size_t slot = (size_t) scheduler_id;
-    if (UNLIKELY(slot > counters->scheduler_count)) {
-        slot = ((slot - 1) % counters->scheduler_count) + 1;
-    }
-    return slot;
+    return (size_t) scheduler_id;
 #else
     UNUSED(ctx);
     UNUSED(counters);
