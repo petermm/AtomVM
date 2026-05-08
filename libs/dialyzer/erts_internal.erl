@@ -40,8 +40,10 @@
 cmp_term(_A, _B) ->
     erlang:nif_error(undefined).
 
--spec atomics_new(Arity :: pos_integer(), Opts :: [term()]) -> reference().
-atomics_new(_Arity, _Opts) ->
+%% Note: the second argument is an encoded options bitmask (see
+%% atomics:new/2 in libs/estdlib), not the user-facing options list.
+-spec atomics_new(Arity :: pos_integer(), OptsBitmask :: non_neg_integer()) -> reference().
+atomics_new(_Arity, _OptsBitmask) ->
     erlang:nif_error(undefined).
 
 -spec counters_new(Size :: pos_integer()) -> reference().
