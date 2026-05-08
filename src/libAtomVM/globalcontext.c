@@ -276,7 +276,7 @@ COLD_FUNC void globalcontext_destroy(GlobalContext *glb)
     /* Join sub-threads: a thread may still execute JIT epilogue code after
      * decrementing running_schedulers, so we must join before munmapping
      * native code pages. */
-    smp_scheduler_join_all();
+    smp_scheduler_join_all(glb);
 #endif
 
     sys_free_platform(glb);

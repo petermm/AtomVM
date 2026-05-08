@@ -258,13 +258,19 @@ int smp_get_online_processors(void);
 void smp_scheduler_start(GlobalContext *glb, int scheduler_id);
 
 /**
- * @brief Wait for all scheduler sub-threads to fully exit.
+ * @brief Wait for all scheduler sub-threads of the given GlobalContext
+ * to fully exit.
  *
  * Must be called before destroying resources (e.g. JIT code pages) that
  * scheduler threads may still access after leaving the scheduler loop.
+ * Only threads belonging to @p glb are joined; threads owned by other
+ * concurrently-running GlobalContexts are left untouched.
+ *
  * May be a no-op on platforms without joinable scheduler threads.
+ *
+ * @param glb the global context whose scheduler threads should be joined
  */
-void smp_scheduler_join_all(void);
+void smp_scheduler_join_all(GlobalContext *glb);
 
 /**
  * @brief Determine if caller is in the main thread, i.e. thread that was not

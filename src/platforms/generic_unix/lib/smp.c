@@ -46,10 +46,16 @@ struct RWLock
 
 /* Track scheduler thread handles so smp_scheduler_join_all can join them.
  * A sub-thread may still execute JIT epilogue code after decrementing
- * running_schedulers; joining prevents munmap races on JIT code pages. */
+ * running_schedulers; joining prevents munmap races on JIT code pages.
+ *
+ * The list is process-global because pthread bookkeeping is, but each
+ * node is tagged with the owning GlobalContext so that destroying one
+ * VM does not block on or join scheduler threads belonging to another
+ * concurrently-running VM. */
 struct SchedulerThreadList
 {
     pthread_t thread;
+    GlobalContext *global;
     struct SchedulerThreadList *next;
 };
 static pthread_mutex_t scheduler_threads_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -115,24 +121,40 @@ void smp_scheduler_start(GlobalContext *ctx, int scheduler_id)
         AVM_ABORT();
     }
     node->thread = thread;
+    node->global = ctx;
     pthread_mutex_lock(&scheduler_threads_lock);
     node->next = scheduler_threads;
     scheduler_threads = node;
     pthread_mutex_unlock(&scheduler_threads_lock);
 }
 
-void smp_scheduler_join_all(void)
+void smp_scheduler_join_all(GlobalContext *glb)
 {
-    struct SchedulerThreadList *list;
+    /* Splice out the nodes belonging to glb under the lock, then join
+     * them after releasing the lock. This avoids holding the global
+     * scheduler_threads_lock while blocking on pthread_join, and leaves
+     * threads owned by other concurrently-running GlobalContexts in
+     * place. */
+    struct SchedulerThreadList *to_join = NULL;
     pthread_mutex_lock(&scheduler_threads_lock);
-    list = scheduler_threads;
-    scheduler_threads = NULL;
+    struct SchedulerThreadList **link = &scheduler_threads;
+    while (*link) {
+        struct SchedulerThreadList *node = *link;
+        if (node->global == glb) {
+            *link = node->next;
+            node->next = to_join;
+            to_join = node;
+        } else {
+            link = &node->next;
+        }
+    }
     pthread_mutex_unlock(&scheduler_threads_lock);
-    while (list) {
-        struct SchedulerThreadList *next = list->next;
-        (void) pthread_join(list->thread, NULL);
-        free(list);
-        list = next;
+
+    while (to_join) {
+        struct SchedulerThreadList *next = to_join->next;
+        (void) pthread_join(to_join->thread, NULL);
+        free(to_join);
+        to_join = next;
     }
 }
 

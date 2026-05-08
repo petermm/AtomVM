@@ -82,8 +82,9 @@ void smp_scheduler_start(GlobalContext *ctx, int scheduler_id)
     }
 }
 
-void smp_scheduler_join_all(void)
+void smp_scheduler_join_all(GlobalContext *glb)
 {
+    UNUSED(glb);
     /* Threads are detached on this platform. */
 }
 
