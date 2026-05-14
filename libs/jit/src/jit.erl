@@ -1452,9 +1452,21 @@ first_pass(<<?OP_BS_GET_BINARY2, Rest0/binary>>, MMod, MSt0, State0) ->
                                 Unit =:= 8 ->
                                     {BSt2, SizeInUnitsReg};
                                 true ->
+                                    % Bound-check SizeInUnitsReg before the
+                                    % multiply so SizeInUnitsReg * Unit cannot
+                                    % overflow the native (signed) register.
+                                    % Negative sizes are already rejected above;
+                                    % this rejects sizes greater than MaxValidSize
+                                    % with a signed comparison (no backend
+                                    % implements an unsigned '>' condition).
+                                    WordBits = MMod:word_size() * 8,
+                                    MaxValidSize = ((1 bsl (WordBits - 1)) - 1) div Unit,
+                                    BBSt0 = cond_jump_to_label(
+                                        {MaxValidSize, '<', SizeInUnitsReg}, Fail, MMod, BSt2
+                                    ),
                                     % mul/3 converts units to bits in-place;
                                     % after this, SizeInUnitsReg actually holds bits
-                                    BBSt1 = MMod:mul(BSt2, SizeInUnitsReg, Unit),
+                                    BBSt1 = MMod:mul(BBSt0, SizeInUnitsReg, Unit),
                                     BBSt2 = MMod:if_block(
                                         BBSt1, {SizeInUnitsReg, '&', 16#7, '!=', 0}, fun(BlockSt) ->
                                             MMod:call_primitive_last(BlockSt, ?PRIM_RAISE_ERROR, [
