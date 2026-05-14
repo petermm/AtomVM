@@ -1981,10 +1981,6 @@ static term jit_stacktrace_build(Context *ctx)
 
 static bool jit_is_divisible(size_t value, size_t unit)
 {
-    if (unit == 0) {
-        return false;
-    }
-
     return value % unit == 0;
 }
 

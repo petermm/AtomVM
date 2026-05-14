@@ -4474,10 +4474,6 @@ schedule_in:
                     TRACE("bs_get_binary2: neither signed nor native or little endian encoding supported.\n");
                     RAISE_ERROR(UNSUPPORTED_ATOM);
                 }
-                if (UNLIKELY(unit == 0)) {
-                    TRACE("bs_get_binary2: invalid unit (0).\n");
-                    RAISE_ERROR(BADARG_ATOM);
-                }
                 if (bs_offset % 8 != 0) {
                     TRACE("bs_get_binary2: Unsupported.  Offset on binary read must be aligned on byte boundaries.\n");
                     RAISE_ERROR(BADARG_ATOM);

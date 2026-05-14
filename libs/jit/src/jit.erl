@@ -1449,9 +1449,24 @@ first_pass(<<?OP_BS_GET_BINARY2, Rest0/binary>>, MMod, MSt0, State0) ->
                                 Unit =:= 8 ->
                                     {BSt1, SizeInUnitsReg};
                                 true ->
+                                    % Bound-check SizeInUnitsReg before the
+                                    % multiply so SizeInUnitsReg * Unit cannot
+                                    % overflow the native (signed) register.
+                                    % Reject negative sizes and sizes greater
+                                    % than MaxValidSize using two signed
+                                    % comparisons (no backend implements an
+                                    % unsigned '>' condition).
+                                    WordBits = MMod:word_size() * 8,
+                                    MaxValidSize = ((1 bsl (WordBits - 1)) - 1) div Unit,
+                                    BBSt0a = cond_jump_to_label(
+                                        {SizeInUnitsReg, '<', 0}, Fail, MMod, BSt1
+                                    ),
+                                    BBSt0 = cond_jump_to_label(
+                                        {MaxValidSize, '<', SizeInUnitsReg}, Fail, MMod, BBSt0a
+                                    ),
                                     % mul/3 converts units to bits in-place;
                                     % after this, SizeInUnitsReg actually holds bits
-                                    BBSt1 = MMod:mul(BSt1, SizeInUnitsReg, Unit),
+                                    BBSt1 = MMod:mul(BBSt0, SizeInUnitsReg, Unit),
                                     BBSt2 = MMod:if_block(
                                         BBSt1, {SizeInUnitsReg, '&', 16#7, '!=', 0}, fun(BlockSt) ->
                                             MMod:call_primitive_last(BlockSt, ?PRIM_RAISE_ERROR, [
@@ -1461,9 +1476,12 @@ first_pass(<<?OP_BS_GET_BINARY2, Rest0/binary>>, MMod, MSt0, State0) ->
                                     ),
                                     MMod:shift_right(BBSt2, {free, SizeInUnitsReg}, 3)
                             end,
-                        % Note: negative SizeInBytesReg is safe — sub makes SizeReg
-                        % wrap/overflow so the unsigned '<' comparison below will
-                        % detect it as out-of-bounds and jump to Fail.
+                        % Note: on the Unit =/= 8 path, negative sizes are
+                        % already rejected by the explicit '< 0' check above.
+                        % On the Unit =:= 8 path, a negative SizeInBytesReg
+                        % would make 'sub' wrap SizeReg to a value smaller
+                        % than BSOffsetReg1, so the bounds check below jumps
+                        % to Fail.
                         BSt3 = MMod:sub(BSt2, SizeReg, SizeInBytesReg),
                         BSt4 = cond_jump_to_label({SizeReg, '<', BSOffsetReg1}, Fail, MMod, BSt3),
                         BSt5 = MMod:move_to_native_register(BSt4, SizeInBytesReg, SizeReg),

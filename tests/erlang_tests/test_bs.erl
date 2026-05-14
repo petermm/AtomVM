@@ -769,7 +769,28 @@ test_bs_match_bitstring_modifier() ->
         fun(Tag, Value) -> Tag =:= error andalso element(1, Value) =:= badmatch end
     ),
 
+    %% Overflow guard: requesting `Size * Unit` bits that would overflow
+    %% the native register width.  On 32-bit AtomVM (avm_int_t = int32_t),
+    %% Size = 1 bsl 26, Unit = 32 yields 2^31 bits = 2^28 bytes.  The
+    %% old multiply wrapped this to a small positive byte count and the
+    %% bounds check incorrectly admitted the match against a tiny binary;
+    %% the new bound check rejects it via the fail label (badmatch).  On
+    %% 64-bit the same call simply fails the bounds check normally
+    %% because 256 MiB > 3 bytes.  Either way the match must fail.
+    ok =
+        try
+            binary_match_unit_overflow(id(<<1, 2, 3>>), id(1 bsl 26)),
+            unexpected
+        catch
+            error:{badmatch, _} -> ok;
+            error:badarg -> ok
+        end,
+
     ok.
+
+binary_match_unit_overflow(BS, Size) ->
+    <<Matched:Size/binary-unit:32, _Rest/binary>> = BS,
+    Matched.
 
 bitstring_match(BS, Size) ->
     <<Matched:Size/bitstring, Rest/bits>> = BS,
