@@ -685,6 +685,7 @@ test_integer_outside_float_limits() ->
 
 create_float_binary(Value, Size) ->
     <<Value:Size/float>>.
+
 test_bs_match_bitstring_modifier() ->
     ok =
         try
