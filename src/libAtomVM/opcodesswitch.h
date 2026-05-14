@@ -180,6 +180,18 @@ static inline term *to_x_reg_ptr(term *xptr)
     return (term *) (((uintptr_t) xptr) & ~((uintptr_t) X_REG_FLAG));
 }
 
+// Greatest common divisor of two unsigned ints, used to derive overflow-safe
+// alignment divisors for bitstring unit/size arithmetic (see OP_BS_GET_BINARY2).
+static inline unsigned int gcd_uint(unsigned int a, unsigned int b)
+{
+    while (b != 0) {
+        unsigned int t = a % b;
+        a = b;
+        b = t;
+    }
+    return a;
+}
+
 #ifndef AVM_NO_EMU
 
 static dreg_t extended_register_ptr(Context *ctx, unsigned int index)
@@ -4528,6 +4540,10 @@ schedule_in:
                     TRACE("bs_get_binary2: neither signed nor native or little endian encoding supported.\n");
                     RAISE_ERROR(UNSUPPORTED_ATOM);
                 }
+                if (UNLIKELY(unit == 0)) {
+                    TRACE("bs_get_binary2: invalid unit (0).\n");
+                    RAISE_ERROR(BADARG_ATOM);
+                }
                 if (bs_offset % 8 != 0) {
                     TRACE("bs_get_binary2: Unsupported.  Offset on binary read must be aligned on byte boundaries.\n");
                     RAISE_ERROR(BADARG_ATOM);
@@ -4538,6 +4554,13 @@ schedule_in:
                     JUMP_TO_ADDRESS(mod->labels[fail]);
                 }
                 size_t remaining_bytes = bs_capacity - bs_offset / 8;
+
+                // Derive overflow-safe alignment divisors (matches the JIT's
+                // unit_divisor_for_binary_all/1 logic). With g = gcd(unit, 8),
+                // remaining bytes must be divisible by (unit / g).
+                unsigned int g = gcd_uint(unit, 8);
+                unsigned int byte_factor = unit / g;
+
                 size_t size_val = 0;
                 if (term_is_any_integer(size)) {
                     // size counts units: scale it to bits, then convert to bytes
@@ -4553,8 +4576,8 @@ schedule_in:
                     size_val = size_in_bits / 8;
                 } else if (size == ALL_ATOM) {
                     size_val = remaining_bytes;
-                    if (unit != 1 && (remaining_bytes * 8) % unit != 0) {
-                        TRACE("bs_get_binary2: all: remaining size %zu not divisible by unit %u\n", remaining_bytes, (unsigned) unit);
+                    if (byte_factor != 1 && size_val % byte_factor != 0) {
+                        TRACE("bs_get_binary2: all: remaining size %zu not divisible by unit %u\n", size_val, (unsigned) unit);
                         JUMP_TO_ADDRESS(mod->labels[fail]);
                     }
                 } else {
@@ -4564,6 +4587,8 @@ schedule_in:
 
                 TRACE("bs_get_binary2/7, fail=%u src=%p live=%u unit=%u\n", (unsigned) fail, (void *) bs_bin, (unsigned) live, (unsigned) unit);
 
+                // size_val is non-negative and bounded by the remaining capacity,
+                // and it is already a size_t, so this comparison cannot truncate.
                 if (size_val > remaining_bytes) {
                     TRACE("bs_get_binary2: insufficient capacity -- bs_offset = %d, size_val = %zu\n", (int) bs_offset, size_val);
                     JUMP_TO_ADDRESS(mod->labels[fail]);
