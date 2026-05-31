@@ -133,7 +133,7 @@ Functions
 .. doxygenfunction:: mailbox_remove_message
 .. doxygenfunction:: mailbox_reset
 .. doxygenfunction:: mailbox_send
-.. doxygenfunction:: mailbox_send_built_in_atom_request_signal
+.. doxygenfunction:: mailbox_send_process_info_request_signal
 .. doxygenfunction:: mailbox_send_empty_body_signal
 .. doxygenfunction:: mailbox_send_ref_signal
 .. doxygenfunction:: mailbox_send_term_signal

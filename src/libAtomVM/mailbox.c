@@ -294,6 +294,10 @@ void mailbox_send_immediate_signal(Context *c, enum MessageType type, term immed
 bool mailbox_send_process_info_request_signal(
     Context *c, int32_t sender_pid, process_info_mode_t mode, const term *atoms, size_t len)
 {
+    if (UNLIKELY(len > (SIZE_MAX - sizeof(struct ProcessInfoRequestSignal)) / sizeof(term))) {
+        return false;
+    }
+
     struct ProcessInfoRequestSignal *signal = malloc(
         sizeof(struct ProcessInfoRequestSignal) + len * sizeof(term));
     if (IS_NULL_PTR(signal)) {

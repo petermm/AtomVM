@@ -382,6 +382,7 @@ void context_process_process_info_request_signal(Context *ctx, struct ProcessInf
                 break;
             }
 
+            assert(term_is_tuple(item_result) && term_get_tuple_arity(item_result) == 2);
             if (signal->mode == PROCESS_INFO_LIST_OMIT_UNREGISTERED && signal->atoms[i] == REGISTERED_NAME_ATOM && term_is_nil(term_get_tuple_element(item_result, 1))) {
                 continue;
             }

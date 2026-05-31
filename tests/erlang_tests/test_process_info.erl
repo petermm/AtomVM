@@ -47,12 +47,17 @@ with_other_pid(Fun) ->
         end,
         [monitor]
     ),
-    Fun(Pid),
-    Pid ! quit,
-    normal =
-        receive
-            {'DOWN', Ref, process, Pid, Reason} -> Reason
-        end.
+    try
+        Fun(Pid)
+    after
+        Pid ! quit,
+        normal =
+            receive
+                {'DOWN', Ref, process, Pid, Reason} -> Reason
+            after 1000 ->
+                erlang:error(timeout_waiting_for_child_exit)
+            end
+    end.
 
 with_dead_pid(Fun) ->
     {DeadPid, Ref} = spawn_opt(fun() -> ok end, [monitor]),
@@ -94,7 +99,7 @@ test_process_info_1() ->
     end,
 
     Check(self()),
-    % with_other_pid(Check),
+    with_other_pid(Check),
 
     with_dead_pid(fun(DeadPid) ->
         undefined = process_info(DeadPid)

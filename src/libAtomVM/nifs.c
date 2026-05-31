@@ -3359,6 +3359,7 @@ static term nif_erlang_process_info(Context *ctx, int argc, term argv[])
             RAISE_ERROR(item_result);
         }
 
+        assert(term_is_tuple(item_result) && term_get_tuple_arity(item_result) == 2);
         if (omit_unregistered && items[i] == REGISTERED_NAME_ATOM && term_is_nil(term_get_tuple_element(item_result, 1))) {
             continue;
         }
