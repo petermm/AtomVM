@@ -265,7 +265,7 @@ void mailbox_send_immediate_signal(Context *c, enum MessageType type, term immed
  * @param atoms array of atom terms to query
  * @param len number of atoms in the array
  */
-void mailbox_send_process_info_request_signal(
+bool mailbox_send_process_info_request_signal(
     Context *c, int32_t sender_pid, process_info_mode_t mode, const term *atoms, size_t len);
 
 /**

@@ -3210,7 +3210,7 @@ static term nif_erlang_process_info(Context *ctx, int argc, term argv[])
 {
     term pid = argv[0];
 
-    if (!term_is_pid(pid)) {
+    if (!term_is_local_pid(pid)) {
         RAISE_ERROR(BADARG_ATOM);
     }
 
@@ -3248,7 +3248,11 @@ static term nif_erlang_process_info(Context *ctx, int argc, term argv[])
         } else {
             // Currently, all items require a signal. We could nevertheless filter
             // items that do not exist.
-            mailbox_send_process_info_request_signal(target, ctx->process_id, PROCESS_INFO_SINGLE, &item, 1);
+            if (UNLIKELY(
+                    !mailbox_send_process_info_request_signal(target, ctx->process_id, PROCESS_INFO_SINGLE, &item, 1))) {
+                globalcontext_get_process_unlock(ctx->global, target);
+                RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+            }
             context_update_flags(ctx, ~NoFlags, Trap);
         }
         globalcontext_get_process_unlock(ctx->global, target);
@@ -3316,7 +3320,12 @@ static term nif_erlang_process_info(Context *ctx, int argc, term argv[])
     }
 
     if (ctx != target) {
-        mailbox_send_process_info_request_signal(target, ctx->process_id, signal_mode, items, items_len);
+        if (UNLIKELY(
+                !mailbox_send_process_info_request_signal(target, ctx->process_id, signal_mode, items, items_len))) {
+            free(items_alloc);
+            globalcontext_get_process_unlock(ctx->global, target);
+            RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+        }
         context_update_flags(ctx, ~NoFlags, Trap);
         free(items_alloc);
         globalcontext_get_process_unlock(ctx->global, target);
