@@ -830,6 +830,21 @@ HOT_FUNC static inline bool memory_heap_fragment_contains_pointer(HeapFragment *
     return false;
 }
 
+bool memory_heap_contains_pointer(const Heap *heap, const term *ptr)
+{
+    if (ptr >= heap->heap_start && ptr < heap->heap_end) {
+        return true;
+    }
+    const HeapFragment *fragment = heap->root->next;
+    while (fragment) {
+        if (ptr >= fragment->storage && ptr < fragment->heap_end) {
+            return true;
+        }
+        fragment = fragment->next;
+    }
+    return false;
+}
+
 HOT_FUNC static term memory_shallow_copy_term(HeapFragment *old_fragment, term t, term **new_heap, bool move)
 {
     switch (t & TERM_PRIMARY_MASK) {

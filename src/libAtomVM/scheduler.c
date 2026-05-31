@@ -25,6 +25,7 @@
 #include "debug.h"
 #include "list.h"
 #include "mailbox.h"
+#include "persistent_term.h"
 #include "smp.h"
 #include "sys.h"
 #include "utils.h"
@@ -63,6 +64,7 @@ Context *scheduler_wait(Context *ctx)
 #ifdef DEBUG_PRINT_READY_PROCESSES
     debug_print_processes_list(global->ready_processes);
 #endif
+    persistent_term_process_checkpoint(ctx);
     GlobalContext *global = ctx->global;
     SMP_SPINLOCK_LOCK(&global->processes_spinlock);
     context_update_flags(ctx, ~Running, NoFlags);
@@ -270,6 +272,7 @@ static Context *scheduler_run0(GlobalContext *global)
     SMP_MUTEX_UNLOCK(global->schedulers_mutex);
 #endif
 
+    persistent_term_process_checkpoint(result);
     return result;
 }
 
@@ -287,6 +290,7 @@ Context *scheduler_run(GlobalContext *global)
             // process signal messages and also empty outer list to inner list.
             scheduler_process_native_signal_messages(result);
             if (UNLIKELY(result->flags & Killed)) {
+                persistent_term_process_checkpoint(result);
                 SMP_SPINLOCK_LOCK(&global->processes_spinlock);
                 list_remove(&result->processes_list_head);
                 SMP_SPINLOCK_UNLOCK(&global->processes_spinlock);
@@ -302,6 +306,7 @@ Context *scheduler_run(GlobalContext *global)
                                 AVM_ABORT();
                             }
                         }
+                        persistent_term_process_checkpoint(result);
                         context_update_flags(result, ~Running, NoFlags);
                         // The context was marked ready for the first message
                         // However, another message may have arrived before it
@@ -313,6 +318,7 @@ Context *scheduler_run(GlobalContext *global)
                             scheduler_make_ready(result);
                         }
                     } else {
+                        persistent_term_process_checkpoint(result);
                         scheduler_terminate(result);
                     }
                 } else {
@@ -324,6 +330,7 @@ Context *scheduler_run(GlobalContext *global)
                     // ready, and in this case the mailbox may only contain
                     // signal messages that are processed and removed by
                     // `scheduler_process_native_signal_messages`.
+                    persistent_term_process_checkpoint(result);
                     context_update_flags(result, ~Running, NoFlags);
                 }
             }
@@ -335,6 +342,7 @@ Context *scheduler_run(GlobalContext *global)
 
 Context *scheduler_next(GlobalContext *global, Context *c)
 {
+    persistent_term_process_checkpoint(c);
     // Remove c from running and append it at the end of ready list
     // c could already be in ready queue, if it received a message.
     SMP_SPINLOCK_LOCK(&global->processes_spinlock);

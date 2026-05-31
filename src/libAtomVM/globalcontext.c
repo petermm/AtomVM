@@ -33,6 +33,7 @@
 #include "list.h"
 #include "mailbox.h"
 #include "otp_crypto.h"
+#include "persistent_term.h"
 #include "posix_nifs.h"
 #include "refc_binary.h"
 #include "resources.h"
@@ -240,6 +241,10 @@ GlobalContext *globalcontext_new(void)
     smp_spinlock_init(&glb->env_spinlock);
 #endif
     glb->scheduler_stop_all = false;
+    glb->persistent_term_reclaim_pending = false;
+#ifndef AVM_NO_SMP
+    glb->persistent_term_reclaim_teardown_guard = 0;
+#endif
 
     return glb;
 }
@@ -558,6 +563,7 @@ void globalcontext_process_task_driver_queues(GlobalContext *glb)
 void globalcontext_init_process(GlobalContext *glb, Context *ctx)
 {
     ctx->global = glb;
+    persistent_term_init_process_checkpoint(ctx);
 
     SMP_SPINLOCK_LOCK(&glb->processes_spinlock);
     ctx->process_id = ++glb->last_process_id;

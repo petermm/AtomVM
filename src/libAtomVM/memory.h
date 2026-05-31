@@ -218,6 +218,18 @@ static inline void memory_heap_trim(Heap *heap, size_t size)
 }
 
 /**
+ * @brief Check if a heap contains the given term pointer
+ *
+ * @details Checks whether the given term pointer falls within any fragment of
+ * the given heap. The youngest fragment is checked using heap->heap_start to
+ * heap->heap_end, and any older fragments via the root->next chain.
+ * @param heap the heap to check
+ * @param ptr a pointer into a term
+ * @returns true if the pointer is within the heap's address space
+ */
+bool memory_heap_contains_pointer(const Heap *heap, const term *ptr);
+
+/**
  * @brief copies a term to a destination heap
  *
  * @details deep copies a term to a destination heap, once finished old memory can be freed.

@@ -21,12 +21,15 @@
 #include "persistent_term.h"
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 #include "context.h"
+#include "dictionary.h"
 #include "globalcontext.h"
 #include "memory.h"
 #include "smp.h"
+#include "sys.h"
 #include "term.h"
 #include "term_hash.h"
 #include "utils.h"
@@ -38,6 +41,9 @@ struct PersistentTermEntry
     term value;
     Heap *heap;
     size_t memory;
+#ifndef AVM_NO_SMP
+    uint64_t retire_epoch;
+#endif
 };
 
 static persistent_term_result_t find_entry(
@@ -51,6 +57,8 @@ static struct PersistentTermEntry *entry_new(term key, term value);
 static void entry_destroy(struct PersistentTermEntry *entry, GlobalContext *global);
 static void retire_entry(PersistentTerm *persistent_term, struct PersistentTermEntry *entry);
 static bool term_is_equal(term a, term b, GlobalContext *global, persistent_term_result_t *result);
+static bool context_has_reference_to_heap(const Context *ctx, const Heap *target_heap);
+void persistent_term_reclaim(PersistentTerm *persistent_term, GlobalContext *global);
 
 void persistent_term_init(PersistentTerm *persistent_term)
 {
@@ -62,7 +70,20 @@ void persistent_term_init(PersistentTerm *persistent_term)
     }
 
 #ifndef AVM_NO_SMP
+    persistent_term->reclaim_epoch = 0;
     persistent_term->lock = smp_rwlock_create();
+#endif
+}
+
+void persistent_term_init_process_checkpoint(Context *ctx)
+{
+#ifndef AVM_NO_SMP
+    PersistentTerm *pt = &ctx->global->persistent_term;
+    SMP_RWLOCK_RDLOCK(pt->lock);
+    ctx->persistent_term_checked_epoch = pt->reclaim_epoch;
+    SMP_RWLOCK_UNLOCK(pt->lock);
+#else
+    UNUSED(ctx);
 #endif
 }
 
@@ -141,6 +162,7 @@ persistent_term_result_t persistent_term_put(
         }
     }
 
+    bool retired = false;
     if (entry == NULL) {
         new_entry->next = persistent_term->buckets[bucket_index];
         persistent_term->buckets[bucket_index] = new_entry;
@@ -151,9 +173,18 @@ persistent_term_result_t persistent_term_put(
         *link = new_entry;
         persistent_term->memory += new_entry->memory;
         retire_entry(persistent_term, entry);
+        retired = true;
     }
 
     SMP_RWLOCK_UNLOCK(persistent_term->lock);
+    if (retired) {
+#ifndef AVM_NO_SMP
+        global->persistent_term_reclaim_pending = true;
+        sys_signal(global);
+#else
+        persistent_term_reclaim(persistent_term, global);
+#endif
+    }
     return PersistentTermOk;
 }
 
@@ -219,6 +250,12 @@ persistent_term_result_t persistent_term_erase(
 
     *removed = true;
     SMP_RWLOCK_UNLOCK(persistent_term->lock);
+#ifndef AVM_NO_SMP
+    global->persistent_term_reclaim_pending = true;
+    sys_signal(global);
+#else
+    persistent_term_reclaim(persistent_term, global);
+#endif
     return PersistentTermOk;
 }
 
@@ -345,8 +382,235 @@ static void entry_destroy(struct PersistentTermEntry *entry, GlobalContext *glob
 
 static void retire_entry(PersistentTerm *persistent_term, struct PersistentTermEntry *entry)
 {
+#ifndef AVM_NO_SMP
+    entry->retire_epoch = ++persistent_term->reclaim_epoch;
+#endif
     entry->next = persistent_term->retired_entries;
     persistent_term->retired_entries = entry;
+}
+
+static bool term_is_pointer_into_heap(term t, const Heap *target_heap)
+{
+    if (term_is_boxed(t)) {
+        return memory_heap_contains_pointer(target_heap, term_to_const_term_ptr(t));
+    }
+    if (term_is_nonempty_list(t)) {
+        return memory_heap_contains_pointer(target_heap, term_get_list_ptr(t));
+    }
+    return false;
+}
+
+static bool heap_range_has_reference_to_heap(const term *start, const term *end, const Heap *target_heap)
+{
+    for (const term *ptr = start; ptr < end; ptr++) {
+        if (term_is_pointer_into_heap(*ptr, target_heap)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool context_has_reference_to_heap(const Context *ctx, const Heap *target_heap)
+{
+    if (heap_range_has_reference_to_heap(ctx->heap.heap_start, ctx->heap.heap_ptr, target_heap)) {
+        return true;
+    }
+    const HeapFragment *fragment = ctx->heap.root->next;
+    while (fragment) {
+        if (heap_range_has_reference_to_heap(fragment->storage, fragment->heap_end, target_heap)) {
+            return true;
+        }
+        fragment = fragment->next;
+    }
+
+    term *stack_base = context_stack_base(ctx);
+    if (heap_range_has_reference_to_heap(ctx->e, stack_base, target_heap)) {
+        return true;
+    }
+
+    for (size_t i = 0; i <= MAX_REG; i++) {
+        if (term_is_pointer_into_heap(ctx->x[i], target_heap)) {
+            return true;
+        }
+    }
+
+    if (term_is_pointer_into_heap(ctx->cp, target_heap)) {
+        return true;
+    }
+
+    if (term_is_pointer_into_heap(ctx->bs, target_heap)) {
+        return true;
+    }
+
+    if (term_is_pointer_into_heap(ctx->exception_reason, target_heap)) {
+        return true;
+    }
+
+    if (term_is_pointer_into_heap(ctx->exception_stacktrace, target_heap)) {
+        return true;
+    }
+
+    struct ListHead *item;
+    LIST_FOR_EACH(item, &ctx->extended_x_regs) {
+        struct ExtendedRegister *ext_reg = CONTAINER_OF(item, struct ExtendedRegister, head);
+        if (term_is_pointer_into_heap(ext_reg->value, target_heap)) {
+            return true;
+        }
+    }
+
+    LIST_FOR_EACH(item, &ctx->dictionary) {
+        struct DictEntry *dict_entry = CONTAINER_OF(item, struct DictEntry, head);
+        if (term_is_pointer_into_heap(dict_entry->key, target_heap)) {
+            return true;
+        }
+        if (term_is_pointer_into_heap(dict_entry->value, target_heap)) {
+            return true;
+        }
+    }
+
+    if (term_is_pointer_into_heap(ctx->exit_reason, target_heap)) {
+        return true;
+    }
+
+    if (term_is_pointer_into_heap(ctx->group_leader, target_heap)) {
+        return true;
+    }
+
+    for (MailboxMessage *msg = ctx->mailbox.inner_first; msg != NULL; msg = msg->next) {
+        if (msg->type == NormalMessage) {
+            Message *m = CONTAINER_OF(msg, Message, base);
+            if (heap_range_has_reference_to_heap(
+                    m->storage + STORAGE_HEAP_START_INDEX, m->heap_end, target_heap)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void persistent_term_process_checkpoint(Context *ctx)
+{
+#ifndef AVM_NO_SMP
+    GlobalContext *global = ctx->global;
+    if (!global->persistent_term_reclaim_pending) {
+        return;
+    }
+    PersistentTerm *pt = &global->persistent_term;
+
+    SMP_RWLOCK_WRLOCK(pt->lock);
+    if (pt->retired_entries == NULL
+        || ctx->persistent_term_checked_epoch >= pt->reclaim_epoch) {
+        SMP_RWLOCK_UNLOCK(pt->lock);
+        return;
+    }
+
+    uint64_t old_checked = ctx->persistent_term_checked_epoch;
+    uint64_t new_checked = pt->reclaim_epoch;
+
+    for (struct PersistentTermEntry *entry = pt->retired_entries;
+         entry != NULL; entry = entry->next) {
+        if (entry->retire_epoch <= old_checked) {
+            continue;
+        }
+        if (context_has_reference_to_heap(ctx, entry->heap)) {
+            if (entry->retire_epoch - 1 < new_checked) {
+                new_checked = entry->retire_epoch - 1;
+            }
+        }
+    }
+
+    bool advanced = new_checked > old_checked;
+    if (advanced) {
+        ctx->persistent_term_checked_epoch = new_checked;
+    }
+    SMP_RWLOCK_UNLOCK(pt->lock);
+
+    if (advanced) {
+        persistent_term_reclaim(pt, global);
+    }
+#else
+    UNUSED(ctx);
+#endif
+}
+
+void persistent_term_reclaim(PersistentTerm *persistent_term, GlobalContext *global)
+{
+#ifndef AVM_NO_SMP
+    if (!global->persistent_term_reclaim_pending) {
+        return;
+    }
+    if (global->persistent_term_reclaim_teardown_guard != 0) {
+        return;
+    }
+
+    SMP_RWLOCK_WRLOCK(persistent_term->lock);
+    if (persistent_term->retired_entries == NULL) {
+        global->persistent_term_reclaim_pending = false;
+        SMP_RWLOCK_UNLOCK(persistent_term->lock);
+        return;
+    }
+
+    struct ListHead *processes = synclist_rdlock(&global->processes_table);
+    struct PersistentTermEntry **link = &persistent_term->retired_entries;
+    while (*link != NULL) {
+        struct PersistentTermEntry *entry = *link;
+        bool blocked = false;
+        struct ListHead *item;
+        LIST_FOR_EACH(item, processes) {
+            Context *ctx = CONTAINER_OF(item, Context, processes_table_head);
+            if (ctx->persistent_term_checked_epoch < entry->retire_epoch) {
+                blocked = true;
+                break;
+            }
+        }
+        if (!blocked) {
+            *link = entry->next;
+            persistent_term->memory -= entry->memory;
+            entry_destroy(entry, global);
+        } else {
+            link = &entry->next;
+        }
+    }
+    synclist_unlock(&global->processes_table);
+
+    global->persistent_term_reclaim_pending = persistent_term->retired_entries != NULL;
+    SMP_RWLOCK_UNLOCK(persistent_term->lock);
+#else
+    SMP_RWLOCK_WRLOCK(persistent_term->lock);
+    if (persistent_term->retired_entries == NULL) {
+        SMP_RWLOCK_UNLOCK(persistent_term->lock);
+        return;
+    }
+
+    struct PersistentTermEntry **link = &persistent_term->retired_entries;
+    struct ListHead *processes = synclist_rdlock(&global->processes_table);
+
+    while (*link != NULL) {
+        struct PersistentTermEntry *entry = *link;
+
+        bool referenced = false;
+        struct ListHead *item;
+        LIST_FOR_EACH(item, processes) {
+            Context *ctx = CONTAINER_OF(item, Context, processes_table_head);
+            if (context_has_reference_to_heap(ctx, entry->heap)) {
+                referenced = true;
+                break;
+            }
+        }
+
+        if (!referenced) {
+            *link = entry->next;
+            persistent_term->memory -= entry->memory;
+            entry_destroy(entry, global);
+        } else {
+            link = &entry->next;
+        }
+    }
+
+    synclist_unlock(&global->processes_table);
+    SMP_RWLOCK_UNLOCK(persistent_term->lock);
+#endif
 }
 
 static bool term_is_equal(term a, term b, GlobalContext *global, persistent_term_result_t *result)

@@ -23,6 +23,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "smp.h"
 #include "term_typedef.h"
@@ -52,6 +53,7 @@ typedef struct PersistentTerm
     struct PersistentTermEntry *buckets[PERSISTENT_TERM_NUM_BUCKETS];
     struct PersistentTermEntry *retired_entries;
 #ifndef AVM_NO_SMP
+    uint64_t reclaim_epoch;
     RWLock *lock;
 #endif
 } PersistentTerm;
@@ -84,6 +86,11 @@ persistent_term_result_t persistent_term_get_all_maybe_gc(
     struct Context *ctx);
 
 void persistent_term_info(PersistentTerm *persistent_term, size_t *count, size_t *memory);
+
+void persistent_term_reclaim(PersistentTerm *persistent_term, struct GlobalContext *global);
+
+void persistent_term_process_checkpoint(struct Context *ctx);
+void persistent_term_init_process_checkpoint(struct Context *ctx);
 
 #ifdef __cplusplus
 }

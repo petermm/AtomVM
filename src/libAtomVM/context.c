@@ -31,6 +31,7 @@
 #include "list.h"
 #include "mailbox.h"
 #include "memory.h"
+#include "persistent_term.h"
 #include "smp.h"
 #include "synclist.h"
 #include "sys.h"
@@ -136,6 +137,10 @@ Context *context_new(GlobalContext *glb)
 
 void context_destroy(Context *ctx)
 {
+#ifndef AVM_NO_SMP
+    ctx->global->persistent_term_reclaim_teardown_guard++;
+#endif
+
     // Hold and release the spin lock for timers and cancel any timer
     scheduler_cancel_timeout(ctx);
 
@@ -291,6 +296,13 @@ void context_destroy(Context *ctx)
     free(ctx->platform_data);
 
     ets_delete_owned_tables(&ctx->global->ets, ctx->process_id, ctx->global);
+
+#ifndef AVM_NO_SMP
+    ctx->global->persistent_term_reclaim_teardown_guard--;
+    if (ctx->global->persistent_term_reclaim_pending) {
+        persistent_term_reclaim(&ctx->global->persistent_term, ctx->global);
+    }
+#endif
 
     free(ctx);
 }

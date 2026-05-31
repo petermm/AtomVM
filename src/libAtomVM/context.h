@@ -28,6 +28,8 @@
 #ifndef _CONTEXT_H_
 #define _CONTEXT_H_
 
+#include <stdint.h>
+
 #include "globalcontext.h"
 #include "jit.h"
 #include "list.h"
@@ -162,6 +164,10 @@ struct Context
     uintptr_t exception_class;
     term exception_reason;
     term exception_stacktrace;
+
+#ifndef AVM_NO_SMP
+    uint64_t persistent_term_checked_epoch;
+#endif
 };
 
 #ifndef TYPEDEF_CONTEXT

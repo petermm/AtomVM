@@ -20,7 +20,7 @@
 
 -module(test_persistent_term).
 
--export([start/0]).
+-export([start/0, holder_loop/2]).
 
 start() ->
     cleanup(),
@@ -33,6 +33,9 @@ start() ->
     ok = test_complex_keys(),
     ok = test_fun_keys(),
     ok = test_info_and_get_all(),
+    ok = test_reclaim(),
+    ok = test_live_reference_blocks_reclaim(),
+    ok = test_reclaim_after_holder_dies(),
     cleanup(),
     0.
 
@@ -110,15 +113,51 @@ test_info_and_get_all() ->
     true = lists:member({Key2, {value2, [1, 2, 3]}}, All),
 
     true = persistent_term:erase(Key1),
-    #{count := Count3, memory := Memory3} = persistent_term:info(),
+    #{count := Count3} = persistent_term:info(),
     Count3 = Count2 - 1,
-    %% AtomVM retains retired entries on a dead list until VM shutdown so
-    %% previously returned terms stay valid without a global GC pass;
-    %% OTP may reclaim that memory immediately.
-    true = (Memory3 =< Memory2),
     true = persistent_term:erase(Key2),
     true = lists:member({Key1, {value1, replaced}}, All),
     true = lists:member({Key2, {value2, [1, 2, 3]}}, All),
+    ok.
+
+test_reclaim() ->
+    Key = {?MODULE, reclaim},
+    ok = persistent_term:put(Key, make_big_value(100)),
+    #{memory := M1} = persistent_term:info(),
+    true = persistent_term:erase(Key),
+    ok = wait_until(fun() ->
+        #{memory := M2} = persistent_term:info(),
+        M2 < M1
+    end),
+    ok.
+
+test_live_reference_blocks_reclaim() ->
+    Key = {?MODULE, live_ref},
+    Value = make_big_value(100),
+    ok = persistent_term:put(Key, Value),
+    #{memory := M1} = persistent_term:info(),
+    Retained = persistent_term:get(Key),
+    true = persistent_term:erase(Key),
+    _ = wait_until(fun() -> false end),
+    #{memory := M2} = persistent_term:info(),
+    true = M2 >= M1,
+    Value = Retained,
+    ok.
+
+test_reclaim_after_holder_dies() ->
+    Key = {?MODULE, holder_dies},
+    Value = make_big_value(100),
+    ok = persistent_term:put(Key, Value),
+    #{memory := M_before} = persistent_term:info(),
+    Parent = self(),
+    Pid = spawn_opt(?MODULE, holder_loop, [Key, Parent], []),
+    receive ready -> ok end,
+    true = persistent_term:erase(Key),
+    Pid ! release,
+    ok = wait_until(fun() ->
+        #{memory := M} = persistent_term:info(),
+        M < M_before
+    end),
     ok.
 
 cleanup() ->
@@ -126,7 +165,26 @@ cleanup() ->
     _ = persistent_term:erase({?MODULE, put_new}),
     _ = persistent_term:erase({?MODULE, info_1}),
     _ = persistent_term:erase({?MODULE, info_2}),
+    _ = persistent_term:erase({?MODULE, reclaim}),
+    _ = persistent_term:erase({?MODULE, live_ref}),
+    _ = persistent_term:erase({?MODULE, holder_dies}),
     ok.
+
+wait_until(Fun) -> wait_until(Fun, 200).
+wait_until(_Fun, 0) -> timeout;
+wait_until(Fun, N) ->
+    case Fun() of
+        true -> ok;
+        false -> receive after 10 -> ok end, wait_until(Fun, N - 1)
+    end.
+
+make_big_value(0) -> [];
+make_big_value(N) -> [N | make_big_value(N - 1)].
+
+holder_loop(Key, Parent) ->
+    Retained = persistent_term:get(Key),
+    Parent ! ready,
+    receive release -> Retained end.
 
 assert_badarg(Fun) ->
     {'EXIT', {badarg, _}} = (catch Fun()),

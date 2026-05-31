@@ -159,8 +159,13 @@ struct GlobalContext
     Mutex *schedulers_mutex;
     CondVar *schedulers_cv;
     bool ATOMIC scheduler_stop_all;
+    bool ATOMIC persistent_term_reclaim_pending;
+#ifndef AVM_NO_SMP
+    unsigned int ATOMIC persistent_term_reclaim_teardown_guard;
+#endif
 #else
     bool scheduler_stop_all;
+    bool persistent_term_reclaim_pending;
 #endif
 
 #ifndef AVM_NO_SMP
