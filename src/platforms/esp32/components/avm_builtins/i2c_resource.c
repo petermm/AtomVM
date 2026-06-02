@@ -90,6 +90,11 @@ static bool is_i2c_resource_open(const struct I2CResource *rsrc_obj)
     return rsrc_obj->i2c_num != I2C_NUM_MAX;
 }
 
+static bool term_is_i2c_address(term t)
+{
+    return term_is_uint8(t) && term_to_uint8(t) <= 0x7F;
+}
+
 static void reset_i2c_transmission_state(struct I2CResource *rsrc_obj)
 {
     if (rsrc_obj->cmd != NULL) {
@@ -376,10 +381,22 @@ static term nif_i2c_write_bytes(Context *ctx, int argc, term argv[])
     // extract the arguments
     //
     term req = argv[1];
+    if (UNLIKELY(!term_is_tuple(req))) {
+        ESP_LOGE(TAG, "nif_write_bytes: Request is not a tuple");
+        RAISE_ERROR(BADARG_ATOM);
+    }
     int arity = term_get_tuple_arity(req);
+    if (UNLIKELY(arity < 2 || arity > 3)) {
+        ESP_LOGE(TAG, "nif_write_bytes: Request tuple has invalid arity");
+        RAISE_ERROR(BADARG_ATOM);
+    }
 
     term address = term_get_tuple_element(req, 0);
-    uint8_t addr = term_to_int32(address);
+    if (UNLIKELY(!term_is_i2c_address(address))) {
+        ESP_LOGE(TAG, "nif_write_bytes: Address is not a valid 7-bit I2C address");
+        RAISE_ERROR(BADARG_ATOM);
+    }
+    uint8_t addr = term_to_uint8(address);
 
     term data = term_get_tuple_element(req, 1);
     uint8_t datum;
@@ -388,12 +405,12 @@ static term nif_i2c_write_bytes(Context *ctx, int argc, term argv[])
     if (term_is_binary(data)) {
         buf = (uint8_t *) term_binary_data(data);
         data_len = term_binary_size(data);
-    } else if (term_is_integer(data)) {
-        datum = term_to_int32(data);
+    } else if (term_is_uint8(data)) {
+        datum = term_to_uint8(data);
         buf = &datum;
         data_len = 1;
     } else {
-        ESP_LOGE(TAG, "Data is nether a binary nor an integer");
+        ESP_LOGE(TAG, "nif_write_bytes: Data is neither a binary nor a byte");
         RAISE_ERROR(BADARG_ATOM);
     }
 
@@ -401,7 +418,11 @@ static term nif_i2c_write_bytes(Context *ctx, int argc, term argv[])
     uint8_t register_address;
     if (arity == 3) {
         register_ = term_get_tuple_element(req, 2);
-        register_address = term_to_int32(register_);
+        if (UNLIKELY(!term_is_uint8(register_))) {
+            ESP_LOGE(TAG, "nif_write_bytes: Register is not a byte");
+            RAISE_ERROR(BADARG_ATOM);
+        }
+        register_address = term_to_uint8(register_);
     }
 
     //
@@ -504,19 +525,39 @@ static term nif_i2c_read_bytes(Context *ctx, int argc, term argv[])
     // extract the arguments
     //
     term req = argv[1];
+    if (UNLIKELY(!term_is_tuple(req))) {
+        ESP_LOGE(TAG, "nif_read_bytes: Request is not a tuple");
+        RAISE_ERROR(BADARG_ATOM);
+    }
     int arity = term_get_tuple_arity(req);
+    if (UNLIKELY(arity < 2 || arity > 3)) {
+        ESP_LOGE(TAG, "nif_read_bytes: Request tuple has invalid arity");
+        RAISE_ERROR(BADARG_ATOM);
+    }
 
     term address = term_get_tuple_element(req, 0);
-    uint8_t addr = term_to_int32(address);
+    if (UNLIKELY(!term_is_i2c_address(address))) {
+        ESP_LOGE(TAG, "nif_read_bytes: Address is not a valid 7-bit I2C address");
+        RAISE_ERROR(BADARG_ATOM);
+    }
+    uint8_t addr = term_to_uint8(address);
 
     term read_bytes = term_get_tuple_element(req, 1);
+    if (UNLIKELY(!term_is_non_neg_int(read_bytes))) {
+        ESP_LOGE(TAG, "nif_read_bytes: Count is not a non-negative integer");
+        RAISE_ERROR(BADARG_ATOM);
+    }
     avm_int_t read_count = term_to_int32(read_bytes);
 
     term register_ = term_invalid_term();
     uint8_t register_address = 0;
     if (arity == 3) {
         register_ = term_get_tuple_element(req, 2);
-        register_address = term_to_int32(register_);
+        if (UNLIKELY(!term_is_uint8(register_))) {
+            ESP_LOGE(TAG, "nif_read_bytes: Register is not a byte");
+            RAISE_ERROR(BADARG_ATOM);
+        }
+        register_address = term_to_uint8(register_);
     }
 
     //
@@ -643,7 +684,11 @@ static term nif_i2c_begin_transmission(Context *ctx, int argc, term argv[])
     //
 
     term address = argv[1];
-    uint8_t addr = term_to_int32(address);
+    if (UNLIKELY(!term_is_i2c_address(address))) {
+        ESP_LOGE(TAG, "nif_begin_transmission: Address is not a valid 7-bit I2C address");
+        RAISE_ERROR(BADARG_ATOM);
+    }
+    uint8_t addr = term_to_uint8(address);
 
     //
     // Initiate the I2C command
@@ -718,6 +763,10 @@ static term nif_i2c_enqueue_write_bytes(Context *ctx, int argc, term argv[])
     }
 
     term data = argv[1];
+    if (UNLIKELY(!term_is_binary(data))) {
+        ESP_LOGE(TAG, "nif_enqueue_write_bytes: Data is not a binary");
+        RAISE_ERROR(BADARG_ATOM);
+    }
     const uint8_t *buf = (const uint8_t *) term_binary_data(data);
     size_t len = term_binary_size(data);
 
