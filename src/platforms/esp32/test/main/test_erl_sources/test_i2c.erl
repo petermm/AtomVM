@@ -43,6 +43,7 @@ run_case(UseNif) ->
     try
         ok = test_einprogress_errors(I2C),
         ok = test_nack_errors(I2C),
+        ok = test_non_binary_transaction_write_rejected(I2C),
         ok = test_chip_id(I2C),
         Calibration = test_calibration(I2C),
         SplitWriteTemp = test_split_transaction_temperature_read(I2C),
@@ -154,6 +155,27 @@ test_nack_errors(I2C) ->
     {error, esp_fail} = i2c:end_transmission(I2C),
     ok = assert_chip_id_via_pointer_read(I2C),
     ok.
+
+test_non_binary_transaction_write_rejected(I2C) ->
+    ok = i2c:begin_transmission(I2C, ?BMP180_ADDRESS),
+    try
+        ok = expect_transaction_write_badarg(I2C)
+    after
+        _ = i2c:end_transmission(I2C)
+    end,
+    ok = assert_chip_id_via_register_read(I2C),
+    ok.
+
+expect_transaction_write_badarg(I2C) ->
+    try i2c:write_bytes(I2C, ?BMP180_CONTROL_REGISTER) of
+        {error, badarg} ->
+            ok;
+        Other ->
+            erlang:error({unexpected_transaction_write_result, Other})
+    catch
+        error:badarg ->
+            ok
+    end.
 
 test_chip_id(I2C) ->
     ok = assert_chip_id_via_register_read(I2C),
