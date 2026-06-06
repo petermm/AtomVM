@@ -289,12 +289,16 @@ EventListener *socket_events_handler(GlobalContext *glb, EventListener *listener
     while (xQueueReceive(netconn_events, &event, 1) == pdTRUE) {
         TRACE("Got netconn: %p, len = %d\n", (void *) event.netconn, event.len);
         struct SocketData *socket = NULL;
+        // Only read the socket process id under the lock: the socket data may
+        // be removed and freed as soon as the list is unlocked.
+        int32_t socket_process_id = 0;
         struct ListHead *socket_head;
         struct ListHead *socket_list = synclist_rdlock(&platform->sockets);
         LIST_FOR_EACH (socket_head, socket_list) {
             struct SocketData *current_socket = GET_LIST_ENTRY(socket_head, struct SocketData, sockets_head);
             if (current_socket->conn == event.netconn) {
                 socket = current_socket;
+                socket_process_id = current_socket->process_id;
                 break;
             }
         }
@@ -319,7 +323,7 @@ EventListener *socket_events_handler(GlobalContext *glb, EventListener *listener
             term message = term_alloc_tuple(2, &heap);
             term_put_tuple_element(message, 0, globalcontext_make_atom(glb, netconn_event_internal));
             term_put_tuple_element(message, 1, term_from_int(event.len));
-            globalcontext_send_message(glb, socket->process_id, message);
+            globalcontext_send_message(glb, socket_process_id, message);
             END_WITH_STACK_HEAP(heap, glb)
         }
     }
@@ -921,31 +925,42 @@ static void do_connect(Context *ctx, const GenMessage *gen_message)
 
     free(address_string);
 
-    // Lock list of sockets before the event callback is called
-    struct ListHead *sockets = socket_data_preinit(platform);
     struct netconn *conn = netconn_new_with_proto_and_callback(NETCONN_TCP, 0, socket_callback);
     if (IS_NULL_PTR(conn)) {
         AVM_ABORT();
     }
 
-    status = netconn_connect(conn, &remote_ip, port);
-    if (UNLIKELY(status != ERR_OK)) {
-        TRACE("tcp: failed connect: %i\n", status);
-        netconn_delete(conn);
-        socket_data_postinit(platform);
-        do_send_error_reply(ctx, status, ref_ticks, pid);
-        return;
-    }
-
-    TRACE("tcp: connected.\n");
-
+    // Publish the socket before the blocking connect: events received in the
+    // meantime are posted to this very context's mailbox and are only
+    // processed after this handler returns. Holding the sockets lock across
+    // netconn_connect would instead block every socket operation and the
+    // event handler for the whole connection attempt, which can last up to
+    // the TCP SYN timeout.
+    struct ListHead *sockets = socket_data_preinit(platform);
     struct TCPClientSocketData *tcp_data = tcp_client_socket_data_new(ctx, conn, sockets, controlling_process_pid);
-    socket_data_postinit(platform);
     if (IS_NULL_PTR(tcp_data)) {
         AVM_ABORT();
     }
     tcp_data->socket_data.active = active;
     tcp_data->socket_data.binary = binary;
+    socket_data_postinit(platform);
+
+    status = netconn_connect(conn, &remote_ip, port);
+    if (UNLIKELY(status != ERR_OK)) {
+        TRACE("tcp: failed connect: %i\n", status);
+        // Stop new events first, then unpublish: once synclist_remove
+        // returns, the event handler can no longer reference the socket data
+        // and it is safe to free it. Events already posted to this context's
+        // mailbox are dropped thanks to platform_data being NULL.
+        netconn_delete(conn);
+        synclist_remove(&platform->sockets, &tcp_data->socket_data.sockets_head);
+        free(tcp_data);
+        ctx->platform_data = NULL;
+        do_send_error_reply(ctx, status, ref_ticks, pid);
+        return;
+    }
+
+    TRACE("tcp: connected.\n");
 
     do_send_reply(ctx, OK_ATOM, ref_ticks, pid);
 }
@@ -1430,6 +1445,11 @@ static NativeHandlerResult socket_consume_mailbox(Context *ctx)
         TRACE("\n");
 
         if (term_is_tuple(msg) && term_get_tuple_element(msg, 0) == globalcontext_make_atom(glb, netconn_event_internal)) {
+            if (IS_NULL_PTR(ctx->platform_data)) {
+                // Event for a connection whose init failed and was deleted.
+                mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+                continue;
+            }
             int len = term_to_int32(term_get_tuple_element(msg, 1));
             NativeHandlerResult result = do_netconn_event(ctx, len);
             if (result == NativeTerminate) {

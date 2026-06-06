@@ -66,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed ESP32 I2C driver resource leaks, half-closed state, and close-during-transmission errors
 - Fixed several underallocation issues that could trigger data corruption on `binary:replace`, `zlib:compress` and bsd socket recv code.
 - Fixed a bug where `catch` would raise on regular atom results
+- Fixed ESP32 socket driver blocking every socket operation and the socket event handler while
+  a TCP connect was in progress, for up to the TCP SYN timeout when the destination is
+  unreachable, which could delay unrelated socket replies past their callers' timeouts
 
 ## [0.7.0-alpha.1] - 2026-04-06
 
