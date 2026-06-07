@@ -19,6 +19,8 @@
  */
 
 #include "sys.h"
+
+#include "sched_trace.h"
 #include "generic_unix_sys.h"
 
 #include "avmpack.h"
@@ -168,17 +170,25 @@ static inline void sys_poll_events_with_kqueue(GlobalContext *glb, int timeout_m
         ts.tv_nsec = (uint_least64_t) (timeout_ms % 1000) * 1000000;
     }
 
+    if (timeout_ms != 0) {
+        SCHED_TRACE(TR_POLL_ENTER, timeout_ms, poll_count);
+    }
     int nbEvents = kevent(platform->kqueue_fd, NULL, 0, notified, poll_count, ts_ptr);
+    if (timeout_ms != 0 || nbEvents > 0) {
+        SCHED_TRACE(TR_POLL_EXIT, nbEvents, timeout_ms);
+    }
     struct ListHead *listeners = NULL;
     for (int i = 0; i < nbEvents; i++) {
         if (notified[i].filter == EVFILT_USER && notified[i].ident == SIGNAL_IDENTIFIER) {
             // We've been signaled.
+            SCHED_TRACE(TR_SIGNAL_CONSUMED, 0, 0);
             continue;
         }
         if (notified[i].filter == EVFILT_READ) {
             if (listeners == NULL) {
                 listeners = synclist_wrlock(&glb->listeners);
             }
+            SCHED_TRACE(TR_LISTENER_NOTIFY, notified[i].ident, 0);
             if (!process_listener_handler(glb, (int) notified[i].ident, listeners, NULL, NULL)) {
                 select_event_notify(notified[i].ident, true, false, glb);
             }
@@ -287,11 +297,18 @@ static inline void sys_poll_events_with_poll(GlobalContext *glb, int timeout_ms)
 
         listeners_poll_count = listeners_new_count;
         select_events_poll_count = select_events_new_count;
+        SCHED_TRACE(TR_REBUILD, listeners_poll_count, select_events_poll_count);
     }
 
     poll_count += listeners_poll_count + select_events_poll_count;
 
+    if (timeout_ms != 0) {
+        SCHED_TRACE(TR_POLL_ENTER, timeout_ms, poll_count);
+    }
     int nb_descriptors = poll(fds, poll_count, timeout_ms);
+    if (timeout_ms != 0 || nb_descriptors > 0) {
+        SCHED_TRACE(TR_POLL_EXIT, nb_descriptors, timeout_ms);
+    }
 
     // After poll, process the list of fds in order, using fd_index as the index
     // on the list and nb_descriptors as the number of fds to process left
@@ -309,6 +326,7 @@ static inline void sys_poll_events_with_poll(GlobalContext *glb, int timeout_ms)
             char ignored;
             (void) read(platform->signal_pipe[0], &ignored, sizeof(ignored));
 #endif
+            SCHED_TRACE(TR_SIGNAL_CONSUMED, 0, 0);
             nb_descriptors--;
         }
         fd_index++;
@@ -325,6 +343,7 @@ static inline void sys_poll_events_with_poll(GlobalContext *glb, int timeout_ms)
             fds[fd_index].revents = 0;
             nb_descriptors--;
 
+            SCHED_TRACE(TR_LISTENER_NOTIFY, fds[fd_index].fd, 0);
             process_listener_handler(glb, fds[fd_index].fd, listeners, &item, &previous);
         }
         synclist_unlock(&glb->listeners);
@@ -363,6 +382,7 @@ void sys_poll_events(GlobalContext *glb, int timeout_ms) CLANG_THREAD_SANITIZE_S
 void sys_signal(GlobalContext *glb)
 {
     struct GenericUnixPlatformData *platform = glb->platform_data;
+    SCHED_TRACE(TR_SIGNAL, 0, 0);
 #ifdef HAVE_KQUEUE
     struct timespec ts = { 0, 0 };
     struct kevent kev;
@@ -662,6 +682,7 @@ void event_listener_add_to_polling_set(struct EventListener *listener, GlobalCon
 
 void sys_register_listener_nolock(GlobalContext *global, struct EventListener *listener)
 {
+    SCHED_TRACE(TR_LISTENER_REG, listener->fd, 0);
     event_listener_add_to_polling_set(listener, global);
 #ifndef AVM_NO_SMP
 #ifndef HAVE_KQUEUE
@@ -699,6 +720,7 @@ static void listener_event_remove_from_polling_set(listener_event_t listener_fd,
 
 void sys_unregister_listener_nolock(GlobalContext *global, struct EventListener *listener)
 {
+    SCHED_TRACE(TR_LISTENER_UNREG, listener->fd, 0);
     listener_event_remove_from_polling_set(listener->fd, global);
     list_remove(&listener->listeners_list_head);
 }
@@ -713,6 +735,7 @@ void sys_unregister_listener(GlobalContext *global, struct EventListener *listen
 void sys_register_select_event(GlobalContext *global, ErlNifEvent event, bool is_write)
 {
     struct GenericUnixPlatformData *platform = global->platform_data;
+    SCHED_TRACE(TR_SEL_REG, event, is_write);
 #ifdef HAVE_KQUEUE
     struct timespec ts = { 0, 0 };
     struct kevent kev;
@@ -735,6 +758,7 @@ void sys_register_select_event(GlobalContext *global, ErlNifEvent event, bool is
 void sys_unregister_select_event(GlobalContext *global, ErlNifEvent event, bool is_write)
 {
     struct GenericUnixPlatformData *platform = global->platform_data;
+    SCHED_TRACE(TR_SEL_UNREG, event, is_write);
 #ifdef HAVE_KQUEUE
     struct timespec ts = { 0, 0 };
     struct kevent kev;

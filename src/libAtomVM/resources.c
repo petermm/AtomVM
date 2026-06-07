@@ -30,6 +30,7 @@
 #include "list.h"
 #include "refc_binary.h"
 #include "resources.h"
+#include "sched_trace.h"
 #include "synclist.h"
 #include "sys.h"
 #include "utils.h"
@@ -170,6 +171,7 @@ static int enif_select_common(ErlNifEnv *env, ErlNifEvent event, enum ErlNifSele
             }
             refc_binary_decrement_refcount(resource, global);
             enif_select_event_message_dispose(select_event->message, global, false);
+            SCHED_TRACE(TR_SEL_STOP, event, 0);
             free((void *) select_event);
             return ERL_NIF_SELECT_STOP_CALLED;
         }
@@ -187,6 +189,7 @@ static int enif_select_common(ErlNifEnv *env, ErlNifEvent event, enum ErlNifSele
         if (was_write) {
             sys_unregister_select_event(global, event, true);
         }
+        SCHED_TRACE(TR_SEL_STOP, event, 1);
         return ERL_NIF_SELECT_STOP_SCHEDULED;
     }
     // Create new event if it doesn't exist.
@@ -269,6 +272,7 @@ term select_event_make_notification(void *rsrc_obj, uint64_t ref_ticks, bool is_
 
 static void select_event_send_notification(struct SelectEvent *select_event, bool is_write, GlobalContext *global)
 {
+    SCHED_TRACE(TR_SEL_MSG, select_event->event, select_event->local_pid);
     if (select_event->message) {
         enum SendMessageResult result;
 #ifdef AVM_SELECT_IN_TASK
@@ -312,6 +316,7 @@ bool select_event_notify(ErlNifEvent event, bool is_read, bool is_write, GlobalC
         }
         select_event = NULL;
     }
+    SCHED_TRACE(TR_SEL_NOTIFY, event, (is_read ? 1 : 0) | (is_write ? 2 : 0) | (select_event != NULL ? 4 : 0));
     if (select_event) {
         if (is_read && select_event->read) {
             select_event_send_notification(select_event, false, global);

@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
+#
+# Dockerfile for reproducing the scheduler/event-loop CI failures
+# documented in INVESTIGATION.md. Mirrors the ubuntu-24.04 CI runner
+# (linux/amd64, snap-installed valgrind 3.22.x) as closely as possible
+# without snap.
+#
+# Build:
+#   docker build --platform linux/amd64 -t atomvm-sched-trace \
+#     -f tools/Dockerfile.sched-trace .
+#
+# Then use tools/run-sched-trace-docker.sh as the entry point for
+# iterations.
+FROM --platform=linux/amd64 ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        curl \
+        g++ \
+        gcc \
+        git \
+        gperf \
+        libc6-dbg \
+        libmbedtls-dev \
+        ninja-build \
+        socat \
+        valgrind \
+        zlib1g-dev \
+        # Erlang for the BEAM side of test_net_kernel / test_serial_dist_socat
+        erlang-base erlang-dev erlang-tools erlang-os-mon erlang-public-key \
+        erlang-crypto erlang-ssl erlang-syntax-tools erlang-edoc \
+        erlang-eunit erlang-runtime-tools \
+        # rebar3 is required by tools/packbeam at configure time.
+        rebar3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Confirm versions for reproducibility logging.
+RUN gcc --version | head -1 \
+    && cmake --version | head -1 \
+    && ninja --version \
+    && valgrind --version \
+    && erl -version 2>&1
+
+WORKDIR /work

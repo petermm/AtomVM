@@ -20,6 +20,8 @@
 
 #include "scheduler.h"
 
+#include "sched_trace.h"
+
 #include <stdio.h>
 
 #include "debug.h"
@@ -72,6 +74,7 @@ Context *scheduler_wait(Context *ctx)
         list_append(&global->waiting_processes, &ctx->processes_list_head);
     }
     SMP_SPINLOCK_UNLOCK(&global->processes_spinlock);
+    SCHED_TRACE(TR_PROC_WAIT, ctx->process_id, 0);
 
     return scheduler_run(global);
 }
@@ -185,12 +188,19 @@ static Context *scheduler_run0(GlobalContext *global)
     // opportunity to end the scheduler, in which case the function returns
     // NULL
     Context *result = NULL;
+#if defined(AVM_SCHED_TRACE) || (defined(AVM_SCHED_HANDOFF_BUDGET) && !defined(AVM_NO_SMP))
+    static _Thread_local int direct_handoff_streak = 0;
+#endif
 
 #ifndef AVM_NO_SMP
     SMP_MUTEX_LOCK(global->schedulers_mutex);
     bool is_waiting = !global->waiting_scheduler;
     if (is_waiting) {
         global->waiting_scheduler = true;
+        SCHED_TRACE(TR_CLAIM, 0, 0);
+#if defined(AVM_SCHED_TRACE) || (defined(AVM_SCHED_HANDOFF_BUDGET) && !defined(AVM_NO_SMP))
+        direct_handoff_streak = 0;
+#endif
     }
     bool main_thread = smp_is_main_thread(global);
 #endif
@@ -235,20 +245,55 @@ static Context *scheduler_run0(GlobalContext *global)
                 return NULL;
             }
             if (!is_waiting) {
+#if defined(AVM_SCHED_HANDOFF_BUDGET) && !defined(AVM_NO_SMP)
+                // Diagnostic option: bound the number of consecutive direct
+                // handoffs a single non-poller scheduler thread can perform
+                // before it must release the schedulers_mutex via a
+                // condvar wait. On hosts with unfair native-thread
+                // scheduling (Valgrind --fair-sched=no in particular),
+                // this prevents one OS thread from monopolizing the CPU
+                // and starving the poller scheduler.
+                if (direct_handoff_streak >= (AVM_SCHED_HANDOFF_BUDGET)) {
+                    direct_handoff_streak = 0;
+                    // Wake the poller so it can also make progress, then
+                    // block briefly on the condvar so the host scheduler
+                    // can switch threads.
+                    sys_signal(global);
+                    SCHED_TRACE(TR_CV_WAIT, 0, 1);
+                    smp_condvar_wait(global->schedulers_cv, global->schedulers_mutex);
+                    SCHED_TRACE(TR_CV_WOKE, 0, 1);
+                    is_waiting = !global->waiting_scheduler;
+                    if (is_waiting) {
+                        global->waiting_scheduler = true;
+                        SCHED_TRACE(TR_CLAIM, 0, 0);
+                    }
+                    continue;
+                }
+#endif
                 // If a process is ready, process it instead of waking up
                 // the poller scheduler
                 result = scheduler_first_runnable_ready(global);
                 if (result != NULL) {
+#if defined(AVM_SCHED_TRACE) || (defined(AVM_SCHED_HANDOFF_BUDGET) && !defined(AVM_NO_SMP))
+                    direct_handoff_streak++;
+#endif
+                    SCHED_TRACE(TR_DIRECT_HANDOFF, result->process_id, direct_handoff_streak);
                     break;
                 }
 
                 // Before entering the condition variable, signal the poll events
                 // so the thread polling on events can check the ready queue.
                 sys_signal(global);
+                SCHED_TRACE(TR_CV_WAIT, 0, 0);
                 smp_condvar_wait(global->schedulers_cv, global->schedulers_mutex);
+                SCHED_TRACE(TR_CV_WOKE, 0, 0);
                 is_waiting = !global->waiting_scheduler;
                 if (is_waiting) {
                     global->waiting_scheduler = true;
+                    SCHED_TRACE(TR_CLAIM, 0, 0);
+#if defined(AVM_SCHED_TRACE) || (defined(AVM_SCHED_HANDOFF_BUDGET) && !defined(AVM_NO_SMP))
+                    direct_handoff_streak = 0;
+#endif
                 }
             }
         } while (!is_waiting);
@@ -269,6 +314,7 @@ static Context *scheduler_run0(GlobalContext *global)
             result = scheduler_first_runnable_ready(global);
         }
 
+        SCHED_TRACE(TR_POLL_GATE, result != NULL ? (int32_t) result->process_id : -1, wait_timeout);
         // Only the poller scheduler drives the event loop.
 #ifndef AVM_NO_SMP
         if (is_waiting) {
@@ -292,6 +338,7 @@ static Context *scheduler_run0(GlobalContext *global)
     // Only the polling scheduler relinquishes the poller role.
     if (is_waiting) {
         global->waiting_scheduler = false;
+        SCHED_TRACE(TR_RELINQUISH, result != NULL ? (int32_t) result->process_id : -1, 0);
         smp_condvar_signal(global->schedulers_cv);
     }
     SMP_MUTEX_UNLOCK(global->schedulers_mutex);
@@ -377,6 +424,7 @@ Context *scheduler_next(GlobalContext *global, Context *c)
 static void scheduler_make_ready(Context *ctx)
 {
     GlobalContext *global = ctx->global;
+    SCHED_TRACE(TR_MAKE_READY, ctx->process_id, context_get_flags(ctx, Ready | Running | Killed | Spawning));
     SMP_SPINLOCK_LOCK(&global->processes_spinlock);
     if (context_get_flags(ctx, Killed | Spawning)) {
         SMP_SPINLOCK_UNLOCK(&global->processes_spinlock);
@@ -397,16 +445,20 @@ static void scheduler_make_ready(Context *ctx)
             && global->running_schedulers < global->online_schedulers
             && !context_get_flags(ctx, Running)) {
             global->running_schedulers++;
+            SCHED_TRACE(TR_MAKE_READY_SIGNAL, ctx->process_id, 1);
             smp_scheduler_start(global);
         }
         if (global->waiting_scheduler) {
+            SCHED_TRACE(TR_MAKE_READY_SIGNAL, ctx->process_id, 0);
             sys_signal(global);
         }
         SMP_MUTEX_UNLOCK(global->schedulers_mutex);
     } else {
+        SCHED_TRACE(TR_MAKE_READY_SIGNAL, ctx->process_id, 2);
         sys_signal(global);
     }
 #elif defined(AVM_TASK_DRIVER_ENABLED)
+    SCHED_TRACE(TR_MAKE_READY_SIGNAL, ctx->process_id, 3);
     sys_signal(global);
 #endif
 }
@@ -486,6 +538,7 @@ void scheduler_set_timeout(Context *ctx, avm_int64_t timeout)
     SMP_SPINLOCK_LOCK(&glb->timer_spinlock);
     timer_list_insert(tw, twi);
     SMP_SPINLOCK_UNLOCK(&glb->timer_spinlock);
+    SCHED_TRACE(TR_SET_TIMEOUT, ctx->process_id, timeout);
 
 #ifndef AVM_NO_SMP
     if (SMP_MUTEX_TRYLOCK(glb->schedulers_mutex)) {

@@ -59,6 +59,7 @@ set(HEADER_FILES
     posix_nifs.h
     refc_binary.h
     resources.h
+    sched_trace.h
     scheduler.h
     smp.h
     synclist.h
@@ -103,6 +104,7 @@ set(SOURCE_FILES
     posix_nifs.c
     refc_binary.c
     resources.c
+    sched_trace.c
     scheduler.c
     stacktrace.c
     term.c
