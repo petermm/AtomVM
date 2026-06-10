@@ -120,6 +120,30 @@ jobs:
       run: |
         make
 
+    - name: "Check Elixir boot AVM partition size"
+      if: matrix.flavor == '-elixir'
+      shell: bash
+      run: |
+        BOOT_AVM="build/libs/esp32boot/elixir_esp32boot.avm"
+        PARTITION_SIZE=$(awk -F, '$1 ~ /^[[:space:]]*boot\.avm[[:space:]]*$/ {
+          gsub(/[[:space:]]/, "", $5)
+          print $5
+        }' src/platforms/esp32/partitions-elixir.csv)
+
+        if [ -z "${PARTITION_SIZE}" ]; then
+          echo "::error::Unable to determine boot.avm size from partitions-elixir.csv"
+          exit 1
+        fi
+
+        AVM_SIZE=$(stat -c %s "${BOOT_AVM}")
+        MAX_SIZE=$((PARTITION_SIZE))
+        echo "Elixir boot AVM: ${AVM_SIZE} / ${MAX_SIZE} bytes"
+
+        if [ "${AVM_SIZE}" -gt "${MAX_SIZE}" ]; then
+          echo "::error::Elixir boot AVM is too large: ${AVM_SIZE} bytes exceeds the ${MAX_SIZE} byte boot.avm partition"
+          exit 1
+        fi
+
     - name: "Set SOC target"
       run: echo "SOC_TARGET=${{ startsWith(matrix.soc, 'esp32p4') && 'esp32p4' || matrix.soc }}" >> $GITHUB_ENV
 
