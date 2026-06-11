@@ -25,7 +25,7 @@ add_library(esp32_test_modules)
 # components/libatomvm/CMakeLists.txt since that directory's variables do not
 # propagate into this sibling subdirectory scope.
 if(CONFIG_JIT_ENABLED)
-    if (${IDF_TARGET} MATCHES "esp32c2|esp32c3|esp32c5|esp32c6|esp32c61|esp32h2|esp32p4")
+    if (${IDF_TARGET} MATCHES "esp32c2|esp32c3|esp32c5|esp32c6|esp32c61|esp32h2|esp32p4|esp32s31")
         set(AVM_DISABLE_JIT OFF)
         set(AVM_JIT_TARGET_ARCH riscv32)
     elseif(${IDF_TARGET} MATCHES "esp32|esp32s2|esp32s3")

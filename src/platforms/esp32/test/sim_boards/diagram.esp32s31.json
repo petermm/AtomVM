@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "author": "Wokwi",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s31-function-coreboard-1",
+      "id": "esp",
+      "top": -44.94,
+      "left": -179.11
+    },
+    {
+      "type": "wokwi-ili9341",
+      "id": "lcd1",
+      "top": -364,
+      "left": -86.7,
+      "attrs": { "width": "240", "height": "320" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX0", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+    [ "esp:3V3.1", "lcd1:VCC", "red", [ "v-28.8", "h-76.8" ] ],
+    [ "esp:GND.1", "lcd1:GND", "black", [ "v-24", "h96" ] ],
+    [ "esp:35", "lcd1:MOSI", "green", [ "v-4.8", "h14.4", "v-24", "h4.81" ] ],
+    [ "esp:36", "lcd1:SCK", "yellow", [ "v-9.6", "h38.41" ] ],
+    [ "esp:37", "lcd1:CS", "orange", [ "h-4.8", "v-48" ] ],
+    [ "esp:38", "lcd1:D/C", "blue", [ "v-19.2", "h28.8" ] ],
+    [ "esp:39", "lcd1:RST", "purple", [ "h-4.8", "v-24", "h24" ] ],
+    [ "esp:3V3.2", "lcd1:LED", "gold", [ "h4.8", "v-48" ] ]
+  ],
+  "dependencies": {}
+}

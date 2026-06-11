@@ -39,7 +39,7 @@ elseif ("${app_offset}" STREQUAL "0x300000")
     # included from a component context; derive from IDF_TARGET otherwise.
     if (DEFINED AVM_JIT_TARGET_ARCH)
         set(_jit_arch "${AVM_JIT_TARGET_ARCH}")
-    elseif (${IDF_TARGET} MATCHES "esp32c2|esp32c3|esp32c5|esp32c6|esp32c61|esp32h2|esp32p4")
+    elseif (${IDF_TARGET} MATCHES "esp32c2|esp32c3|esp32c5|esp32c6|esp32c61|esp32h2|esp32p4|esp32s31")
         set(_jit_arch "riscv32")
     elseif (${IDF_TARGET} MATCHES "^esp32")
         set(_jit_arch "xtensa")
