@@ -6042,6 +6042,44 @@ static const char b64_table_urlsafe[64] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H
                                            'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x',
                                            'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7',
                                            '8', '9', '-', '_'};
+
+static const uint8_t d64_table[256] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x3E, 0xFF, 0xFF, 0xFF, 0x3F,
+    0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+    0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+    0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+};
+
+static const uint8_t d64_table_urlsafe[256] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x3E, 0xFF, 0xFF,
+    0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+    0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0xFF, 0xFF, 0xFF, 0xFF, 0x3F,
+    0xFF, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+    0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+};
 // clang-format on
 
 // per https://tools.ietf.org/rfc/rfc4648.txt
@@ -6152,80 +6190,47 @@ static term base64_encode(Context *ctx, int argc, term argv[], bool return_binar
             RAISE_ERROR(OUT_OF_MEMORY_ATOM);
         }
     }
-    for (size_t i = 0; i < dst_size; ++i) {
-        uint8_t accum = 0;
-        switch (i & 0x03) {
-            case 0:
-                dst_pos[i] = table[(*src_pos) >> 2];
-                break;
-            case 1:
-                accum = ((*src_pos) & 0x03) << 4;
-                src_pos++;
-                if (i < dst_size - 1) {
-                    accum |= ((*src_pos) & 0xF0) >> 4;
-                }
-                dst_pos[i] = table[accum];
-                break;
-            case 2:
-                accum = ((*src_pos) & 0x0F) << 2;
-                src_pos++;
-                if (i < dst_size - 1) {
-                    accum |= ((*src_pos) & 0xC0) >> 6;
-                }
-                dst_pos[i] = table[accum];
-                break;
-            case 3:
-                dst_pos[i] = table[(*src_pos) & 0x3F];
-                src_pos++;
-                break;
+
+    uint8_t *dst_start = dst_pos;
+    const uint8_t *src_end = src_pos + src_size;
+    while (src_end - src_pos >= 3) {
+        uint8_t b0 = src_pos[0];
+        uint8_t b1 = src_pos[1];
+        uint8_t b2 = src_pos[2];
+
+        dst_pos[0] = table[b0 >> 2];
+        dst_pos[1] = table[((b0 & 0x03) << 4) | (b1 >> 4)];
+        dst_pos[2] = table[((b1 & 0x0F) << 2) | (b2 >> 6)];
+        dst_pos[3] = table[b2 & 0x3F];
+
+        src_pos += 3;
+        dst_pos += 4;
+    }
+    if (src_end - src_pos == 1) {
+        uint8_t b0 = src_pos[0];
+        dst_pos[0] = table[b0 >> 2];
+        dst_pos[1] = table[(b0 & 0x03) << 4];
+        if (emit_padding) {
+            dst_pos[2] = '=';
+            dst_pos[3] = '=';
+        }
+    } else if (src_end - src_pos == 2) {
+        uint8_t b0 = src_pos[0];
+        uint8_t b1 = src_pos[1];
+        dst_pos[0] = table[b0 >> 2];
+        dst_pos[1] = table[((b0 & 0x03) << 4) | (b1 >> 4)];
+        dst_pos[2] = table[(b1 & 0x0F) << 2];
+        if (emit_padding) {
+            dst_pos[3] = '=';
         }
     }
+
     free(src_buf);
-    if (emit_padding) {
-        for (size_t i = 0; i < pad; ++i) {
-            dst_pos[dst_size + i] = '=';
-        }
-    }
     if (!return_binary) {
-        dst = term_from_string(dst_pos, dst_size_with_pad, &ctx->heap);
-        free(dst_pos);
+        dst = term_from_string(dst_start, dst_size_with_pad, &ctx->heap);
+        free(dst_start);
     }
     return dst;
-}
-
-static inline uint8_t find_index(uint8_t c)
-{
-    if ('A' <= c && c <= 'Z') {
-        return c - 'A';
-    } else if ('a' <= c && c <= 'z') {
-        return 26 + (c - 'a');
-    } else if ('0' <= c && c <= '9') {
-        return 52 + (c - '0');
-    } else if (c == '+') {
-        return 62;
-    } else if (c == '/') {
-        return 63;
-    } else {
-        return NOT_FOUND;
-    }
-}
-
-// RFC 4648 Section 5: URL and filename safe alphabet ('-' and '_' replace '+' and '/')
-static inline uint8_t find_index_urlsafe(uint8_t c)
-{
-    if ('A' <= c && c <= 'Z') {
-        return c - 'A';
-    } else if ('a' <= c && c <= 'z') {
-        return 26 + (c - 'a');
-    } else if ('0' <= c && c <= '9') {
-        return 52 + (c - '0');
-    } else if (c == '-') {
-        return 62;
-    } else if (c == '_') {
-        return 63;
-    } else {
-        return NOT_FOUND;
-    }
 }
 
 // Support for iolists is an AtomVM extension;
@@ -6318,13 +6323,16 @@ static term base64_decode(Context *ctx, int argc, term argv[], bool return_binar
     if (src_pos[src_size - 1] == '=') {
         explicit_pad = (src_pos[src_size - 2] == '=') ? 2 : 1;
     }
-    // total logical padding: explicit '=' chars, or inferred from unpadded length
-    size_t pad = explicit_pad;
-    if (pad == 0 && src_size % 4 != 0) {
-        pad = 4 - (src_size % 4);
+    size_t n = src_size - explicit_pad;
+    size_t remainder = n % 4;
+    if (UNLIKELY(remainder == 1
+            || (explicit_pad == 1 && remainder == 0)
+            || (explicit_pad == 2 && remainder != 2))) {
+        free(src_buf);
+        RAISE_ERROR(BADARG_ATOM);
     }
-    // decoded size: round up to the next group of 4, decode 3 bytes per group, subtract pad
-    size_t dst_size = ((src_size + 3) / 4) * 3 - pad;
+    size_t dst_size
+        = (n / 4) * 3 + (remainder == 0 ? 0 : remainder - 1);
     size_t heap_free = return_binary ? term_binary_heap_size(dst_size)
                                      : 2 * dst_size;
     if (UNLIKELY(memory_ensure_free_with_roots(ctx, heap_free, 1, &src, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
@@ -6348,38 +6356,61 @@ static term base64_decode(Context *ctx, int argc, term argv[], bool return_binar
         src_pos = (uint8_t *) term_binary_data(src);
     }
     // iterate over real (non-'=') source characters only
-    size_t n = src_size - explicit_pad;
-    for (size_t i = 0; i < n; ++i) {
-        uint8_t octet = urlsafe ? find_index_urlsafe(src_pos[i]) : find_index(src_pos[i]);
-        if (octet == NOT_FOUND) {
+    const uint8_t *table = urlsafe ? d64_table_urlsafe : d64_table;
+
+    size_t i = 0;
+    size_t d = 0;
+    while (n - i >= 4) {
+        uint8_t c0 = src_pos[i];
+        uint8_t c1 = src_pos[i + 1];
+        uint8_t c2 = src_pos[i + 2];
+        uint8_t c3 = src_pos[i + 3];
+
+        uint8_t v0 = table[c0];
+        uint8_t v1 = table[c1];
+        uint8_t v2 = table[c2];
+        uint8_t v3 = table[c3];
+
+        if (UNLIKELY(v0 == NOT_FOUND || v1 == NOT_FOUND || v2 == NOT_FOUND || v3 == NOT_FOUND)) {
             free(src_buf);
             free(dst_buf);
             RAISE_ERROR(BADARG_ATOM);
         }
-        switch (i & 0x03) {
-            case 0:
-                *dst_pos = octet << 2;
-                break;
-            case 1:
-                *dst_pos |= octet >> 4;
-                if ((pad != 2) || i < n - 1) {
-                    dst_pos++;
-                    *dst_pos = (octet & 0x0F) << 4;
-                }
-                break;
-            case 2:
-                *dst_pos |= (octet & 0xFC) >> 2;
-                if ((pad != 1) || i < n - 1) {
-                    dst_pos++;
-                    *dst_pos = (octet & 0x03) << 6;
-                }
-                break;
-            case 3:
-                *dst_pos |= octet;
-                dst_pos++;
-                break;
-        }
+
+        dst_pos[d] = (v0 << 2) | (v1 >> 4);
+        dst_pos[d + 1] = (v1 << 4) | (v2 >> 2);
+        dst_pos[d + 2] = (v2 << 6) | v3;
+
+        d += 3;
+        i += 4;
     }
+    if (n - i == 2) {
+        uint8_t c0 = src_pos[i];
+        uint8_t c1 = src_pos[i + 1];
+        uint8_t v0 = table[c0];
+        uint8_t v1 = table[c1];
+        if (UNLIKELY(v0 == NOT_FOUND || v1 == NOT_FOUND)) {
+            free(src_buf);
+            free(dst_buf);
+            RAISE_ERROR(BADARG_ATOM);
+        }
+        dst_pos[d] = (v0 << 2) | (v1 >> 4);
+    } else if (n - i == 3) {
+        uint8_t c0 = src_pos[i];
+        uint8_t c1 = src_pos[i + 1];
+        uint8_t c2 = src_pos[i + 2];
+        uint8_t v0 = table[c0];
+        uint8_t v1 = table[c1];
+        uint8_t v2 = table[c2];
+        if (UNLIKELY(v0 == NOT_FOUND || v1 == NOT_FOUND || v2 == NOT_FOUND)) {
+            free(src_buf);
+            free(dst_buf);
+            RAISE_ERROR(BADARG_ATOM);
+        }
+        dst_pos[d] = (v0 << 2) | (v1 >> 4);
+        dst_pos[d + 1] = (v1 << 4) | (v2 >> 2);
+    }
+
     free(src_buf);
     if (!return_binary) {
         dst = term_from_string(dst_buf, dst_size, &ctx->heap);

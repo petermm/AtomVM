@@ -123,10 +123,17 @@ test_padding_option() ->
     %% decode/2 with padding => false also accepts padded input (OTP-compatible)
     <<1, 2, 3, 4>> = base64:decode(<<"AQIDBA==">>, #{padding => false}),
     <<1, 2, 3, 4, 5>> = base64:decode(<<"AQIDBAU=">>, #{padding => false}),
+    <<0>> = base64:decode(<<"AA=">>, #{padding => false}),
+    <<0, 0, 0, 0>> = base64:decode(<<"AAAAAA=">>, #{padding => false}),
 
     %% decode_to_string/2 with padding options
     [1, 2, 3, 4] = base64:decode_to_string(<<"AQIDBA==">>, #{padding => true}),
     [1, 2, 3, 4] = base64:decode_to_string(<<"AQIDBA">>, #{padding => false}),
+    [0] = base64:decode_to_string(<<"AA=">>, #{padding => false}),
+
+    %% invalid explicit padding/remainder combinations
+    expect_error(fun() -> base64:decode(<<"AAAAA==">>, #{padding => false}) end, badarg),
+    expect_error(fun() -> base64:decode(<<"AAAA==">>, #{padding => false}) end, badarg),
 
     %% decode/1 and decode/2 with padding => true reject unpadded input (default)
     expect_error(fun() -> base64:decode(<<"AQIDBA">>) end, badarg),
