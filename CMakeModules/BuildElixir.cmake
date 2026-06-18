@@ -127,6 +127,58 @@ macro(pack_archive avm_name)
     )
 endmacro()
 
+# Consolidate a protocol after it (and all its implementation modules) have been
+# compiled into ${CMAKE_CURRENT_BINARY_DIR}/beams/. Consolidation bakes the
+# dispatch table into the protocol beam so it no longer calls
+# Protocol.__concat__/2 at runtime, which lets the Protocol module itself be
+# dropped from the packed library.
+#
+# Usage:
+#     consolidate_protocol(Enumerable
+#         List Map MapSet Range)
+#
+# The first argument is the protocol module name; remaining arguments are the
+# types for which implementations exist. The implementation module name is
+# inferred as <protocol>.<type>. Produces a stamp file
+# ${CMAKE_CURRENT_BINARY_DIR}/beams/.consolidated.<Protocol> that downstream
+# targets (e.g. pack_archive) should depend on.
+macro(consolidate_protocol protocol)
+    find_package(Elixir REQUIRED)
+
+    set(_cp_types "")
+    set(_cp_impl_beams "")
+    foreach(_type ${ARGN})
+        list(APPEND _cp_types ":\"Elixir.${_type}\"")
+        list(APPEND _cp_impl_beams
+            "${CMAKE_CURRENT_BINARY_DIR}/beams/Elixir.${protocol}.${_type}.beam")
+    endforeach()
+
+    # Join type atoms with ", " to form an Elixir list literal.
+    string(REPLACE ";" ", " _cp_type_list "${_cp_types}")
+
+    set(_cp_beam "${CMAKE_CURRENT_BINARY_DIR}/beams/Elixir.${protocol}.beam")
+    set(_cp_stamp "${CMAKE_CURRENT_BINARY_DIR}/beams/.consolidated.${protocol}")
+    set(_cp_script "${CMAKE_CURRENT_BINARY_DIR}/consolidate.${protocol}.exs")
+
+    # Generate the consolidation script to avoid shell/CMake quoting issues.
+    file(GENERATE OUTPUT ${_cp_script} CONTENT
+"proto = :\"Elixir.${protocol}\"
+types = [${_cp_type_list}]
+beam = \"${_cp_beam}\"
+{:ok, bin} = Protocol.consolidate(proto, types)
+File.write!(beam, bin)
+File.write!(\"${_cp_stamp}\", \"ok\")
+")
+
+    add_custom_command(
+        OUTPUT ${_cp_stamp}
+        COMMAND ${ELIXIR_EXECUTABLE} ${_cp_script}
+        DEPENDS ${_cp_beam} ${_cp_impl_beams} ${_cp_script}
+        COMMENT "Consolidating ${protocol} protocol"
+        VERBATIM
+    )
+endmacro()
+
 macro(pack_runnable avm_name main)
     find_package(Elixir REQUIRED)
 

@@ -53,7 +53,6 @@ set(ELIXIR_MODULES
     Supervisor.Spec
     Kernel
     Process
-    Protocol
     Protocol.UndefinedError
     Range
     System
@@ -111,8 +110,38 @@ compile_multi(json.ex
     OUTPUT JSON_BEAMS
 )
 
+# Consolidate protocols so their beams embed the dispatch table and no longer
+# call Protocol.__concat__/2 at runtime. This lets us omit Protocol.beam from
+# the packed library (~33 KB saved).
+consolidate_protocol(Enumerable
+    List Map MapSet Range)
+consolidate_protocol(Collectable
+    List Map MapSet)
+consolidate_protocol(String.Chars
+    Atom BitString Float Integer List)
+consolidate_protocol(List.Chars
+    Atom BitString Float Integer List)
+consolidate_protocol(JSON.Encoder
+    Atom BitString Float Integer List Map)
+
+set(CONSOLIDATION_STAMPS
+    ${CMAKE_CURRENT_BINARY_DIR}/beams/.consolidated.Enumerable
+    ${CMAKE_CURRENT_BINARY_DIR}/beams/.consolidated.Collectable
+    ${CMAKE_CURRENT_BINARY_DIR}/beams/.consolidated.String.Chars
+    ${CMAKE_CURRENT_BINARY_DIR}/beams/.consolidated.List.Chars
+    ${CMAKE_CURRENT_BINARY_DIR}/beams/.consolidated.JSON.Encoder
+)
+
 pack_archive(exavmlib ${ELIXIR_MODULES}
     EXTRA_BEAMS ${JSON_BEAMS}
+)
+
+# Ensure consolidation completes before the protocol beams are packed, and
+# repack the archive whenever consolidation reruns.
+add_custom_command(
+    OUTPUT exavmlib.avm
+    DEPENDS ${CONSOLIDATION_STAMPS}
+    APPEND
 )
 
 include(../../../version.cmake)
@@ -122,7 +151,9 @@ set(EXAVMLIB_VERSION ${ATOMVM_BASE_VERSION})
 install(
     DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/beams/
     DESTINATION lib/atomvm/lib/exavmlib-${EXAVMLIB_VERSION}/ebin
-    FILES_MATCHING PATTERN "*.beam"
+    FILES_MATCHING
+    PATTERN "*.beam"
+    PATTERN "Elixir.Protocol.beam" EXCLUDE
 )
 
 install(

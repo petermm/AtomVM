@@ -20,12 +20,13 @@
 
 if (NOT DEFINED Elixir_FOUND)
     find_program(ELIXIRC_PATH elixirc)
+    find_program(ELIXIR_EXECUTABLE elixir)
 
-    if (ELIXIRC_PATH)
+    if (ELIXIRC_PATH AND ELIXIR_EXECUTABLE)
         message("Found Elixir")
         set(Elixir_FOUND TRUE)
     elseif(Elixir_FIND_REQUIRED)
-        message(FATAL_ERROR "Elixir compiler not found")
+        message(FATAL_ERROR "Elixir compiler or interpreter not found")
         set(Elixir_FOUND FALSE)
     endif()
 endif()
