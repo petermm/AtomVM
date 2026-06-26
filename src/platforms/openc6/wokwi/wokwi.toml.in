@@ -1,0 +1,4 @@
+[wokwi]
+version = 1
+firmware = 'flasher_args.json'
+elf = '@OPENC6_BIOS_RELATIVE_PATH@/build/esp32_c6_bios.elf'

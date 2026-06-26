@@ -1,0 +1,30 @@
+{
+    "write_flash_args" : [ "--flash_mode", "dio",
+                           "--flash_size", "8MB",
+                           "--flash_freq", "80m" ],
+    "flash_settings" : {
+        "flash_mode": "dio",
+        "flash_size": "8MB",
+        "flash_freq": "80m"
+    },
+    "flash_files" : {
+        "0x0" : "@OPENC6_BIOS_RELATIVE_PATH@/build/bootloader/bootloader.bin",
+        "0x20000" : "@OPENC6_BIOS_RELATIVE_PATH@/build/esp32_c6_bios.bin",
+        "0x8000" : "@OPENC6_BIOS_RELATIVE_PATH@/build/partition_table/partition-table.bin",
+        "0x19000" : "@OPENC6_BIOS_RELATIVE_PATH@/build/ota_data_initial.bin",
+        "0x1a0000" : "main.avm",
+        "0x700000" : "payload.bin"
+    },
+    "bootloader" : { "offset" : "0x0", "file" : "@OPENC6_BIOS_RELATIVE_PATH@/build/bootloader/bootloader.bin", "encrypted" : "false" },
+    "app" : { "offset" : "0x20000", "file" : "@OPENC6_BIOS_RELATIVE_PATH@/build/esp32_c6_bios.bin", "encrypted" : "false" },
+    "partition-table" : { "offset" : "0x8000", "file" : "@OPENC6_BIOS_RELATIVE_PATH@/build/partition_table/partition-table.bin", "encrypted" : "false" },
+    "otadata" : { "offset" : "0x19000", "file" : "@OPENC6_BIOS_RELATIVE_PATH@/build/ota_data_initial.bin", "encrypted" : "false" },
+    "payload" : { "offset" : "0x700000", "file" : "payload.bin", "encrypted" : "false" },
+    "fs" : { "offset" : "0x1a0000", "file" : "main.avm", "encrypted" : "false" },
+    "extra_esptool_args" : {
+        "after"  : "hard_reset",
+        "before" : "default_reset",
+        "stub"   : true,
+        "chip"   : "esp32c6"
+    }
+}
