@@ -124,12 +124,12 @@ jobs:
             -DAVM_WARNINGS_ARE_ERRORS=ON
 
       # The largest AtomVM translation units use several GiB while Fil-C compiles
-      # them. Build serially and suppress DWARF data to stay within the runner's
-      # memory limit. CCC_OVERRIDE_OPTIONS appends -g0 after AtomVM's target-level
-      # -g option.
+      # them. Build serially, suppress DWARF data, and disable Fil-C's expensive
+      # check-scheduling optimization to stay within the runner's memory limit.
+      # The safety checks remain enabled, but the resulting binary is less optimized.
       - name: Build AtomVM
         env:
-          CCC_OVERRIDE_OPTIONS: "+-g0"
+          CCC_OVERRIDE_OPTIONS: "+-g0 +-mllvm +-filc-optimize-checks=false"
         run: |
           (
             while true; do
