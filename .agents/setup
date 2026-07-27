@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Installing AtomVM generic Unix build dependencies..."
+
+packages=(
+    build-essential
+    ca-certificates
+    cmake
+    curl
+    elixir
+    erlang-base
+    erlang-dev
+    erlang-dialyzer
+    git
+    gperf
+    libmbedtls-dev
+    ninja-build
+    rebar3
+    zlib1g-dev
+)
+
+missing_packages=()
+for package in "${packages[@]}"; do
+    if ! dpkg-query -W -f='${db:Status-Abbrev}' "$package" 2>/dev/null | grep -q '^ii '; then
+        missing_packages+=("$package")
+    fi
+done
+
+if ((${#missing_packages[@]})); then
+    if ((EUID == 0)); then
+        apt_get=(apt-get)
+    else
+        apt_get=(sudo apt-get)
+    fi
+    "${apt_get[@]}" update
+    if ((EUID == 0)); then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing_packages[@]}"
+    else
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing_packages[@]}"
+    fi
+else
+    echo "System packages are already installed."
+fi
+
+# Keep the Gleam version aligned with the generic Unix CI build.
+gleam_version=1.11.1
+if ! command -v gleam >/dev/null || [[ "$(gleam --version)" != "gleam ${gleam_version}" ]]; then
+    case "$(uname -m)" in
+        x86_64)
+            gleam_target=x86_64-unknown-linux-musl
+            gleam_sha256=31649fab05f982c51d7553cc4a2d3e615ee49348f7162fe75d48f71331618033
+            ;;
+        aarch64|arm64)
+            gleam_target=aarch64-unknown-linux-musl
+            gleam_sha256=22d4c9299f57f712210df7f48d1c84f99f13abfd9e067a6b290abfdab384161d
+            ;;
+        *)
+            echo "Unsupported architecture for Gleam: $(uname -m)" >&2
+            exit 1
+            ;;
+    esac
+
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' EXIT
+    gleam_archive="$tmp_dir/gleam.tar.gz"
+    curl -fsSL --retry 3 \
+        -o "$gleam_archive" \
+        "https://github.com/gleam-lang/gleam/releases/download/v${gleam_version}/gleam-v${gleam_version}-${gleam_target}.tar.gz"
+    echo "${gleam_sha256}  ${gleam_archive}" | sha256sum --check --status
+    tar -xzf "$gleam_archive" -C "$tmp_dir" gleam
+    if ((EUID == 0)); then
+        install -m 0755 "$tmp_dir/gleam" /usr/local/bin/gleam
+    else
+        sudo install -m 0755 "$tmp_dir/gleam" /usr/local/bin/gleam
+    fi
+    rm -rf "$tmp_dir"
+    trap - EXIT
+else
+    echo "Gleam ${gleam_version} is already installed."
+fi
+
+echo "AtomVM orb setup complete."

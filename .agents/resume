@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# AtomVM has no persistent services. Fail quickly if a resumed orb has lost a
+# tool installed by setup, so Amp reports the environment problem immediately.
+for tool in cmake ninja gcc g++ gperf erl erlc elixirc rebar3 gleam; do
+    command -v "$tool" >/dev/null
+done
+
+echo "AtomVM orb environment is ready."
