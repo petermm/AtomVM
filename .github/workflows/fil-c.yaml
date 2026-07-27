@@ -70,6 +70,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake gperf ninja-build patchelf xz-utils
 
+      # Fil-C's peak compiler usage appears to exhaust 16 GiB of physical RAM.
+      - name: Add swap space
+        run: |
+          swap_file="${RUNNER_TEMP}/fil-c.swap"
+          fallocate --length 8G "${swap_file}"
+          chmod 600 "${swap_file}"
+          sudo mkswap "${swap_file}"
+          sudo swapon "${swap_file}"
+          free --human
+          swapon --show
+
       - name: Cache Fil-C archive
         uses: actions/cache@v4
         with:
@@ -120,6 +131,22 @@ jobs:
         env:
           CCC_OVERRIDE_OPTIONS: "+-g0"
         run: |
+          (
+            while true; do
+              echo "Memory snapshot: $(date --iso-8601=seconds)"
+              free --human
+              ps -eo pid,ppid,rss,vsz,comm,args --sort=-rss | sed -n '1,8p'
+              sleep 20
+            done
+          ) &
+          memory_monitor_pid=$!
+
+          stop_memory_monitor() {
+            kill "${memory_monitor_pid}" 2>/dev/null || :
+            wait "${memory_monitor_pid}" 2>/dev/null || :
+          }
+          trap stop_memory_monitor EXIT
+
           cmake --build build-fil-c --parallel 1 --target \
             AtomVM \
             atomvmlib \
