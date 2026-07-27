@@ -8,15 +8,14 @@ packages=(
     ca-certificates
     cmake
     curl
-    elixir
-    erlang-base
-    erlang-dev
-    erlang-dialyzer
     git
     gperf
     libmbedtls-dev
+    libncurses6
+    libssl3
     ninja-build
-    rebar3
+    socat
+    unzip
     zlib1g-dev
 )
 
@@ -42,6 +41,92 @@ if ((${#missing_packages[@]})); then
 else
     echo "System packages are already installed."
 fi
+
+# Keep the BEAM toolchain aligned with the release-0.7 generic Unix CI build.
+beam_root=/opt/atomvm-beam
+otp_version=28.5.0.4
+elixir_version=1.19.5
+rebar3_version=3.25.1
+
+if [[ "$(cat "$beam_root/otp/releases/28/OTP_VERSION" 2>/dev/null || true)" != "$otp_version" ]]; then
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' EXIT
+    otp_archive="$tmp_dir/otp.tar.gz"
+    curl -fsSL --retry 3 \
+        -o "$otp_archive" \
+        "https://builds.hex.pm/builds/otp/amd64/ubuntu-22.04/OTP-${otp_version}.tar.gz"
+    echo "29df77ddc31722ad07b38722a77ccedeed28f35a160c0c3ad07645989c2272be  ${otp_archive}" | sha256sum --check --status
+    if ((EUID == 0)); then
+        rm -rf "$beam_root/otp"
+        mkdir -p "$beam_root/otp"
+        tar -xzf "$otp_archive" --strip-components=1 -C "$beam_root/otp"
+        "$beam_root/otp/Install" -minimal "$beam_root/otp"
+    else
+        sudo rm -rf "$beam_root/otp"
+        sudo mkdir -p "$beam_root/otp"
+        sudo tar -xzf "$otp_archive" --strip-components=1 -C "$beam_root/otp"
+        sudo "$beam_root/otp/Install" -minimal "$beam_root/otp"
+    fi
+    rm -rf "$tmp_dir"
+    trap - EXIT
+else
+    echo "Erlang/OTP ${otp_version} is already installed."
+fi
+
+if [[ "$(PATH="$beam_root/otp/bin:$PATH" "$beam_root/elixir/bin/elixir" --version 2>/dev/null | tail -n 1 || true)" != "Elixir ${elixir_version} (compiled with Erlang/OTP 28)" ]]; then
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' EXIT
+    elixir_archive="$tmp_dir/elixir.zip"
+    curl -fsSL --retry 3 \
+        -o "$elixir_archive" \
+        "https://builds.hex.pm/builds/elixir/v${elixir_version}-otp-28.zip"
+    echo "ca481510feb6dabc875bba43e44b25c7abafa53bd7a103639851b7aeace8a022  ${elixir_archive}" | sha256sum --check --status
+    if ((EUID == 0)); then
+        rm -rf "$beam_root/elixir"
+        mkdir -p "$beam_root/elixir"
+        unzip -q "$elixir_archive" -d "$beam_root/elixir"
+    else
+        sudo rm -rf "$beam_root/elixir"
+        sudo mkdir -p "$beam_root/elixir"
+        sudo unzip -q "$elixir_archive" -d "$beam_root/elixir"
+    fi
+    rm -rf "$tmp_dir"
+    trap - EXIT
+else
+    echo "Elixir ${elixir_version} is already installed."
+fi
+
+if [[ "$(PATH="$beam_root/otp/bin:$PATH" "$beam_root/rebar3/bin/rebar3" version 2>/dev/null || true)" != "rebar ${rebar3_version} on Erlang/OTP 28 "* ]]; then
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' EXIT
+    rebar3_binary="$tmp_dir/rebar3"
+    curl -fsSL --retry 3 \
+        -o "$rebar3_binary" \
+        "https://github.com/erlang/rebar3/releases/download/${rebar3_version}/rebar3"
+    echo "924576737f0d3098e1fa4691e6f542bf61036d234c61ebdc18aafef8e2bccf67  ${rebar3_binary}" | sha256sum --check --status
+    if ((EUID == 0)); then
+        install -D -m 0755 "$rebar3_binary" "$beam_root/rebar3/bin/rebar3"
+    else
+        sudo install -D -m 0755 "$rebar3_binary" "$beam_root/rebar3/bin/rebar3"
+    fi
+    rm -rf "$tmp_dir"
+    trap - EXIT
+else
+    echo "rebar3 ${rebar3_version} is already installed."
+fi
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+profile_marker="# AtomVM release-0.7 BEAM toolchain"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+    cat >> "$HOME/.bash_profile" <<EOF
+
+$profile_marker
+if [[ "\$PWD" == "$repo_root" || "\$PWD" == "$repo_root/"* ]]; then
+    export PATH="$beam_root/otp/bin:$beam_root/elixir/bin:$beam_root/rebar3/bin:\$PATH"
+fi
+EOF
+fi
+export PATH="$beam_root/otp/bin:$beam_root/elixir/bin:$beam_root/rebar3/bin:$PATH"
 
 # Erlang distribution with short node names requires the short hostname to
 # resolve. Orb hosts may initially contain only the fully qualified name.

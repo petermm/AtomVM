@@ -3,8 +3,14 @@ set -euo pipefail
 
 # AtomVM has no persistent services. Fail quickly if a resumed orb has lost a
 # tool installed by setup, so Amp reports the environment problem immediately.
+beam_root=/opt/atomvm-beam
+export PATH="$beam_root/otp/bin:$beam_root/elixir/bin:$beam_root/rebar3/bin:$PATH"
 for tool in cmake ninja gcc g++ gperf erl erlc elixirc rebar3 gleam; do
     command -v "$tool" >/dev/null
 done
+[[ "$(erl -noshell -eval 'io:put_chars(erlang:system_info(otp_release))' -s init stop)" == "28" ]]
+[[ "$(cat "$beam_root/otp/releases/28/OTP_VERSION")" == "28.5.0.4" ]]
+[[ "$(elixir --version | tail -n 1)" == "Elixir 1.19.5 (compiled with Erlang/OTP 28)" ]]
+[[ "$(rebar3 version)" == "rebar 3.25.1 on Erlang/OTP 28 "* ]]
 
 echo "AtomVM orb environment is ready."
