@@ -43,6 +43,17 @@ else
     echo "System packages are already installed."
 fi
 
+# Erlang distribution with short node names requires the short hostname to
+# resolve. Orb hosts may initially contain only the fully qualified name.
+short_hostname="$(hostname -s)"
+if ! getent hosts "$short_hostname" >/dev/null; then
+    if ((EUID == 0)); then
+        printf '127.0.1.1\t%s\n' "$short_hostname" >> /etc/hosts
+    else
+        printf '127.0.1.1\t%s\n' "$short_hostname" | sudo tee -a /etc/hosts >/dev/null
+    fi
+fi
+
 # Keep the Gleam version aligned with the generic Unix CI build.
 gleam_version=1.11.1
 if ! command -v gleam >/dev/null || [[ "$(gleam --version)" != "gleam ${gleam_version}" ]]; then
