@@ -74,10 +74,12 @@ jobs:
       - name: Add swap space
         run: |
           swap_file="${RUNNER_TEMP}/fil-c.swap"
-          fallocate --length 12G "${swap_file}"
-          chmod 600 "${swap_file}"
+          df --human-readable "${RUNNER_TEMP}"
+          sudo fallocate --length 16G "${swap_file}"
+          sudo chmod 600 "${swap_file}"
           sudo mkswap "${swap_file}"
           sudo swapon "${swap_file}"
+          df --human-readable "${RUNNER_TEMP}"
           free --human
           swapon --show
 
