@@ -113,9 +113,25 @@ jobs:
             -DAVM_WARNINGS_ARE_ERRORS=ON
 
       # The largest AtomVM translation units use several GiB while Fil-C compiles
-      # them. A single compile job keeps memory use predictable.
+      # them. Build serially and suppress DWARF data to stay within the runner's
+      # memory limit. CCC_OVERRIDE_OPTIONS appends -g0 after AtomVM's target-level
+      # -g option.
       - name: Build AtomVM
-        run: cmake --build build-fil-c --parallel 1
+        env:
+          CCC_OVERRIDE_OPTIONS: "+-g0"
+        run: |
+          cmake --build build-fil-c --parallel 1 --target \
+            AtomVM \
+            atomvmlib \
+            hello_world \
+            test_alisp \
+            test-enif \
+            test_etest \
+            test-heap \
+            test-jit_stream_flash \
+            test-mailbox \
+            test-structs \
+            test-term
 
       - name: Run C tests
         working-directory: build-fil-c
