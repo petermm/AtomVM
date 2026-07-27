@@ -92,6 +92,7 @@ jobs:
           cd "${fil_c_root}"
           ./setup.sh
 
+          echo "FIL_C_ROOT=${fil_c_root}" >> "${GITHUB_ENV}"
           echo "CC=${fil_c_root}/build/bin/clang" >> "${GITHUB_ENV}"
           echo "CXX=${fil_c_root}/build/bin/clang++" >> "${GITHUB_ENV}"
 
@@ -108,6 +109,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_DISABLE_FIND_PACKAGE_MbedTLS=TRUE \
             -DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=TRUE \
+            -DLIBRT:FILEPATH="${FIL_C_ROOT}/pizfix/lib/librt.a" \
             -DAVM_WARNINGS_ARE_ERRORS=ON
 
       # The largest AtomVM translation units use several GiB while Fil-C compiles
