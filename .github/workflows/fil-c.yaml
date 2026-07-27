@@ -1,0 +1,133 @@
+#
+#  Copyright 2026 Peter Madsen <petermm@gmail.com>
+#
+#  SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
+#
+
+name: Fil-C
+
+on:
+  push:
+    paths:
+      - ".github/workflows/fil-c.yaml"
+      - "CMakeLists.txt"
+      - "CMakeModules/**"
+      - "examples/**"
+      - "libs/**"
+      - "src/libAtomVM/**"
+      - "src/platforms/generic_unix/**"
+      - "tests/**"
+      - "version.cmake"
+  pull_request:
+    paths:
+      - ".github/workflows/fil-c.yaml"
+      - "CMakeLists.txt"
+      - "CMakeModules/**"
+      - "examples/**"
+      - "libs/**"
+      - "src/libAtomVM/**"
+      - "src/platforms/generic_unix/**"
+      - "tests/**"
+      - "version.cmake"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref != 'refs/heads/main' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FIL_C_VERSION: "0.681"
+  FIL_C_SHA256: "84272acf017fe76bddb32bb3865f3d97ce332eb6e6a17fc1c07a8eb9ad777787"
+
+jobs:
+  build-and-test:
+    name: Build and test with Fil-C
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19"
+          rebar3-version: "3.25.1"
+          gleam-version: "1.15.2"
+          hexpm-mirrors: |
+            https://builds.hex.pm
+            https://repo.hex.pm
+            https://cdn.jsdelivr.net/hex
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gperf ninja-build patchelf xz-utils
+
+      - name: Cache Fil-C archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/filc-${{ env.FIL_C_VERSION }}-linux-x86_64.tar.xz
+          key: fil-c-linux-x86_64-${{ env.FIL_C_VERSION }}-${{ env.FIL_C_SHA256 }}
+
+      - name: Install Fil-C
+        run: |
+          archive="${RUNNER_TEMP}/filc-${FIL_C_VERSION}-linux-x86_64.tar.xz"
+          fil_c_root="${RUNNER_TEMP}/filc-${FIL_C_VERSION}-linux-x86_64"
+
+          if [ ! -f "${archive}" ]; then
+            curl --fail --location --retry 3 \
+              --output "${archive}" \
+              "https://github.com/pizlonator/fil-c/releases/download/v${FIL_C_VERSION}/filc-${FIL_C_VERSION}-linux-x86_64.tar.xz"
+          fi
+
+          echo "${FIL_C_SHA256}  ${archive}" | sha256sum --check
+          tar -xJf "${archive}" -C "${RUNNER_TEMP}"
+          cd "${fil_c_root}"
+          ./setup.sh
+
+          echo "CC=${fil_c_root}/build/bin/clang" >> "${GITHUB_ENV}"
+          echo "CXX=${fil_c_root}/build/bin/clang++" >> "${GITHUB_ENV}"
+
+      - name: Fil-C version
+        run: |
+          "${CC}" --version
+          "${CXX}" --version
+
+      # Fil-C cannot safely link against libraries built by the host compiler.
+      # Keep this job self-contained until zlib and Mbed TLS are built with Fil-C.
+      - name: Configure AtomVM
+        run: |
+          cmake -S . -B build-fil-c -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_DISABLE_FIND_PACKAGE_MbedTLS=TRUE \
+            -DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=TRUE \
+            -DAVM_WARNINGS_ARE_ERRORS=ON
+
+      # The largest AtomVM translation units use several GiB while Fil-C compiles
+      # them. A single compile job keeps memory use predictable.
+      - name: Build AtomVM
+        run: cmake --build build-fil-c --parallel 1
+
+      - name: Run C tests
+        working-directory: build-fil-c
+        run: |
+          ./tests/test-enif
+          ./tests/test-heap
+          ./tests/test-jit_stream_flash
+          ./tests/test-mailbox
+          ./tests/test-structs
+          ./tests/test-term
+
+      - name: Run AtomVM smoke tests
+        working-directory: build-fil-c
+        run: |
+          ./src/AtomVM ./examples/erlang/hello_world.avm ./libs/atomvmlib.avm
+          ./src/AtomVM ./tests/libs/etest/test_etest.avm
+          ./src/AtomVM ./tests/libs/alisp/test_alisp.avm
