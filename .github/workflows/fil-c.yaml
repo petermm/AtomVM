@@ -106,7 +106,7 @@ jobs:
       - name: Configure AtomVM
         run: |
           cmake -S . -B build-fil-c -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_DISABLE_FIND_PACKAGE_MbedTLS=TRUE \
             -DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=TRUE \
             -DLIBRT:FILEPATH="${FIL_C_ROOT}/pizfix/lib/librt.a" \
