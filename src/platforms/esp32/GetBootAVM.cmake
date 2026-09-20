@@ -22,18 +22,13 @@ partition_table_get_partition_info(app_offset "--partition-name main.avm" "offse
 set(AVM_APP_OFFSET "${app_offset}")
 partition_table_get_partition_info(lib_offset "--partition-name boot.avm" "offset")
 set(AVM_LIB_OFFSET "${lib_offset}")
-# partitions.csv and partitions-elixir.csv use 0x250000 for main.avm (non-JIT).
-# partitions-jit.csv uses 0x300000 for main.avm (JIT: AOT boot.avm 1.375MB on 4MB flash).
-# Use ATOMVM_ELIXIR_SUPPORT to select the elixir boot library flavor.
-if ("${app_offset}" STREQUAL "0x250000")
-    if (ATOMVM_ELIXIR_SUPPORT)
-        set(BOOT_LIBS "elixir_esp32boot.avm")
-        set(ATOMVM_FLAVOR "-elixir")
-    else()
-        set(BOOT_LIBS "esp32boot.avm")
-        set(ATOMVM_FLAVOR "")
-    endif()
-elseif ("${app_offset}" STREQUAL "0x300000")
+# The boot library flavor comes from the build, not from partition offsets.
+# A custom table may place main.avm anywhere, but both named partitions are
+# required to create a bootable image.
+if ("${app_offset}" STREQUAL "" OR "${lib_offset}" STREQUAL "")
+    set(BOOT_LIBS "NONE")
+    set(ATOMVM_FLAVOR "")
+elseif (CONFIG_JIT_ENABLED)
     # JIT partition layout: select arch-specific precompiled boot AVM.
     # AVM_JIT_TARGET_ARCH is set in components/libatomvm/CMakeLists.txt when
     # included from a component context; derive from IDF_TARGET otherwise.
@@ -63,7 +58,10 @@ elseif ("${app_offset}" STREQUAL "0x300000")
         set(BOOT_LIBS "NONE")
         set(ATOMVM_FLAVOR "")
     endif()
+elseif (ATOMVM_ELIXIR_SUPPORT)
+    set(BOOT_LIBS "elixir_esp32boot.avm")
+    set(ATOMVM_FLAVOR "-elixir")
 else()
-    set(BOOT_LIBS "NONE")
+    set(BOOT_LIBS "esp32boot.avm")
     set(ATOMVM_FLAVOR "")
 endif()
