@@ -46,50 +46,74 @@ struct RWLock
 
 /* Track scheduler thread handles so smp_scheduler_join_all can join them.
  * A sub-thread may still execute JIT epilogue code after decrementing
- * running_schedulers; joining prevents munmap races on JIT code pages. */
+ * running_schedulers; joining prevents munmap races on JIT code pages.
+ *
+ * The list is process-global because pthread bookkeeping is, but each
+ * node is tagged with the owning GlobalContext so that destroying one
+ * VM does not block on or join scheduler threads belonging to another
+ * concurrently-running VM. */
 struct SchedulerThreadList
 {
     pthread_t thread;
+    GlobalContext *global;
     struct SchedulerThreadList *next;
 };
 static pthread_mutex_t scheduler_threads_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct SchedulerThreadList *scheduler_threads = NULL;
 
+struct SchedulerThreadArg
+{
+    GlobalContext *global;
+    int scheduler_id;
+};
+
 // Thread local storage with _Thread_local C11 keyword crashes on i386 with
 // valgrind (Ubutun 18 & 20, gcc 6-10). Use POSIX API instead.
 #ifdef __i386__
-static pthread_key_t g_sub_main_thread_key;
-static pthread_once_t g_sub_main_thread_key_once = PTHREAD_ONCE_INIT;
+static pthread_key_t g_scheduler_id_key;
+static pthread_once_t g_scheduler_id_key_once = PTHREAD_ONCE_INIT;
 
-static void sub_main_thread_make_key()
+static void scheduler_id_make_key()
 {
-    if (UNLIKELY(pthread_key_create(&g_sub_main_thread_key, NULL))) {
+    if (UNLIKELY(pthread_key_create(&g_scheduler_id_key, NULL))) {
         AVM_ABORT();
     }
 }
 #else
-static _Thread_local bool g_sub_main_thread = false;
+static _Thread_local int g_scheduler_id = 1;
 #endif
 
 static void *scheduler_thread_entry_point(void *arg)
 {
+    struct SchedulerThreadArg *thread_arg = (struct SchedulerThreadArg *) arg;
+    GlobalContext *global = thread_arg->global;
+    int scheduler_id = thread_arg->scheduler_id;
+    free(thread_arg);
 #ifdef __i386__
-    if (UNLIKELY(pthread_once(&g_sub_main_thread_key_once, sub_main_thread_make_key))) {
+    if (UNLIKELY(pthread_once(&g_scheduler_id_key_once, scheduler_id_make_key))) {
         AVM_ABORT();
     }
-    if (UNLIKELY(pthread_setspecific(g_sub_main_thread_key, (void *) 1))) {
+    if (UNLIKELY(pthread_setspecific(g_scheduler_id_key, (void *) (uintptr_t) scheduler_id))) {
         AVM_ABORT();
     }
 #else
-    g_sub_main_thread = true;
+    g_scheduler_id = scheduler_id;
 #endif
-    return (void *) (uintptr_t) scheduler_entry_point((GlobalContext *) arg);
+    return (void *) (uintptr_t) scheduler_entry_point(global);
 }
 
-void smp_scheduler_start(GlobalContext *ctx)
+void smp_scheduler_start(GlobalContext *ctx, int scheduler_id)
 {
+    struct SchedulerThreadArg *arg = malloc(sizeof(*arg));
+    if (IS_NULL_PTR(arg)) {
+        AVM_ABORT();
+    }
+    arg->global = ctx;
+    arg->scheduler_id = scheduler_id;
+
     pthread_t thread;
-    if (UNLIKELY(pthread_create(&thread, NULL, scheduler_thread_entry_point, ctx))) {
+    if (UNLIKELY(pthread_create(&thread, NULL, scheduler_thread_entry_point, arg))) {
+        free(arg);
         AVM_ABORT();
     }
     struct SchedulerThreadList *node = malloc(sizeof(*node));
@@ -97,35 +121,57 @@ void smp_scheduler_start(GlobalContext *ctx)
         AVM_ABORT();
     }
     node->thread = thread;
+    node->global = ctx;
     pthread_mutex_lock(&scheduler_threads_lock);
     node->next = scheduler_threads;
     scheduler_threads = node;
     pthread_mutex_unlock(&scheduler_threads_lock);
 }
 
-void smp_scheduler_join_all(void)
+void smp_scheduler_join_all(GlobalContext *glb)
 {
-    struct SchedulerThreadList *list;
+    /* Splice out the nodes belonging to glb under the lock, then join
+     * them after releasing the lock. This avoids holding the global
+     * scheduler_threads_lock while blocking on pthread_join, and leaves
+     * threads owned by other concurrently-running GlobalContexts in
+     * place. */
+    struct SchedulerThreadList *to_join = NULL;
     pthread_mutex_lock(&scheduler_threads_lock);
-    list = scheduler_threads;
-    scheduler_threads = NULL;
+    struct SchedulerThreadList **link = &scheduler_threads;
+    while (*link) {
+        struct SchedulerThreadList *node = *link;
+        if (node->global == glb) {
+            *link = node->next;
+            node->next = to_join;
+            to_join = node;
+        } else {
+            link = &node->next;
+        }
+    }
     pthread_mutex_unlock(&scheduler_threads_lock);
-    while (list) {
-        struct SchedulerThreadList *next = list->next;
-        (void) pthread_join(list->thread, NULL);
-        free(list);
-        list = next;
+
+    while (to_join) {
+        struct SchedulerThreadList *next = to_join->next;
+        (void) pthread_join(to_join->thread, NULL);
+        free(to_join);
+        to_join = next;
     }
 }
 
 bool smp_is_main_thread(GlobalContext *glb)
 {
+    return smp_current_scheduler_id(glb) == 1;
+}
+
+int smp_current_scheduler_id(GlobalContext *glb)
+{
     UNUSED(glb);
 #ifdef __i386__
-    (void) pthread_once(&g_sub_main_thread_key_once, sub_main_thread_make_key);
-    return pthread_getspecific(g_sub_main_thread_key) == NULL;
+    (void) pthread_once(&g_scheduler_id_key_once, scheduler_id_make_key);
+    void *scheduler_id = pthread_getspecific(g_scheduler_id_key);
+    return scheduler_id == NULL ? 1 : (int) (uintptr_t) scheduler_id;
 #else
-    return !g_sub_main_thread;
+    return g_scheduler_id;
 #endif
 }
 

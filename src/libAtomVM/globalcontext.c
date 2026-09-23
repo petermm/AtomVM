@@ -19,6 +19,7 @@
  */
 
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "dist_nifs.h"
@@ -232,7 +233,25 @@ GlobalContext *globalcontext_new(void)
         free(glb);
         return NULL;
     }
-    glb->online_schedulers = smp_get_online_processors();
+    glb->scheduler_slots_count = smp_get_online_processors();
+    if (glb->scheduler_slots_count < 1) {
+        glb->scheduler_slots_count = 1;
+    }
+    glb->scheduler_slots = calloc((size_t) glb->scheduler_slots_count + 1, sizeof(uint8_t));
+    if (IS_NULL_PTR(glb->scheduler_slots)) {
+        smp_condvar_destroy(glb->schedulers_cv);
+        smp_mutex_destroy(glb->schedulers_mutex);
+#if HAVE_OPEN && HAVE_CLOSE
+        resource_type_destroy(glb->posix_fd_resource_type);
+#endif
+        smp_rwlock_destroy(glb->modules_lock);
+        valueshashtable_destroy(glb->modules_table);
+        atom_table_destroy(glb->atom_table);
+        free(glb);
+        return NULL;
+    }
+    glb->scheduler_slots[1] = 1;
+    glb->online_schedulers = glb->scheduler_slots_count;
     glb->running_schedulers = 0;
     glb->waiting_scheduler = false;
 
@@ -249,7 +268,7 @@ COLD_FUNC void globalcontext_destroy(GlobalContext *glb)
     /* Join sub-threads: a thread may still execute JIT epilogue code after
      * decrementing running_schedulers, so we must join before munmapping
      * native code pages. */
-    smp_scheduler_join_all();
+    smp_scheduler_join_all(glb);
 #endif
 
     sys_free_platform(glb);
@@ -324,6 +343,7 @@ COLD_FUNC void globalcontext_destroy(GlobalContext *glb)
     synclist_destroy(&glb->resource_types);
 
 #ifndef AVM_NO_SMP
+    free(glb->scheduler_slots);
     smp_condvar_destroy(glb->schedulers_cv);
     smp_mutex_destroy(glb->schedulers_mutex);
     smp_rwlock_destroy(glb->modules_lock);

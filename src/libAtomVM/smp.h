@@ -279,23 +279,37 @@ int smp_get_online_processors(void);
  * @brief Start a new scheduler, calling `scheduler_entry_point` with the given
  * global context.
  * @param glb the global context
+ * @param scheduler_id scheduler slot assigned to the new scheduler
  */
-void smp_scheduler_start(GlobalContext *glb);
+void smp_scheduler_start(GlobalContext *glb, int scheduler_id);
 
 /**
- * @brief Wait for all scheduler sub-threads to fully exit.
+ * @brief Wait for all scheduler sub-threads of the given GlobalContext
+ * to fully exit.
  *
  * Must be called before destroying resources (e.g. JIT code pages) that
  * scheduler threads may still access after leaving the scheduler loop.
+ * Only threads belonging to @p glb are joined; threads owned by other
+ * concurrently-running GlobalContexts are left untouched.
+ *
  * May be a no-op on platforms without joinable scheduler threads.
+ *
+ * @param glb the global context whose scheduler threads should be joined
  */
-void smp_scheduler_join_all(void);
+void smp_scheduler_join_all(GlobalContext *glb);
 
 /**
  * @brief Determine if caller is in the main thread, i.e. thread that was not
  * started with acmsmp_scheduler_start.
  */
 bool smp_is_main_thread(GlobalContext *glb);
+
+/**
+ * @brief Return the scheduler slot for the current scheduler thread.
+ *
+ * @details Slots start at 1. The main scheduler always uses slot 1.
+ */
+int smp_current_scheduler_id(GlobalContext *glb);
 
 #define SMP_SPINLOCK_LOCK(spinlock) smp_spinlock_lock(spinlock)
 #define SMP_SPINLOCK_TRYLOCK(spinlock) smp_spinlock_trylock(spinlock)
