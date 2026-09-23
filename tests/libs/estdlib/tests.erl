@@ -62,6 +62,7 @@ get_non_networking_tests(_OTPVersion) ->
     [
         test_apply,
         test_binary,
+        test_counters,
         test_lists,
         test_calendar,
         test_gen_event,

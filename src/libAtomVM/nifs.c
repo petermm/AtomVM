@@ -40,6 +40,7 @@
 #include "bif.h"
 #include "bitstring.h"
 #include "context.h"
+#include "counters.h"
 #include "defaultatoms.h"
 #include "dictionary.h"
 #include "dist_nifs.h"
@@ -617,6 +618,31 @@ static const struct Nif erts_internal_cmp_term_nif = {
 static const struct Nif erts_internal_atomics_new_nif = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_erts_internal_atomics_new_2
+};
+
+static const struct Nif erts_internal_counters_new_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_new_1
+};
+
+static const struct Nif erts_internal_counters_get_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_get_2
+};
+
+static const struct Nif erts_internal_counters_add_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_add_3
+};
+
+static const struct Nif erts_internal_counters_put_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_put_3
+};
+
+static const struct Nif erts_internal_counters_info_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_erts_internal_counters_info_1
 };
 
 static const struct Nif atomics_new_nif = {
@@ -3583,7 +3609,7 @@ static term nif_erlang_system_info(Context *ctx, int argc, term argv[])
         char system_version[256];
         int len;
 #ifndef AVM_NO_SMP
-        len = snprintf(system_version, sizeof(system_version), "AtomVM %s [%d-bit] [smp:%d:%d]\n", ATOMVM_VERSION, TERM_BYTES * 8, ctx->global->online_schedulers, smp_get_online_processors());
+        len = snprintf(system_version, sizeof(system_version), "AtomVM %s [%d-bit] [smp:%d:%d]\n", ATOMVM_VERSION, TERM_BYTES * 8, ctx->global->online_schedulers, ctx->global->scheduler_slots_count);
 #else
         len = snprintf(system_version, sizeof(system_version), "AtomVM %s [%d-bit] [nosmp]\n", ATOMVM_VERSION, TERM_BYTES * 8);
 #endif
@@ -3612,7 +3638,7 @@ static term nif_erlang_system_info(Context *ctx, int argc, term argv[])
     }
     if (key == SCHEDULERS_ATOM) {
 #ifndef AVM_NO_SMP
-        return term_from_int11(smp_get_online_processors());
+        return term_from_int11(ctx->global->scheduler_slots_count);
 #else
         return term_from_int11(1);
 #endif
@@ -3651,8 +3677,8 @@ static term nif_erlang_system_flag(Context *ctx, int argc, term argv[])
         VALIDATE_VALUE(value, term_is_integer);
         int old_value = 0;
         int new_value = term_to_int(value);
-        int nb_processors = smp_get_online_processors();
-        if (UNLIKELY(new_value < 1) || UNLIKELY(new_value > nb_processors)) {
+        int max_slots = ctx->global->scheduler_slots_count;
+        if (UNLIKELY(new_value < 1) || UNLIKELY(new_value > max_slots)) {
             RAISE_ERROR(BADARG_ATOM);
         }
         while (!ATOMIC_COMPARE_EXCHANGE_WEAK_INT(&ctx->global->online_schedulers, &old_value, new_value)) {

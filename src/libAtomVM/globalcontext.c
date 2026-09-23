@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "atomics.h"
+#include "counters.h"
 #include "dist_nifs.h"
 #include "globalcontext.h"
 
@@ -131,6 +132,7 @@ GlobalContext *globalcontext_new(void)
     glb->creation = 0;
 #ifndef AVM_NO_SMP
     smp_spinlock_init(&glb->atomics_spinlock);
+    smp_spinlock_init(&glb->counters_spinlock);
 #endif
     synclist_init(&glb->dist_connections);
 
@@ -138,6 +140,17 @@ GlobalContext *globalcontext_new(void)
     erl_nif_env_partial_init_from_globalcontext(&env, glb);
     glb->atomics_resource_type = enif_init_resource_type(&env, "atomics", &atomics_resource_type_init, ERL_NIF_RT_CREATE, NULL);
     if (IS_NULL_PTR(glb->atomics_resource_type)) {
+#ifndef AVM_NO_SMP
+        smp_rwlock_destroy(glb->modules_lock);
+#endif
+        valueshashtable_destroy(glb->modules_table);
+        atom_table_destroy(glb->atom_table);
+        free(glb);
+        return NULL;
+    }
+    glb->counters_resource_type = enif_init_resource_type(&env, "counters", &counters_resource_type_init, ERL_NIF_RT_CREATE, NULL);
+    if (IS_NULL_PTR(glb->counters_resource_type)) {
+        resource_type_destroy(glb->atomics_resource_type);
 #ifndef AVM_NO_SMP
         smp_rwlock_destroy(glb->modules_lock);
 #endif

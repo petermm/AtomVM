@@ -26,6 +26,7 @@ set(ERLANG_MODULES
     test_apply
     test_binary
     test_calendar
+    test_counters
     test_epmd
     test_gen_event
     test_gen_server
