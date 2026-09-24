@@ -30,7 +30,17 @@
 %%-----------------------------------------------------------------------------
 -module(erts_internal).
 
--export([mc_iterator/1, mc_refill/1, cmp_term/2]).
+-export([
+    mc_iterator/1,
+    mc_refill/1,
+    cmp_term/2,
+    atomics_new/2,
+    counters_new/1,
+    counters_get/2,
+    counters_add/3,
+    counters_put/3,
+    counters_info/1
+]).
 
 %%-----------------------------------------------------------------------------
 %% @param   MapOrIter   a map or a map iterator to iterate over
@@ -109,4 +119,40 @@ mc_refill([Path | Map]) ->
 %%-----------------------------------------------------------------------------
 -spec cmp_term(A :: term(), B :: term()) -> -1 | 0 | 1.
 cmp_term(_A, _B) ->
+    erlang:nif_error(undefined).
+
+%% The second argument is an encoded options bitmask, not the user-facing
+%% options list accepted by atomics:new/2.
+%% @doc Allocate an atomics resource for atomics:new/2.
+-spec atomics_new(Arity :: pos_integer(), OptsBitmask :: non_neg_integer()) -> reference().
+atomics_new(_Arity, _OptsBitmask) ->
+    erlang:nif_error(undefined).
+
+%% @doc Allocate a write-concurrency counters resource.
+-spec counters_new(Size :: pos_integer()) -> reference().
+counters_new(_Size) ->
+    erlang:nif_error(undefined).
+
+%% @doc Read a write-concurrency counter.
+-spec counters_get(Ref :: reference(), Ix :: pos_integer()) -> integer().
+counters_get(_Ref, _Ix) ->
+    erlang:nif_error(undefined).
+
+%% @doc Add to a write-concurrency counter.
+-spec counters_add(Ref :: reference(), Ix :: pos_integer(), Incr :: integer()) -> ok.
+counters_add(_Ref, _Ix, _Incr) ->
+    erlang:nif_error(undefined).
+
+%% @doc Set a write-concurrency counter.
+-spec counters_put(Ref :: reference(), Ix :: pos_integer(), Value :: integer()) -> ok.
+counters_put(_Ref, _Ix, _Value) ->
+    erlang:nif_error(undefined).
+
+%% @doc Return information about a write-concurrency counters resource.
+-spec counters_info(Ref :: reference()) ->
+    #{
+        size := non_neg_integer(),
+        memory := non_neg_integer()
+    }.
+counters_info(_Ref) ->
     erlang:nif_error(undefined).
