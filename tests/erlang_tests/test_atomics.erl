@@ -49,6 +49,11 @@ test_signed() ->
     ok = atomics:put(Ref, 2, Max),
     ok = atomics:add(Ref, 2, 1),
     Min = atomics:get(Ref, 2),
+    ok = atomics:put(Ref, 2, 0),
+    ok = atomics:sub(Ref, 2, 1 bsl 63),
+    Min = atomics:get(Ref, 2),
+    ok = atomics:put(Ref, 2, 0),
+    Min = atomics:sub_get(Ref, 2, 1 bsl 63),
     ok.
 
 test_unsigned() ->
@@ -61,6 +66,11 @@ test_unsigned() ->
     Max = atomics:add_get(Ref, 1, -1),
     ok = atomics:compare_exchange(Ref, 1, Max, 123),
     123 = atomics:get(Ref, 1),
+    ok = atomics:put(Ref, 1, 0),
+    ok = atomics:sub(Ref, 1, 1 bsl 63),
+    1 bsl 63 = atomics:get(Ref, 1),
+    ok = atomics:put(Ref, 1, 0),
+    1 bsl 63 = atomics:sub_get(Ref, 1, 1 bsl 63),
     ok.
 
 test_shared() ->
@@ -87,16 +97,26 @@ test_info() ->
     -(1 bsl 63) = SignedMin,
     (1 bsl 63) - 1 = SignedMax,
     true = SignedMemory > 0,
+    SignedExpected = #{size => 2, min => SignedMin, max => SignedMax, memory => SignedMemory},
+    SignedExpected = atomics:info(SignedRef),
     UnsignedRef = atomics:new(1, [{signed, false}]),
     #{size := 1, min := 0, max := UnsignedMax, memory := UnsignedMemory} = atomics:info(
         UnsignedRef
     ),
     (1 bsl 64) - 1 = UnsignedMax,
     true = UnsignedMemory > 0,
+    UnsignedExpected = #{size => 1, min => 0, max => UnsignedMax, memory => UnsignedMemory},
+    UnsignedExpected = atomics:info(UnsignedRef),
     ok.
 
 test_badarg() ->
     assert_badarg(fun() -> atomics:new(0, []) end),
+    assert_system_limit(fun() -> atomics:new(1 bsl 64, []) end),
+    assert_badarg(fun() -> atomics:new(1 bsl 64, [signed]) end),
+    case erlang:system_info(wordsize) of
+        4 -> assert_system_limit(fun() -> atomics:new(536870909, []) end);
+        _ -> ok
+    end,
     assert_badarg(fun() -> atomics:new(1, [{signed, 'maybe'}]) end),
     assert_badarg(fun() -> atomics:new(1, [signed]) end),
     Ref = atomics:new(1, []),
@@ -132,5 +152,14 @@ assert_badarith(Fun) ->
         error(expected_badarith)
     catch
         error:badarith ->
+            ok
+    end.
+
+assert_system_limit(Fun) ->
+    try
+        Fun(),
+        error(expected_system_limit)
+    catch
+        error:system_limit ->
             ok
     end.

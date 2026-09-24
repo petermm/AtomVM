@@ -21,7 +21,9 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#include "atomics.h"
 #include "context.h"
+#include "counters.h"
 #include "defaultatoms.h"
 #include "globalcontext.h"
 #include "memory.h"
@@ -108,6 +110,84 @@ void test_gc_ref_count(void)
     assert(list_is_empty(refc_binaries));
 }
 
+void test_atomic_resources_are_rooted_during_gc(void)
+{
+    GlobalContext *glb = globalcontext_new();
+    Context *ctx = context_new(glb);
+    ctx->heap_growth_strategy = MinimumHeapGrowth;
+
+    term atomics_new_args[] = { term_from_int11(1), term_from_int11(1) };
+    term atomics_ref = nif_erts_internal_atomics_new_2(ctx, 2, atomics_new_args);
+    assert(!term_is_invalid_term(atomics_ref));
+    assert(memory_ensure_free_with_roots(ctx, 0, 1, &atomics_ref, MEMORY_FORCE_SHRINK) == MEMORY_GC_OK);
+    assert(context_avail_free_memory(ctx) == 0);
+
+    term add_get_args[] = { atomics_ref, term_from_int11(1), term_from_int11(7) };
+    term value = nif_atomics_add_get_3(ctx, 3, add_get_args);
+    assert(term_is_integer(value));
+    assert(term_to_int(value) == 7);
+    assert(!list_is_empty(synclist_nolock(&glb->refc_binaries)));
+
+    atomics_ref = add_get_args[0];
+    assert(memory_ensure_free_with_roots(ctx, 0, 1, &atomics_ref, MEMORY_FORCE_SHRINK) == MEMORY_GC_OK);
+    assert(context_avail_free_memory(ctx) == 0);
+    term sub_get_args[] = { atomics_ref, term_from_int11(1), term_from_int11(2) };
+    value = nif_atomics_sub_get_3(ctx, 3, sub_get_args);
+    assert(term_is_integer(value));
+    assert(term_to_int(value) == 5);
+    assert(!list_is_empty(synclist_nolock(&glb->refc_binaries)));
+
+    atomics_ref = sub_get_args[0];
+    assert(memory_ensure_free_with_roots(ctx, 0, 1, &atomics_ref, MEMORY_FORCE_SHRINK) == MEMORY_GC_OK);
+    assert(context_avail_free_memory(ctx) == 0);
+    term exchange_args[] = { atomics_ref, term_from_int11(1), term_from_int11(9) };
+    value = nif_atomics_exchange_3(ctx, 3, exchange_args);
+    assert(term_is_integer(value));
+    assert(term_to_int(value) == 5);
+    assert(!list_is_empty(synclist_nolock(&glb->refc_binaries)));
+
+    atomics_ref = exchange_args[0];
+    assert(memory_ensure_free_with_roots(ctx, 0, 1, &atomics_ref, MEMORY_FORCE_SHRINK) == MEMORY_GC_OK);
+    assert(context_avail_free_memory(ctx) == 0);
+    term atomics_info_args[] = { atomics_ref };
+    term atomics_info = nif_atomics_info_1(ctx, 1, atomics_info_args);
+    assert(term_is_map(atomics_info));
+    assert(!list_is_empty(synclist_nolock(&glb->refc_binaries)));
+
+    term unsigned_new_args[] = { term_from_int11(1), term_from_int11(0) };
+    term unsigned_ref = nif_erts_internal_atomics_new_2(ctx, 2, unsigned_new_args);
+    assert(!term_is_invalid_term(unsigned_ref));
+    assert(memory_ensure_free_with_roots(ctx, 0, 1, &unsigned_ref, MEMORY_FORCE_SHRINK) == MEMORY_GC_OK);
+    assert(context_avail_free_memory(ctx) == 0);
+    term unsigned_add_get_args[] = { unsigned_ref, term_from_int11(1), term_from_int11(1) };
+    value = nif_atomics_add_get_3(ctx, 3, unsigned_add_get_args);
+    assert(term_is_integer(value));
+    assert(term_to_int(value) == 1);
+    assert(!list_is_empty(synclist_nolock(&glb->refc_binaries)));
+
+    term counters_new_args[] = { term_from_int11(1) };
+    term counters_ref = nif_erts_internal_counters_new_1(ctx, 1, counters_new_args);
+    assert(!term_is_invalid_term(counters_ref));
+    assert(memory_ensure_free_with_roots(ctx, 0, 1, &counters_ref, MEMORY_FORCE_SHRINK) == MEMORY_GC_OK);
+    assert(context_avail_free_memory(ctx) == 0);
+
+    term counters_get_args[] = { counters_ref, term_from_int11(1) };
+    value = nif_erts_internal_counters_get_2(ctx, 2, counters_get_args);
+    assert(term_is_integer(value));
+    assert(term_to_int(value) == 0);
+    assert(!list_is_empty(synclist_nolock(&glb->refc_binaries)));
+
+    counters_ref = counters_get_args[0];
+    assert(memory_ensure_free_with_roots(ctx, 0, 1, &counters_ref, MEMORY_FORCE_SHRINK) == MEMORY_GC_OK);
+    assert(context_avail_free_memory(ctx) == 0);
+    term counters_info_args[] = { counters_ref };
+    term counters_info = nif_erts_internal_counters_info_1(ctx, 1, counters_info_args);
+    assert(term_is_map(counters_info));
+    assert(!list_is_empty(synclist_nolock(&glb->refc_binaries)));
+
+    globalcontext_destroy(glb);
+}
+
 int main(int argc, char **argv)
 {
     UNUSED(argc);
@@ -115,6 +195,7 @@ int main(int argc, char **argv)
 
     test_memory_ensure_free();
     test_gc_ref_count();
+    test_atomic_resources_are_rooted_during_gc();
 
     return EXIT_SUCCESS;
 }

@@ -98,6 +98,8 @@ test_info(atomics) ->
     -(1 bsl 63) = Min,
     (1 bsl 63) - 1 = Max,
     true = Memory > 0,
+    Expected = #{size => 3, min => Min, max => Max, memory => Memory},
+    Expected = counters:info(Ref),
     ok;
 test_info(write_concurrency) ->
     Ref = new_counter(write_concurrency, 3),
@@ -106,6 +108,8 @@ test_info(write_concurrency) ->
     true = Memory > 0,
     false = has_map_key(min, Info),
     false = has_map_key(max, Info),
+    Expected = #{size => 3, memory => Memory},
+    Expected = Info,
     ok.
 
 has_map_key(Key, Map) ->
@@ -173,6 +177,8 @@ test_badarg() ->
     assert_badarg(fun() -> counters:new(0, []) end),
     assert_badarg(fun() -> counters:new(1, [not_an_option]) end),
     assert_badarg(fun() -> counters:new(1, [write_concurrency | bad]) end),
+    assert_system_limit(fun() -> counters:new(1 bsl 64, []) end),
+    assert_system_limit(fun() -> counters:new(1 bsl 64, [atomics]) end),
     assert_system_limit(fun() -> counters:new(1 bsl 64, [write_concurrency]) end),
     [ok = test_badarg_for_type(Type) || Type <- [atomics, write_concurrency]],
     ok.

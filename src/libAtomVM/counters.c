@@ -235,9 +235,9 @@ static size_t current_scheduler_slot(Context *ctx, const struct CountersRef *cou
 #define COUNTERS_UNLOCK(ctx) UNUSED(ctx)
 #endif
 
-static bool ensure_counter_value_heap(Context *ctx)
+static bool ensure_counter_value_heap(Context *ctx, term *ref)
 {
-    return memory_ensure_free(ctx, term_boxed_integer_size(INT64_MIN)) == MEMORY_GC_OK;
+    return memory_ensure_free_with_roots(ctx, term_boxed_integer_size(INT64_MIN), 1, ref, MEMORY_NO_SHRINK) == MEMORY_GC_OK;
 }
 
 static term make_counter_value(Context *ctx, uint64_t value)
@@ -329,7 +329,7 @@ term nif_erts_internal_counters_get_2(Context *ctx, int argc, term argv[])
     if (UNLIKELY(!get_resource_index(argv[0], argv[1], ctx, &counters, &index))) {
         return raise_badarg(ctx);
     }
-    if (UNLIKELY(!ensure_counter_value_heap(ctx))) {
+    if (UNLIKELY(!ensure_counter_value_heap(ctx, argv))) {
         return raise_error(ctx, OUT_OF_MEMORY_ATOM);
     }
 
@@ -393,7 +393,7 @@ term nif_erts_internal_counters_info_1(Context *ctx, int argc, term argv[])
     size_t heap_needed = term_map_size_in_terms(2);
     heap_needed += term_boxed_integer_size((int64_t) counters->size);
     heap_needed += term_boxed_integer_size((int64_t) counters->memory);
-    if (UNLIKELY(memory_ensure_free(ctx, heap_needed) != MEMORY_GC_OK)) {
+    if (UNLIKELY(memory_ensure_free_with_roots(ctx, heap_needed, 1, argv, MEMORY_NO_SHRINK) != MEMORY_GC_OK)) {
         return raise_error(ctx, OUT_OF_MEMORY_ATOM);
     }
 

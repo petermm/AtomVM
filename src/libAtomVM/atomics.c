@@ -152,6 +152,11 @@ static bool get_negated_incr(term value, uint64_t *out, term *error_reason)
         return true;
     }
 
+    if (term_is_uint64(value) && term_to_uint64(value) == ((uint64_t) INT64_MAX) + 1) {
+        *out = ((uint64_t) INT64_MAX) + 1;
+        return true;
+    }
+
     if (term_is_any_neg_integer(value)) {
         const intn_digit_t *digits;
         size_t digits_len;
@@ -169,10 +174,10 @@ static bool get_negated_incr(term value, uint64_t *out, term *error_reason)
     return false;
 }
 
-static bool ensure_uint64_heap(Context *ctx, uint64_t value)
+static bool ensure_uint64_heap_with_roots(Context *ctx, uint64_t value, size_t num_roots, term *roots)
 {
     if (value <= (uint64_t) INT64_MAX) {
-        return memory_ensure_free(ctx, term_boxed_integer_size((int64_t) value)) == MEMORY_GC_OK;
+        return memory_ensure_free_with_roots(ctx, term_boxed_integer_size((int64_t) value), num_roots, roots, MEMORY_NO_SHRINK) == MEMORY_GC_OK;
     }
 
     intn_digit_t digits[INTN_UINT64_LEN];
@@ -182,7 +187,12 @@ static bool ensure_uint64_heap(Context *ctx, uint64_t value)
     size_t rounded_digits_len;
     term_bigint_size_requirements(digits_len, &intn_data_size, &rounded_digits_len);
     UNUSED(rounded_digits_len);
-    return memory_ensure_free(ctx, BOXED_BIGINT_HEAP_SIZE(intn_data_size)) == MEMORY_GC_OK;
+    return memory_ensure_free_with_roots(ctx, BOXED_BIGINT_HEAP_SIZE(intn_data_size), num_roots, roots, MEMORY_NO_SHRINK) == MEMORY_GC_OK;
+}
+
+static bool ensure_uint64_heap(Context *ctx, uint64_t value)
+{
+    return ensure_uint64_heap_with_roots(ctx, value, 0, NULL);
 }
 
 static term make_uint64_prepared(Context *ctx, uint64_t value);
@@ -226,12 +236,12 @@ static term make_atomic_value(Context *ctx, const struct AtomicsRef *atomics, ui
     }
 }
 
-static bool ensure_atomic_value_heap(Context *ctx, const struct AtomicsRef *atomics)
+static bool ensure_atomic_value_heap(Context *ctx, const struct AtomicsRef *atomics, term *ref)
 {
     if (atomics->is_signed) {
-        return memory_ensure_free(ctx, term_boxed_integer_size(INT64_MIN)) == MEMORY_GC_OK;
+        return memory_ensure_free_with_roots(ctx, term_boxed_integer_size(INT64_MIN), 1, ref, MEMORY_NO_SHRINK) == MEMORY_GC_OK;
     } else {
-        return ensure_uint64_heap(ctx, UINT64_MAX);
+        return ensure_uint64_heap_with_roots(ctx, UINT64_MAX, 1, ref);
     }
 }
 
@@ -316,8 +326,11 @@ static uint64_t cell_compare_exchange(struct AtomicsRef *atomics, size_t index, 
 
 static term atomics_new(Context *ctx, uint64_t size_value, bool is_signed)
 {
-    if (UNLIKELY(size_value == 0 || size_value > SIZE_MAX)) {
+    if (UNLIKELY(size_value == 0)) {
         return raise_badarg(ctx);
+    }
+    if (UNLIKELY(size_value > SIZE_MAX)) {
+        return raise_error(ctx, SYSTEM_LIMIT_ATOM);
     }
     size_t size = (size_t) size_value;
     const size_t cells_alignment = _Alignof(AtomicsCell);
@@ -327,7 +340,7 @@ static term atomics_new(Context *ctx, uint64_t size_value, bool is_signed)
     }
 
     size_t bytes = sizeof(struct AtomicsRef) + (cells_alignment - 1) + size * sizeof(AtomicsCell);
-    if (UNLIKELY(bytes > UINT_MAX)) {
+    if (UNLIKELY(bytes > UINT_MAX || bytes > SIZE_MAX - sizeof(struct RefcBinary))) {
         return raise_error(ctx, SYSTEM_LIMIT_ATOM);
     }
     struct AtomicsRef *atomics = enif_alloc_resource(ctx->global->atomics_resource_type, bytes);
@@ -381,12 +394,14 @@ term nif_atomics_new_2(Context *ctx, int argc, term argv[])
 {
     UNUSED(argc);
 
-    if (UNLIKELY(!term_is_uint64(argv[0]))) {
-        return raise_badarg(ctx);
-    }
     bool is_signed;
     if (UNLIKELY(!parse_atom_option_list(argv[1], &is_signed))) {
         return raise_badarg(ctx);
+    }
+    if (UNLIKELY(!term_is_uint64(argv[0]))) {
+        return term_is_any_integer(argv[0]) && !term_is_any_neg_integer(argv[0])
+            ? raise_error(ctx, SYSTEM_LIMIT_ATOM)
+            : raise_badarg(ctx);
     }
     return atomics_new(ctx, term_to_uint64(argv[0]), is_signed);
 }
@@ -395,8 +410,13 @@ term nif_erts_internal_atomics_new_2(Context *ctx, int argc, term argv[])
 {
     UNUSED(argc);
 
-    if (UNLIKELY(!term_is_uint64(argv[0]) || !term_is_uint64(argv[1]))) {
+    if (UNLIKELY(!term_is_uint64(argv[1]))) {
         return raise_badarg(ctx);
+    }
+    if (UNLIKELY(!term_is_uint64(argv[0]))) {
+        return term_is_any_integer(argv[0]) && !term_is_any_neg_integer(argv[0])
+            ? raise_error(ctx, SYSTEM_LIMIT_ATOM)
+            : raise_badarg(ctx);
     }
     uint64_t opts = term_to_uint64(argv[1]);
     return atomics_new(ctx, term_to_uint64(argv[0]), (opts & OPT_SIGNED) != 0);
@@ -462,7 +482,7 @@ term nif_atomics_add_get_3(Context *ctx, int argc, term argv[])
     if (UNLIKELY(!get_resource_index(argv[0], argv[1], ctx, &atomics, &index) || !get_incr(argv[2], &incr))) {
         return raise_badarg(ctx);
     }
-    if (UNLIKELY(!ensure_atomic_value_heap(ctx, atomics))) {
+    if (UNLIKELY(!ensure_atomic_value_heap(ctx, atomics, argv))) {
         return raise_error(ctx, OUT_OF_MEMORY_ATOM);
     }
 
@@ -509,7 +529,7 @@ term nif_atomics_sub_get_3(Context *ctx, int argc, term argv[])
     if (UNLIKELY(!get_resource_index(argv[0], argv[1], ctx, &atomics, &index))) {
         return raise_badarg(ctx);
     }
-    if (UNLIKELY(!ensure_atomic_value_heap(ctx, atomics))) {
+    if (UNLIKELY(!ensure_atomic_value_heap(ctx, atomics, argv))) {
         return raise_error(ctx, OUT_OF_MEMORY_ATOM);
     }
 
@@ -529,7 +549,7 @@ term nif_atomics_exchange_3(Context *ctx, int argc, term argv[])
     if (UNLIKELY(!get_resource_index(argv[0], argv[1], ctx, &atomics, &index) || !get_value(atomics, argv[2], &desired))) {
         return raise_badarg(ctx);
     }
-    if (UNLIKELY(!ensure_atomic_value_heap(ctx, atomics))) {
+    if (UNLIKELY(!ensure_atomic_value_heap(ctx, atomics, argv))) {
         return raise_error(ctx, OUT_OF_MEMORY_ATOM);
     }
 
@@ -589,7 +609,7 @@ term nif_atomics_info_1(Context *ctx, int argc, term argv[])
         heap_needed += BOXED_BIGINT_HEAP_SIZE(intn_data_size);
     }
 
-    if (UNLIKELY(memory_ensure_free(ctx, heap_needed) != MEMORY_GC_OK)) {
+    if (UNLIKELY(memory_ensure_free_with_roots(ctx, heap_needed, 1, argv, MEMORY_NO_SHRINK) != MEMORY_GC_OK)) {
         return raise_error(ctx, OUT_OF_MEMORY_ATOM);
     }
 
@@ -602,8 +622,8 @@ term nif_atomics_info_1(Context *ctx, int argc, term argv[])
 
     term map = term_alloc_map(4, &ctx->heap);
     term_set_map_assoc(map, 0, max_key, atomics->is_signed ? term_make_maybe_boxed_int64(INT64_MAX, &ctx->heap) : make_uint64_prepared(ctx, UINT64_MAX));
-    term_set_map_assoc(map, 1, min_key, term_make_maybe_boxed_int64(min, &ctx->heap));
-    term_set_map_assoc(map, 2, size_key, term_make_maybe_boxed_int64((int64_t) atomics->size, &ctx->heap));
-    term_set_map_assoc(map, 3, MEMORY_ATOM, term_make_maybe_boxed_int64((int64_t) memory, &ctx->heap));
+    term_set_map_assoc(map, 1, MEMORY_ATOM, term_make_maybe_boxed_int64((int64_t) memory, &ctx->heap));
+    term_set_map_assoc(map, 2, min_key, term_make_maybe_boxed_int64(min, &ctx->heap));
+    term_set_map_assoc(map, 3, size_key, term_make_maybe_boxed_int64((int64_t) atomics->size, &ctx->heap));
     return map;
 }
