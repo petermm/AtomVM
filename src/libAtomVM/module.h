@@ -284,7 +284,7 @@ term module_get_type_by_index(const Module *mod, int type_index, Context *ctx);
  */
 static inline term module_get_atom_term_by_id(const Module *mod, int local_atom_id)
 {
-    int global_id = mod->local_atoms_to_global_table[local_atom_id];
+    atom_index_t global_id = mod->local_atoms_to_global_table[local_atom_id];
     return term_from_atom_index(global_id);
 }
 
