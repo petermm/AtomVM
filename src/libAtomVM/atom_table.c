@@ -19,6 +19,7 @@
  */
 
 #include "atom_table.h"
+#include "defaultatoms.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -66,6 +67,7 @@ struct AtomTable
 {
     size_t capacity;
     size_t count;
+    atom_index_t base_index;
     int last_node_group_avail;
 #ifndef AVM_NO_SMP
     RWLock *lock;
@@ -91,6 +93,7 @@ struct AtomTable *atom_table_new(void)
     }
 
     htable->count = 0;
+    htable->base_index = 0;
     htable->capacity = DEFAULT_SIZE;
 
     htable->last_node_group = NULL;
@@ -101,6 +104,17 @@ struct AtomTable *atom_table_new(void)
 #endif
 
     return htable;
+}
+
+void atom_table_set_default_atoms(struct AtomTable *table, atom_index_t default_atoms_count)
+{
+    SMP_WRLOCK(table);
+    table->base_index = default_atoms_count;
+    table->count = default_atoms_count;
+    if (table->first_node_group) {
+        table->first_node_group->first_index = default_atoms_count;
+    }
+    SMP_UNLOCK(table);
 }
 
 void atom_table_destroy(struct AtomTable *table)
@@ -210,6 +224,10 @@ static struct HNode *get_node_using_index(struct AtomTable *table, atom_index_t 
 
 const uint8_t *atom_table_get_atom_string(struct AtomTable *table, atom_index_t index, size_t *out_size)
 {
+    if (table->base_index > 0 && index < table->base_index) {
+        return defaultatoms_get_atom_string(index, out_size);
+    }
+
     const uint8_t *result;
     SMP_RDLOCK(table);
 
@@ -363,6 +381,14 @@ static inline bool maybe_rehash(struct AtomTable *table, int new_entries)
 
 enum AtomTableEnsureAtomResult atom_table_ensure_atom(struct AtomTable *table, const uint8_t *atom_data, size_t atom_len, enum AtomTableCopyOpt opts, atom_index_t *result)
 {
+    if (table->base_index > 0) {
+        atom_index_t default_idx;
+        if (defaultatoms_lookup(atom_data, atom_len, &default_idx)) {
+            *result = default_idx;
+            return AtomTableEnsureAtomOk;
+        }
+    }
+
     unsigned long hash = sdbm_hash(atom_data, atom_len);
     SMP_WRLOCK(table);
     unsigned long bucket_index = hash % table->capacity;
@@ -455,15 +481,19 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atoms(struct AtomTable *table, 
             atom_len = current_atom[0];
             current_atom++;
         }
-        node = get_node(table, current_atom, atom_len);
-        current_atom += atom_len;
-
-        if (node) {
-            translate_table[i] = node->index;
+        atom_index_t default_idx;
+        if (table->base_index > 0 && defaultatoms_lookup(current_atom, atom_len, &default_idx)) {
+            translate_table[i] = default_idx;
         } else {
-            new_atoms_count++;
-            translate_table[i] = ATOM_TABLE_NOT_FOUND_MARKER;
+            node = get_node(table, current_atom, atom_len);
+            if (node) {
+                translate_table[i] = node->index;
+            } else {
+                new_atoms_count++;
+                translate_table[i] = ATOM_TABLE_NOT_FOUND_MARKER;
+            }
         }
+        current_atom += atom_len;
     }
 
     maybe_rehash(table, new_atoms_count);

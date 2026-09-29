@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "atom_table.h"
+#include "defaultatoms.h"
 #include "utils.h"
 #include "valueshashtable.h"
 
@@ -538,6 +539,51 @@ static void test_atom_table_bulk_grow(void)
 #undef PER_BATCH
 }
 
+static void test_atom_table_default_atoms(void)
+{
+    struct AtomTable *table = atom_table_new();
+    atom_table_set_default_atoms(table, platform_defaultatoms_count());
+
+    assert(atom_table_count(table) == (size_t) platform_defaultatoms_count());
+
+    // Test retrieving default atom 0 ("false")
+    size_t len;
+    const uint8_t *atom_data = atom_table_get_atom_string(table, 0, &len);
+    assert(atom_data != NULL);
+    assert(len == 5);
+    assert(memcmp(atom_data, "false", 5) == 0);
+
+    // Test retrieving default atom 1 ("true")
+    atom_data = atom_table_get_atom_string(table, 1, &len);
+    assert(atom_data != NULL);
+    assert(len == 4);
+    assert(memcmp(atom_data, "true", 4) == 0);
+
+    // Test ensure default atom returns compile-time index without allocating
+    atom_index_t idx;
+    enum AtomTableEnsureAtomResult r = atom_table_ensure_atom(table, (const uint8_t *) "false", 5, AtomTableNoOpts, &idx);
+    assert(r == AtomTableEnsureAtomOk);
+    assert(idx == 0);
+
+    r = atom_table_ensure_atom(table, (const uint8_t *) "true", 4, AtomTableAlreadyExisting, &idx);
+    assert(r == AtomTableEnsureAtomOk);
+    assert(idx == 1);
+
+    // Test dynamic atom gets index starting at platform_defaultatoms_count()
+    atom_index_t custom_idx;
+    r = atom_table_ensure_atom(table, (const uint8_t *) "custom_atom", 11, AtomTableNoOpts, &custom_idx);
+    assert(r == AtomTableEnsureAtomOk);
+    assert(custom_idx == platform_defaultatoms_count());
+    assert(atom_table_count(table) == (size_t) platform_defaultatoms_count() + 1);
+
+    atom_data = atom_table_get_atom_string(table, custom_idx, &len);
+    assert(atom_data != NULL);
+    assert(len == 11);
+    assert(memcmp(atom_data, "custom_atom", 11) == 0);
+
+    atom_table_destroy(table);
+}
+
 int main(int argc, char **argv)
 {
     UNUSED(argc);
@@ -546,6 +592,7 @@ int main(int argc, char **argv)
     test_valueshashtable();
     test_atom_table();
     test_atom_table_bulk_grow();
+    test_atom_table_default_atoms();
 
     return EXIT_SUCCESS;
 }
