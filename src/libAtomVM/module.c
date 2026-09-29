@@ -889,7 +889,7 @@ static enum ModuleLoadResult module_populate_atoms_table(Module *this_module, ui
 
     const char *current_atom = (const char *) table_data + 12;
 
-    this_module->local_atoms_to_global_table = calloc(atoms_count + 1, sizeof(int));
+    this_module->local_atoms_to_global_table = calloc(atoms_count + 1, sizeof(atom_index_t));
     if (IS_NULL_PTR(this_module->local_atoms_to_global_table)) {
         fprintf(stderr, "Cannot allocate memory while loading module (line: %i).\n", __LINE__);
         return MODULE_ERROR_FAILED_ALLOCATION;
