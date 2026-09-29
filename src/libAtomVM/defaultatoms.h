@@ -76,6 +76,13 @@ void defaultatoms_init(GlobalContext *glb);
 
 void platform_defaultatoms_init(GlobalContext *glb);
 
+const uint8_t *defaultatoms_get_atom_string(atom_index_t index, size_t *out_len);
+bool defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index);
+
+const uint8_t *platform_defaultatoms_get_atom_string(atom_index_t index, size_t *out_len);
+bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index);
+atom_index_t platform_defaultatoms_count(void);
+
 #ifdef __cplusplus
 }
 #endif

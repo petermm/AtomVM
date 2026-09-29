@@ -20,12 +20,34 @@
 
 #include "platform_defaultatoms.h"
 
+#include <string.h>
+
 static const char *const pico_atom = ATOM_STR("\x4", "pico");
+
+const uint8_t *platform_defaultatoms_get_atom_string(atom_index_t index, size_t *out_len)
+{
+    if (index == PICO_ATOM_INDEX) {
+        *out_len = 4;
+        return (const uint8_t *) (pico_atom + 1);
+    }
+    return NULL;
+}
+
+bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
+{
+    if (atom_len == 4 && memcmp(atom_data, pico_atom + 1, 4) == 0) {
+        *out_index = PICO_ATOM_INDEX;
+        return true;
+    }
+    return false;
+}
+
+atom_index_t platform_defaultatoms_count(void)
+{
+    return PICO_ATOM_INDEX + 1;
+}
 
 void platform_defaultatoms_init(GlobalContext *glb)
 {
-    term atom_term = globalcontext_make_atom(glb, pico_atom);
-    if (UNLIKELY(term_to_atom_index(atom_term) != PICO_ATOM_INDEX)) {
-        AVM_ABORT();
-    }
+    UNUSED(glb);
 }

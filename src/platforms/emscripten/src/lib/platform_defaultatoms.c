@@ -23,28 +23,46 @@
 #include <stdlib.h>
 #include <string.h>
 
-void platform_defaultatoms_init(GlobalContext *glb)
-{
 // About X macro: https://en.wikipedia.org/wiki/X_macro
 #define X(name, lenstr, str) \
     lenstr str,
 
-    static const char *const atoms[] = {
+static const char *const platform_atoms[] = {
 #include "platform_defaultatoms.def"
 
-        // dummy value
-        NULL
-    };
+    // dummy value
+    NULL
+};
 #undef X
 
-    for (size_t i = 0; i < ATOM_FIRST_AVAIL_INDEX - PLATFORM_ATOMS_BASE_INDEX; i++) {
-        if (UNLIKELY((size_t) atoms[i][0] != strlen(atoms[i] + 1))) {
-            AVM_ABORT();
-        }
+const uint8_t *platform_defaultatoms_get_atom_string(atom_index_t index, size_t *out_len)
+{
+    if (index >= PLATFORM_ATOMS_BASE_INDEX && index < ATOM_FIRST_AVAIL_INDEX) {
+        const char *entry = platform_atoms[index - PLATFORM_ATOMS_BASE_INDEX];
+        *out_len = (size_t) (uint8_t) entry[0];
+        return (const uint8_t *) (entry + 1);
+    }
+    return NULL;
+}
 
-        term atom_term = globalcontext_make_atom(glb, atoms[i]);
-        if (UNLIKELY(term_to_atom_index(atom_term) != i + PLATFORM_ATOMS_BASE_INDEX)) {
-            AVM_ABORT();
+bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
+{
+    for (size_t i = 0; i < ATOM_FIRST_AVAIL_INDEX - PLATFORM_ATOMS_BASE_INDEX; i++) {
+        const char *entry = platform_atoms[i];
+        if ((uint8_t) entry[0] == atom_len && memcmp(entry + 1, atom_data, atom_len) == 0) {
+            *out_index = (atom_index_t) (i + PLATFORM_ATOMS_BASE_INDEX);
+            return true;
         }
     }
+    return false;
+}
+
+atom_index_t platform_defaultatoms_count(void)
+{
+    return ATOM_FIRST_AVAIL_INDEX;
+}
+
+void platform_defaultatoms_init(GlobalContext *glb)
+{
+    UNUSED(glb);
 }

@@ -136,6 +136,26 @@ void platform_defaultatoms_init(GlobalContext *glb)
     UNUSED(glb);
 }
 
+const uint8_t *platform_defaultatoms_get_atom_string(atom_index_t index, size_t *out_len)
+{
+    UNUSED(index);
+    UNUSED(out_len);
+    return NULL;
+}
+
+bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
+{
+    UNUSED(atom_data);
+    UNUSED(atom_len);
+    UNUSED(out_index);
+    return false;
+}
+
+atom_index_t platform_defaultatoms_count(void)
+{
+    return PLATFORM_ATOMS_BASE_INDEX;
+}
+
 void sys_enable_core_periph_clocks(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();

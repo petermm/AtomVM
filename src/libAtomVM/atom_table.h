@@ -58,6 +58,8 @@ typedef const void *atom_ref_t;
 struct AtomTable *atom_table_new(void);
 void atom_table_destroy(struct AtomTable *table);
 
+void atom_table_set_default_atoms(struct AtomTable *table, atom_index_t default_atoms_count);
+
 size_t atom_table_count(struct AtomTable *table);
 
 atom_index_t atom_table_get_index(struct AtomTable *table, AtomString string);
