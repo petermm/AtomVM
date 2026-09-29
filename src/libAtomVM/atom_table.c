@@ -40,12 +40,10 @@
 #define SMP_UNLOCK(htable) UNUSED(htable)
 #endif
 
-#define DEFAULT_SIZE 8
-#define CAPACITY_INCREASE 8
+#define DEFAULT_SIZE 32
 #define MAX_ATOM_LEN ((1 << 12) - 1)
 
 #define ATOM_TABLE_THRESHOLD(capacity) (capacity + (capacity >> 2))
-#define ATOM_TABLE_NEW_CAPACITY(new_count) (new_count + CAPACITY_INCREASE)
 
 struct HNode
 {
@@ -356,7 +354,10 @@ static inline bool maybe_rehash(struct AtomTable *table, int new_entries)
         return false;
     }
 
-    int new_capacity = ATOM_TABLE_NEW_CAPACITY(new_count);
+    int new_capacity = table->capacity * 2;
+    while (new_count > ATOM_TABLE_THRESHOLD(new_capacity)) {
+        new_capacity *= 2;
+    }
     return do_rehash(table, new_capacity);
 }
 
