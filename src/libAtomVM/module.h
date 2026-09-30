@@ -140,6 +140,7 @@ struct Module
     unsigned int free_literals_data : 1;
     unsigned int labels_is_u16 : 1;
     unsigned int literals_is_u16 : 1;
+    unsigned int labels_in_flash : 1;
 
 #ifndef AVM_NO_SMP
     Mutex *mutex;
@@ -474,6 +475,21 @@ uint32_t module_label_code_offset(Module *mod, int label);
  * @param entry_point the native entry point
  */
 void module_set_native_code(Module *mod, uint32_t labels_count, ModuleNativeEntryPoint entry_point);
+
+/**
+ * @brief Generate a LabT IFF chunk for a given BEAM binary
+ *
+ * @details The header and 16- or 32-bit offsets use the generator's native
+ * byte order, recorded in the flags. Loaders with a different byte order
+ * fall back to scanning Code. Modules with more than UINT16_MAX labels are
+ * not represented by this format and do not receive a LabT chunk.
+ *
+ * @param beam_file pointer to BEAM binary data
+ * @param size size of BEAM binary
+ * @param out_chunk_size output pointer to store the size of the generated chunk
+ * @return malloc'd buffer containing the complete "LabT" chunk, or NULL if error / not applicable
+ */
+void *module_create_labt_chunk(const void *beam_file, unsigned long size, size_t *out_chunk_size);
 
 #ifdef __cplusplus
 }

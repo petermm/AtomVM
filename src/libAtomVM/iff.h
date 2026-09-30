@@ -60,14 +60,33 @@ extern "C" {
 #define AVMN 10
 /** Type table section */
 #define TYPE 11
+/** Label table section */
+#define LABT 12
 
 /** Required size for offsets array */
-#define MAX_OFFS 12
+#define MAX_OFFS 13
 /** Required size for sizes array */
-#define MAX_SIZES 12
+#define MAX_SIZES 13
 
 /** sizeof IFF section header in bytes */
 #define IFF_SECTION_HEADER_SIZE 8
+
+/** LabT entries are uint32_t rather than uint16_t. */
+#define LABT_FLAG_32BIT 1
+/** LabT header and entries are big-endian; otherwise they are little-endian. */
+#define LABT_FLAG_BIG_ENDIAN 2
+
+/**
+ * LabT payload header, followed by num_labels offsets from CodeChunk.code.
+ * All fields and entries use the byte order declared by flags. The IFF chunk
+ * size excludes alignment padding and includes this eight-byte header.
+ */
+struct LabTHeader
+{
+    uint32_t end_instruction_ii;
+    uint16_t flags;
+    uint16_t num_labels;
+};
 
 /**
  * @brief parse a BEAM/IFF file and build a sections offsets table

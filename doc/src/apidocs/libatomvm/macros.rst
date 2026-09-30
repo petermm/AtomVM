@@ -16,4 +16,6 @@ MACROS
 
 .. doxygendefine:: ATOM_STR
 .. doxygendefine:: GET_LIST_ENTRY
+.. doxygendefine:: LABT_FLAG_32BIT
+.. doxygendefine:: LABT_FLAG_BIG_ENDIAN
 .. doxygendefine:: SELECT_INT_DEFAULT

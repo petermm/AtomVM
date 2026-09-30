@@ -98,6 +98,8 @@ if(Erlang_FOUND)
     add_subdirectory(tools/uf2tool)
 endif()
 
+add_subdirectory(tools/packbeam_labt)
+
 if (NOT "${CMAKE_GENERATOR}" MATCHES "Xcode")
     add_custom_target(dialyzer COMMENT "Run dialyzer")
     add_subdirectory(libs)
