@@ -47,6 +47,15 @@
 #define ATOM_TABLE_NOT_FOUND_MARKER ((atom_index_t) 0xFFFF)
 
 #define ATOM_TABLE_THRESHOLD(capacity) (capacity + (capacity >> 2))
+#define ATOM_STRING_CHUNK_SIZE 512
+
+struct AtomStringChunk
+{
+    struct AtomStringChunk *next;
+    size_t used;
+    size_t capacity;
+    uint8_t data[];
+};
 
 struct AtomEntry
 {
@@ -66,6 +75,7 @@ struct AtomTable
 #endif
     atom_index_t *buckets;
     struct AtomEntry *entries;
+    struct AtomStringChunk *string_chunks;
 };
 
 struct AtomTable *atom_table_new(void)
@@ -92,6 +102,7 @@ struct AtomTable *atom_table_new(void)
     htable->base_index = 0;
     htable->capacity = DEFAULT_SIZE;
     htable->entries_capacity = DEFAULT_SIZE;
+    htable->string_chunks = NULL;
 
 #ifndef AVM_NO_SMP
     htable->lock = smp_rwlock_create();
@@ -116,6 +127,12 @@ void atom_table_destroy(struct AtomTable *table)
 #ifndef AVM_NO_SMP
     smp_rwlock_destroy(table->lock);
 #endif
+    struct AtomStringChunk *chunk = table->string_chunks;
+    while (chunk) {
+        struct AtomStringChunk *next = chunk->next;
+        free(chunk);
+        chunk = next;
+    }
     free(table->entries);
     free(table->buckets);
     free(table);
@@ -358,6 +375,30 @@ static inline atom_index_t insert_entry(
     return global_index;
 }
 
+static const uint8_t *copy_atom_string(struct AtomTable *table, const uint8_t *atom_data, size_t atom_len)
+{
+    if (atom_len == 0) {
+        return (const uint8_t *) "";
+    }
+    struct AtomStringChunk *chunk = table->string_chunks;
+    if (chunk == NULL || (chunk->capacity - chunk->used) < atom_len) {
+        size_t alloc_cap = (atom_len > ATOM_STRING_CHUNK_SIZE) ? atom_len : ATOM_STRING_CHUNK_SIZE;
+        struct AtomStringChunk *new_chunk = malloc(sizeof(struct AtomStringChunk) + alloc_cap);
+        if (IS_NULL_PTR(new_chunk)) {
+            return NULL;
+        }
+        new_chunk->next = table->string_chunks;
+        new_chunk->used = 0;
+        new_chunk->capacity = alloc_cap;
+        table->string_chunks = new_chunk;
+        chunk = new_chunk;
+    }
+    uint8_t *dest = chunk->data + chunk->used;
+    memcpy(dest, atom_data, atom_len);
+    chunk->used += atom_len;
+    return dest;
+}
+
 enum AtomTableEnsureAtomResult atom_table_ensure_atom(
     struct AtomTable *table, const uint8_t *atom_data, size_t atom_len, enum AtomTableCopyOpt opts, atom_index_t *result)
 {
@@ -395,16 +436,10 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atom(
     }
 
     if (opts & AtomTableCopyAtom) {
-        if (atom_len > 0) {
-            uint8_t *buf = malloc(atom_len);
-            if (IS_NULL_PTR(buf)) {
-                SMP_UNLOCK(table);
-                return AtomTableEnsureAtomAllocFail;
-            }
-            memcpy(buf, atom_data, atom_len);
-            atom_data = buf;
-        } else {
-            atom_data = (const uint8_t *) "";
+        atom_data = copy_atom_string(table, atom_data, atom_len);
+        if (IS_NULL_PTR(atom_data)) {
+            SMP_UNLOCK(table);
+            return AtomTableEnsureAtomAllocFail;
         }
     }
 
