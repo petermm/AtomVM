@@ -53,6 +53,9 @@ idf_component_register(
     PRIV_REQUIRES "libatomvm" "esp_timer" ${ADDITIONAL_PRIV_REQUIRES}
 )
 
+include(GenDefaultAtoms)
+generate_defaultatoms(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/include/platform_defaultatoms.def" "${CMAKE_CURRENT_BINARY_DIR}/platform_defaultatoms_tables.h" platform)
+
 target_compile_features(${COMPONENT_LIB} INTERFACE c_std_11)
 target_compile_definitions(${COMPONENT_LIB} PUBLIC ATOMVM_HAS_MBEDTLS)
 

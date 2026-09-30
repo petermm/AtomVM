@@ -21,6 +21,8 @@
 cmake_minimum_required (VERSION 3.13)
 project (libAtomVM)
 
+include(GenDefaultAtoms)
+
 set(HEADER_FILES
     atom.h
     atom_table.h
@@ -31,6 +33,7 @@ set(HEADER_FILES
     debug.h
     defaultatoms.def
     defaultatoms.h
+    ${CMAKE_CURRENT_BINARY_DIR}/defaultatoms_tables.h
     dictionary.h
     dist_nifs.h
     erl_nif.h
@@ -133,6 +136,7 @@ if (AVM_WARNINGS_ARE_ERRORS)
 endif()
 
 add_library(libAtomVM ${SOURCE_FILES} ${HEADER_FILES})
+generate_defaultatoms(libAtomVM "${CMAKE_CURRENT_SOURCE_DIR}/defaultatoms.def" "${CMAKE_CURRENT_BINARY_DIR}/defaultatoms_tables.h" generic)
 target_include_directories(libAtomVM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(libAtomVM PUBLIC c_std_11)
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")

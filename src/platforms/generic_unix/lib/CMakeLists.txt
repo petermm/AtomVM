@@ -21,12 +21,15 @@
 cmake_minimum_required (VERSION 3.13)
 project (libAtomVMPlatformGenericUnix)
 
+include(GenDefaultAtoms)
+
 set(HEADER_FILES
     otp_socket_platform.h
     generic_unix_sys.h
     mapped_file.h
     platform_defaultatoms.def
     platform_defaultatoms.h
+    ${CMAKE_CURRENT_BINARY_DIR}/platform_defaultatoms_tables.h
     ../../../libAtomVM/otp_net.h
     ../../../libAtomVM/otp_socket.h
 )
@@ -59,6 +62,7 @@ set(
 )
 
 add_library(libAtomVM${PLATFORM_LIB_SUFFIX} ${SOURCE_FILES} ${HEADER_FILES})
+generate_defaultatoms(libAtomVM${PLATFORM_LIB_SUFFIX} "${CMAKE_CURRENT_SOURCE_DIR}/platform_defaultatoms.def" "${CMAKE_CURRENT_BINARY_DIR}/platform_defaultatoms_tables.h" platform)
 target_compile_features(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC c_std_11)
 if(CMAKE_COMPILER_IS_GNUCC)
     target_compile_options(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC -Wall -pedantic -Wextra -ggdb)
