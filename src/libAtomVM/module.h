@@ -93,12 +93,6 @@ typedef struct
 
 struct ExportedFunction;
 
-struct LiteralEntry
-{
-    uint32_t size;
-    void const *data;
-};
-
 struct ModuleFilename
 {
     uint8_t *data;
@@ -133,7 +127,7 @@ struct Module
 
     void *literals_data;
 
-    struct LiteralEntry *literals_table;
+    void *literals_table;
 
     void *types_data;
 
@@ -145,6 +139,7 @@ struct Module
 
     unsigned int free_literals_data : 1;
     unsigned int labels_is_u16 : 1;
+    unsigned int literals_is_u16 : 1;
 
 #ifndef AVM_NO_SMP
     Mutex *mutex;
