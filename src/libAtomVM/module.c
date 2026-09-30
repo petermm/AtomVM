@@ -1278,7 +1278,8 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
                 free(mod->line_refs_offsets);
                 mod->line_refs_offsets = NULL;
             } else {
-                unsigned int *compacted = realloc(mod->line_refs_offsets, mod->line_refs_offsets_count * sizeof(unsigned int));
+                size_t elem_size = mod->line_refs_offsets_is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
+                void *compacted = realloc(mod->line_refs_offsets, mod->line_refs_offsets_count * elem_size);
                 if (compacted != NULL) {
                     mod->line_refs_offsets = compacted;
                 }
@@ -1948,7 +1949,10 @@ static void module_parse_line_table(Module *mod, const uint8_t *data, size_t len
     }
 
     if (num_instr > 0) {
-        mod->line_refs_offsets = malloc(num_instr * sizeof(unsigned int));
+        uint32_t code_size = mod->code ? ENDIAN_SWAP_32(mod->code->size) : 0;
+        size_t elem_size = (code_size <= 0xFFFF) ? sizeof(uint16_t) : sizeof(uint32_t);
+        mod->line_refs_offsets_is_u16 = (code_size <= 0xFFFF) ? 1 : 0;
+        mod->line_refs_offsets = malloc(num_instr * elem_size);
         if (IS_NULL_PTR(mod->line_refs_offsets)) {
             fprintf(stderr, "Warning: Unable to allocate space for line refs offset, module has %" PRIu32 " instructions. Line information in stacktraces may be missing\n", num_instr);
         }
@@ -1962,7 +1966,11 @@ void module_insert_line_ref_offset(Module *mod, struct ListHead *line_refs, uint
     if (IS_NULL_PTR(mod->line_refs_table) || line_ref == 0 || IS_NULL_PTR(mod->line_refs_offsets)) {
         return;
     }
-    mod->line_refs_offsets[mod->line_refs_offsets_count++] = offset;
+    if (mod->line_refs_offsets_is_u16) {
+        ((uint16_t *) mod->line_refs_offsets)[mod->line_refs_offsets_count++] = (uint16_t) offset;
+    } else {
+        ((uint32_t *) mod->line_refs_offsets)[mod->line_refs_offsets_count++] = (uint32_t) offset;
+    }
 }
 
 static bool module_find_line_ref(Module *mod, uint16_t line_ref, uint32_t *line, size_t *filename_len, const uint8_t **filename)
@@ -1973,6 +1981,17 @@ static bool module_find_line_ref(Module *mod, uint16_t line_ref, uint32_t *line,
     }
     return module_get_location(mod, location_ix, filename_len, filename);
 }
+
+#ifndef AVM_NO_EMU
+static inline unsigned int get_line_ref_offset(const Module *mod, size_t i)
+{
+    if (mod->line_refs_offsets_is_u16) {
+        return ((const uint16_t *) mod->line_refs_offsets)[i];
+    } else {
+        return ((const uint32_t *) mod->line_refs_offsets)[i];
+    }
+}
+#endif
 
 bool module_find_line(Module *mod, size_t offset, uint32_t *line, size_t *filename_len, const uint8_t **filename)
 {
@@ -2054,7 +2073,7 @@ bool module_find_line(Module *mod, size_t offset, uint32_t *line, size_t *filena
             return false;
         }
         for (i = 0; i < mod->line_refs_offsets_count; i++) {
-            ref_offset = mod->line_refs_offsets[i];
+            ref_offset = get_line_ref_offset(mod, i);
             if (offset == ref_offset) {
                 ref_pc = &mod->code->code[ref_offset];
                 DECODE_LITERAL(line_ref, ref_pc);
@@ -2062,13 +2081,13 @@ bool module_find_line(Module *mod, size_t offset, uint32_t *line, size_t *filena
             } else if (i == 0 && offset < ref_offset) {
                 return false;
             } else if (offset < ref_offset) {
-                ref_offset = mod->line_refs_offsets[i - 1];
+                ref_offset = get_line_ref_offset(mod, i - 1);
                 ref_pc = &mod->code->code[ref_offset];
                 DECODE_LITERAL(line_ref, ref_pc);
                 return module_find_line_ref(mod, line_ref, line, filename_len, filename);
             }
         }
-        ref_offset = mod->line_refs_offsets[i - 1];
+        ref_offset = get_line_ref_offset(mod, i - 1);
         ref_pc = &mod->code->code[ref_offset];
         DECODE_LITERAL(line_ref, ref_pc);
         return module_find_line_ref(mod, line_ref, line, filename_len, filename);
