@@ -60,14 +60,23 @@ extern "C" {
 #define AVMN 10
 /** Type table section */
 #define TYPE 11
+/** Label table section */
+#define LABT 12
 
 /** Required size for offsets array */
-#define MAX_OFFS 12
+#define MAX_OFFS 13
 /** Required size for sizes array */
-#define MAX_SIZES 12
+#define MAX_SIZES 13
 
 /** sizeof IFF section header in bytes */
 #define IFF_SECTION_HEADER_SIZE 8
+
+struct LabTHeader
+{
+    uint32_t end_instruction_ii;
+    uint16_t flags;
+    uint16_t num_labels;
+};
 
 /**
  * @brief parse a BEAM/IFF file and build a sections offsets table
