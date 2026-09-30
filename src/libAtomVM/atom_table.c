@@ -42,9 +42,7 @@
 #define SMP_UNLOCK(htable) UNUSED(htable)
 #endif
 
-#if defined(CONFIG_AVM_DEFAULT_ATOMS_IN_RAM) || defined(AVM_DEFAULT_ATOMS_IN_RAM)
-#define DEFAULT_SIZE 512
-#else
+#ifndef DEFAULT_SIZE
 #define DEFAULT_SIZE 32
 #endif
 #define MAX_ATOM_LEN ((1 << 12) - 1)
