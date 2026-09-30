@@ -45,13 +45,27 @@ const uint8_t *platform_defaultatoms_get_atom_string(atom_index_t index, size_t 
     return NULL;
 }
 
+static const uint8_t platform_len_offsets[21] = {
+    0, 0, 0, 3, 8, 14, 19, 27, 31, 35, 38, 39, 40, 41, 41, 42, 43, 43, 43, 43, 44
+};
+
+static const uint8_t platform_atoms_by_len[44] = {
+    27, 38, 39, 5, 9, 10, 40, 41, 0, 4, 6, 13, 21, 23, 7, 8, 12, 32, 33, 2, 11, 16, 19, 20,
+    24, 26, 37, 3, 17, 25, 42, 15, 28, 29, 30, 31, 34, 35, 22, 14, 36, 1, 43, 18
+};
+
 bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
 {
-    for (size_t i = 0; i < ATOM_FIRST_AVAIL_INDEX - PLATFORM_ATOMS_BASE_INDEX; i++) {
-        const char *entry = platform_atoms[i];
-        if ((uint8_t) entry[0] == atom_len && memcmp(entry + 1, atom_data, atom_len) == 0) {
-            *out_index = (atom_index_t) (i + PLATFORM_ATOMS_BASE_INDEX);
-            return true;
+    if (atom_len >= 2 && atom_len <= 19) {
+        size_t start = platform_len_offsets[atom_len];
+        size_t end = platform_len_offsets[atom_len + 1];
+        for (size_t i = start; i < end; i++) {
+            uint8_t idx = platform_atoms_by_len[i];
+            const char *entry = platform_atoms[idx];
+            if (memcmp(entry + 1, atom_data, atom_len) == 0) {
+                *out_index = (atom_index_t) (idx + PLATFORM_ATOMS_BASE_INDEX);
+                return true;
+            }
         }
     }
     return false;

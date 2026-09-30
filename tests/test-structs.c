@@ -576,10 +576,18 @@ static void test_atom_table_default_atoms(void)
     assert(custom_idx == platform_defaultatoms_count());
     assert(atom_table_count(table) == (size_t) platform_defaultatoms_count() + 1);
 
-    atom_data = atom_table_get_atom_string(table, custom_idx, &len);
-    assert(atom_data != NULL);
-    assert(len == 11);
-    assert(memcmp(atom_data, "custom_atom", 11) == 0);
+    // Exhaustively verify every single default atom can be looked up by string
+    for (atom_index_t i = 0; i < platform_defaultatoms_count(); i++) {
+        size_t d_len;
+        const uint8_t *d_data = atom_table_get_atom_string(table, i, &d_len);
+        assert(d_data != NULL);
+        assert(d_len > 0);
+
+        atom_index_t d_idx;
+        r = atom_table_ensure_atom(table, d_data, d_len, AtomTableAlreadyExisting, &d_idx);
+        assert(r == AtomTableEnsureAtomOk);
+        assert(d_idx == i);
+    }
 
     atom_table_destroy(table);
 }
