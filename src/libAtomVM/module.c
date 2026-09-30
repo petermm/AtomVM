@@ -1107,9 +1107,18 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
         functions_count = READ_32_UNALIGNED(beam_file + offsets[IMPT] + 8);
     }
 
+    uint32_t num_labels = 0;
+#ifndef AVM_NO_EMU
+    if (offsets[CODE]) {
+        const CodeChunk *code_chunk = (const CodeChunk *) (beam_file + offsets[CODE]);
+        num_labels = ENDIAN_SWAP_32(code_chunk->labels);
+    }
+#endif
+
     size_t atoms_table_size = size_align_up_pow2((atoms_count + 1) * sizeof(atom_index_t), sizeof(void *));
     size_t imported_funcs_size = functions_count * sizeof(struct ExportedFunction *);
-    size_t total_size = sizeof(Module) + atoms_table_size + imported_funcs_size;
+    size_t labels_size = num_labels * sizeof(void *);
+    size_t total_size = sizeof(Module) + atoms_table_size + imported_funcs_size + labels_size;
 
     Module *mod = malloc(total_size);
     if (IS_NULL_PTR(mod)) {
@@ -1123,6 +1132,10 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     extra += atoms_table_size;
     if (functions_count > 0) {
         mod->imported_funcs = (const struct ExportedFunction **) extra;
+        extra += imported_funcs_size;
+    }
+    if (num_labels > 0) {
+        mod->labels = (const uint8_t **) extra;
     }
 
     mod->module_index = -1;
@@ -1208,18 +1221,8 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
 #endif
 
 #if !defined(AVM_NO_JIT) && !defined(AVM_NO_EMU)
-    if (mod->native_code == NULL) {
-#endif
-#ifndef AVM_NO_EMU
-        uint32_t num_labels = ENDIAN_SWAP_32(mod->code->labels);
-        mod->labels = calloc(num_labels, sizeof(void *));
-        if (IS_NULL_PTR(mod->labels)) {
-            fprintf(stderr, "Error: Null module labels: %s:%i.\n", __FILE__, __LINE__);
-            module_destroy(mod);
-            return NULL;
-        }
-#endif
-#if !defined(AVM_NO_JIT) && !defined(AVM_NO_EMU)
+    if (mod->native_code != NULL) {
+        mod->labels = NULL;
     }
 #endif
 
@@ -1296,7 +1299,6 @@ COLD_FUNC void module_destroy(Module *module)
     jit_debug_unregister_code(NULL, module);
 #endif
 
-    free(module->labels);
     free(module->literals_table);
     free(module->line_refs_offsets);
     if (module->free_literals_data) {
