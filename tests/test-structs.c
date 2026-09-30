@@ -592,6 +592,57 @@ static void test_atom_table_default_atoms(void)
     atom_table_destroy(table);
 }
 
+static void test_atom_table_default_atoms_ram(void)
+{
+    struct AtomTable *table = atom_table_new();
+
+    // Insert all default atoms sequentially with base_index = 0
+    for (atom_index_t i = 0; i < platform_defaultatoms_count(); i++) {
+        size_t len;
+        const uint8_t *data = defaultatoms_get_atom_string(i, &len);
+        assert(data != NULL);
+        atom_index_t idx;
+        enum AtomTableEnsureAtomResult r = atom_table_ensure_atom(table, data, len, AtomTableCopyAtom, &idx);
+        assert(r == AtomTableEnsureAtomOk);
+        assert(idx == i);
+    }
+
+    assert(atom_table_count(table) == (size_t) platform_defaultatoms_count());
+
+    // Verify retrieving default atoms from RAM table
+    size_t len;
+    const uint8_t *atom_data = atom_table_get_atom_string(table, 0, &len);
+    assert(atom_data != NULL);
+    assert(len == 5);
+    assert(memcmp(atom_data, "false", 5) == 0);
+
+    atom_data = atom_table_get_atom_string(table, 1, &len);
+    assert(atom_data != NULL);
+    assert(len == 4);
+    assert(memcmp(atom_data, "true", 4) == 0);
+
+    // Verify lookup by string
+    for (atom_index_t i = 0; i < platform_defaultatoms_count(); i++) {
+        size_t d_len;
+        const uint8_t *d_data = defaultatoms_get_atom_string(i, &d_len);
+        assert(d_data != NULL);
+
+        atom_index_t d_idx;
+        enum AtomTableEnsureAtomResult r = atom_table_ensure_atom(table, d_data, d_len, AtomTableAlreadyExisting, &d_idx);
+        assert(r == AtomTableEnsureAtomOk);
+        assert(d_idx == i);
+    }
+
+    // Dynamic atom gets next available index
+    atom_index_t custom_idx;
+    enum AtomTableEnsureAtomResult r = atom_table_ensure_atom(table, (const uint8_t *) "custom_atom", 11, AtomTableNoOpts, &custom_idx);
+    assert(r == AtomTableEnsureAtomOk);
+    assert(custom_idx == platform_defaultatoms_count());
+    assert(atom_table_count(table) == (size_t) platform_defaultatoms_count() + 1);
+
+    atom_table_destroy(table);
+}
+
 int main(int argc, char **argv)
 {
     UNUSED(argc);
@@ -601,6 +652,7 @@ int main(int argc, char **argv)
     test_atom_table();
     test_atom_table_bulk_grow();
     test_atom_table_default_atoms();
+    test_atom_table_default_atoms_ram();
 
     return EXIT_SUCCESS;
 }

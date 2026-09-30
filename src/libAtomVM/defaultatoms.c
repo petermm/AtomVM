@@ -20,7 +20,9 @@
 
 #include "defaultatoms.h"
 #include "atom_table.h"
+#include "globalcontext.h"
 #include "term.h"
+#include "utils.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -76,6 +78,17 @@ bool defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t
 
 void defaultatoms_init(GlobalContext *glb)
 {
+#if defined(CONFIG_AVM_DEFAULT_ATOMS_IN_RAM) || defined(AVM_DEFAULT_ATOMS_IN_RAM)
+    for (size_t i = 0; i < PLATFORM_ATOMS_BASE_INDEX; i++) {
+        const char *entry = generic_atoms[i];
+        size_t len = (size_t) (uint8_t) entry[0];
+        term atom_term = globalcontext_insert_atom_maybe_copy(glb, (const uint8_t *) (entry + 1), len, true);
+        if (UNLIKELY(term_to_atom_index(atom_term) != i)) {
+            AVM_ABORT();
+        }
+    }
+#else
     atom_table_set_default_atoms(glb->atom_table, platform_defaultatoms_count());
+#endif
     platform_defaultatoms_init(glb);
 }

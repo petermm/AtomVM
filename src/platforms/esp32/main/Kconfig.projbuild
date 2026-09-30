@@ -45,7 +45,15 @@ menu "AtomVM configuration"
          default n
          help
              Enable Just in time compilation, or just execution of precompiled native code
-             
+
+    config AVM_DEFAULT_ATOMS_IN_RAM
+        bool "Copy default atoms table and strings to RAM at boot"
+        default n
+        help
+            Copy default atoms and strings to RAM at startup instead of reading
+            them from Flash. Increases heap usage by ~4-5 KB but improves runtime
+            performance by avoiding Flash reads on atom lookups.
+
     config AVM_CREATE_STACKTRACES
         bool  "Create BEAM stack traces."
         default y

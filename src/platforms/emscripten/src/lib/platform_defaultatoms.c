@@ -19,6 +19,8 @@
  */
 
 #include "platform_defaultatoms.h"
+#include "globalcontext.h"
+#include "utils.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -64,5 +66,16 @@ atom_index_t platform_defaultatoms_count(void)
 
 void platform_defaultatoms_init(GlobalContext *glb)
 {
+#if defined(CONFIG_AVM_DEFAULT_ATOMS_IN_RAM) || defined(AVM_DEFAULT_ATOMS_IN_RAM)
+    for (size_t i = 0; i < ATOM_FIRST_AVAIL_INDEX - PLATFORM_ATOMS_BASE_INDEX; i++) {
+        const char *entry = platform_atoms[i];
+        size_t len = (size_t) (uint8_t) entry[0];
+        term atom_term = globalcontext_insert_atom_maybe_copy(glb, (const uint8_t *) (entry + 1), len, true);
+        if (UNLIKELY(term_to_atom_index(atom_term) != i + PLATFORM_ATOMS_BASE_INDEX)) {
+            AVM_ABORT();
+        }
+    }
+#else
     UNUSED(glb);
+#endif
 }
