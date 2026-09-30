@@ -50,21 +50,27 @@ static const uint8_t platform_len_offsets[21] = {
 };
 
 static const uint8_t platform_atoms_by_len[44] = {
-    27, 38, 39, 5, 9, 10, 40, 41, 0, 4, 6, 13, 21, 23, 7, 8, 12, 32, 33, 2, 11, 16, 19, 20,
-    24, 26, 37, 3, 17, 25, 42, 15, 28, 29, 30, 31, 34, 35, 22, 14, 36, 1, 43, 18
+    27, 38, 39, 41, 5, 40, 10, 9, 13, 4, 6, 0, 23, 21, 7, 12, 8, 32, 33, 26, 19, 20,
+    24, 37, 2, 16, 11, 17, 25, 42, 3, 28, 30, 15, 29, 34, 31, 35, 22, 14, 36, 1, 43, 18
 };
 
 bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
 {
     if (atom_len >= 2 && atom_len <= 19) {
-        size_t start = platform_len_offsets[atom_len];
-        size_t end = platform_len_offsets[atom_len + 1];
-        for (size_t i = start; i < end; i++) {
-            uint8_t idx = platform_atoms_by_len[i];
+        size_t low = platform_len_offsets[atom_len];
+        size_t high = platform_len_offsets[atom_len + 1];
+        while (low < high) {
+            size_t mid = low + (high - low) / 2;
+            uint8_t idx = platform_atoms_by_len[mid];
             const char *entry = platform_atoms[idx];
-            if (memcmp(entry + 1, atom_data, atom_len) == 0) {
+            int cmp = memcmp(atom_data, entry + 1, atom_len);
+            if (cmp == 0) {
                 *out_index = (atom_index_t) (idx + PLATFORM_ATOMS_BASE_INDEX);
                 return true;
+            } else if (cmp < 0) {
+                high = mid;
+            } else {
+                low = mid + 1;
             }
         }
     }

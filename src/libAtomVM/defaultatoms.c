@@ -93,14 +93,20 @@ static const uint8_t generic_atoms_by_len[191] = {
 bool defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
 {
     if (atom_len >= 2 && atom_len <= 19) {
-        size_t start = generic_len_offsets[atom_len];
-        size_t end = generic_len_offsets[atom_len + 1];
-        for (size_t i = start; i < end; i++) {
-            uint8_t idx = generic_atoms_by_len[i];
+        size_t low = generic_len_offsets[atom_len];
+        size_t high = generic_len_offsets[atom_len + 1];
+        while (low < high) {
+            size_t mid = low + (high - low) / 2;
+            uint8_t idx = generic_atoms_by_len[mid];
             const char *entry = generic_atoms[idx];
-            if (memcmp(entry + 1, atom_data, atom_len) == 0) {
+            int cmp = memcmp(atom_data, entry + 1, atom_len);
+            if (cmp == 0) {
                 *out_index = (atom_index_t) idx;
                 return true;
+            } else if (cmp < 0) {
+                high = mid;
+            } else {
+                low = mid + 1;
             }
         }
     }
