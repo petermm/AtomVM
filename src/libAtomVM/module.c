@@ -1082,7 +1082,12 @@ term module_get_exported_functions(Module *this_module, Heap *heap)
 #ifndef AVM_NO_EMU
 static void module_add_label(Module *mod, int index, const uint8_t *ptr)
 {
-    mod->labels[index] = ptr;
+    size_t offset = ptr - (const uint8_t *) mod->code->code;
+    if (mod->labels_is_u16) {
+        ((uint16_t *) mod->labels)[index] = (uint16_t) offset;
+    } else {
+        ((uint32_t *) mod->labels)[index] = (uint32_t) offset;
+    }
 }
 #endif
 
@@ -1108,16 +1113,20 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     }
 
     uint32_t num_labels = 0;
+    uint32_t code_size = 0;
 #ifndef AVM_NO_EMU
     if (offsets[CODE]) {
         const CodeChunk *code_chunk = (const CodeChunk *) (beam_file + offsets[CODE]);
         num_labels = ENDIAN_SWAP_32(code_chunk->labels);
+        code_size = ENDIAN_SWAP_32(code_chunk->size);
     }
 #endif
 
+    bool labels_is_u16 = (code_size <= 0xFFFF);
+    size_t label_elem_size = labels_is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
     size_t atoms_table_size = size_align_up_pow2((atoms_count + 1) * sizeof(atom_index_t), sizeof(void *));
     size_t imported_funcs_size = functions_count * sizeof(struct ExportedFunction *);
-    size_t labels_size = num_labels * sizeof(void *);
+    size_t labels_size = size_align_up_pow2(num_labels * label_elem_size, sizeof(void *));
     size_t total_size = sizeof(Module) + atoms_table_size + imported_funcs_size + labels_size;
 
     Module *mod = malloc(total_size);
@@ -1134,8 +1143,9 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
         mod->imported_funcs = (const struct ExportedFunction **) extra;
         extra += imported_funcs_size;
     }
+    mod->labels_is_u16 = labels_is_u16 ? 1 : 0;
     if (num_labels > 0) {
-        mod->labels = (const uint8_t **) extra;
+        mod->labels = (void *) extra;
     }
 
     mod->module_index = -1;
@@ -2172,12 +2182,11 @@ COLD_FUNC void module_cp_to_label_offset(term cp, Module **cp_mod, int *label, s
     } else {
 #endif
 #ifndef AVM_NO_EMU
-        uint8_t *code = &mod->code->code[0];
         int labels_count = ENDIAN_SWAP_32(mod->code->labels);
 
         int i = 1;
-        const uint8_t *l = mod->labels[1];
-        while (mod_offset > (size_t) (l - code)) {
+        uint32_t l_off_val = module_label_code_offset(mod, 1);
+        while (mod_offset > (size_t) l_off_val) {
             i++;
             if (i >= labels_count) {
                 // last label + 1 is reserved for end of module.
@@ -2189,14 +2198,14 @@ COLD_FUNC void module_cp_to_label_offset(term cp, Module **cp_mod, int *label, s
                 }
                 return;
             }
-            l = mod->labels[i];
+            l_off_val = module_label_code_offset(mod, i);
         }
 
         if (label) {
             *label = i - 1;
         }
         if (l_off) {
-            *l_off = mod_offset - (mod->labels[i - 1] - code);
+            *l_off = mod_offset - module_label_code_offset(mod, i - 1);
         }
 #endif
 #ifndef AVM_NO_JIT
@@ -2234,8 +2243,17 @@ uint32_t module_label_code_offset(Module *mod, int label)
 #endif
     } else {
 #endif
-        uint8_t *code = &mod->code->code[0];
-        return mod->labels[label] - code;
+#ifndef AVM_NO_EMU
+        if (mod->labels_is_u16) {
+            return ((const uint16_t *) mod->labels)[label];
+        } else {
+            return ((const uint32_t *) mod->labels)[label];
+        }
+#else
+    UNUSED(mod);
+    UNUSED(label);
+    return 0;
+#endif
 #ifndef AVM_NO_JIT
     }
 #endif

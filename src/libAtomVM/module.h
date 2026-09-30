@@ -132,7 +132,7 @@ struct Module
 
     const struct ExportedFunction **imported_funcs;
 
-    const uint8_t **labels;
+    void *labels;
 
     void *literals_data;
 
@@ -148,6 +148,7 @@ struct Module
 
     unsigned int free_literals_data : 1;
     unsigned int line_refs_offsets_is_u16 : 1;
+    unsigned int labels_is_u16 : 1;
 
 #ifndef AVM_NO_SMP
     Mutex *mutex;
@@ -158,6 +159,15 @@ struct Module
 #define TYPEDEF_MODULE
 typedef struct Module Module;
 #endif
+
+static inline const uint8_t *module_get_label_address(const Module *mod, int label)
+{
+    if (mod->labels_is_u16) {
+        return (const uint8_t *) mod->code->code + ((const uint16_t *) mod->labels)[label];
+    } else {
+        return (const uint8_t *) mod->code->code + ((const uint32_t *) mod->labels)[label];
+    }
+}
 
 enum ModuleLoadResult
 {
