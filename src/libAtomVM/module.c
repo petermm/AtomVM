@@ -105,12 +105,6 @@ static void module_add_label(Module *mod, int index, const uint8_t *ptr);
 static enum ModuleLoadResult module_build_imported_functions_table(Module *this_module, uint8_t *table_data, GlobalContext *glb);
 static void module_parse_line_table(Module *mod, const uint8_t *data, size_t len);
 
-struct LineRefOffset
-{
-    struct ListHead head;
-    unsigned int offset;
-};
-
 #ifdef ENABLE_TRACE
 typedef struct
 {
@@ -1274,42 +1268,18 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     if (mod->native_code == NULL) {
 #endif
 #ifndef AVM_NO_EMU
-        struct ListHead line_refs;
-        list_init(&line_refs);
-        mod->end_instruction_ii = parse_core_chunk(mod, &line_refs);
+        mod->end_instruction_ii = parse_core_chunk(mod, NULL);
 
-        // Create the list of offsets if the module has line informations.
-        if (mod->line_refs_table != NULL) {
-            // Compute the size of the list
-            size_t num_offsets = 0;
-            struct ListHead *item = line_refs.next;
-            while (item != &line_refs) {
-                num_offsets++;
-                item = item->next;
-            }
-            if (num_offsets > 0) {
-                mod->line_refs_offsets = malloc(num_offsets * sizeof(unsigned int));
-                if (IS_NULL_PTR(mod->line_refs_offsets)) {
-                    fprintf(stderr, "Warning: Unable to allocate space for line refs offset, module has %zu offsets.  Line information in stacktraces may be missing\n", num_offsets);
-                } else {
-                    size_t index = 0;
-                    item = line_refs.next;
-                    while (item != &line_refs) {
-                        struct LineRefOffset *offset = CONTAINER_OF(item, struct LineRefOffset, head);
-                        mod->line_refs_offsets[index] = offset->offset;
-                        index++;
-                        item = item->next;
-                    }
-                    mod->line_refs_offsets_count = num_offsets;
+        if (mod->line_refs_offsets != NULL) {
+            if (mod->line_refs_offsets_count == 0) {
+                free(mod->line_refs_offsets);
+                mod->line_refs_offsets = NULL;
+            } else {
+                unsigned int *compacted = realloc(mod->line_refs_offsets, mod->line_refs_offsets_count * sizeof(unsigned int));
+                if (compacted != NULL) {
+                    mod->line_refs_offsets = compacted;
                 }
             }
-        }
-        // Empty the list
-        while (!list_is_empty(&line_refs)) {
-            struct ListHead *item = line_refs.next;
-            list_remove(item);
-            struct LineRefOffset *previous_ref_offset = GET_LIST_ENTRY(item, struct LineRefOffset, head);
-            free(previous_ref_offset);
         }
 #endif
 #ifndef AVM_NO_JIT
@@ -1944,8 +1914,7 @@ static void module_parse_line_table(Module *mod, const uint8_t *data, size_t len
     pos += 4;
 
     CHECK_FREE_SPACE(4, "Error reading Line chunk: num_instr\n");
-    uint32_t _num_instr = READ_32_UNALIGNED(pos);
-    UNUSED(_num_instr);
+    uint32_t num_instr = READ_32_UNALIGNED(pos);
     pos += 4;
 
     CHECK_FREE_SPACE(4, "Error reading Line chunk: num_refs\n");
@@ -1973,32 +1942,25 @@ static void module_parse_line_table(Module *mod, const uint8_t *data, size_t len
         mod->line_refs_table = NULL;
         mod->locations_count = 0;
         mod->locations_table = NULL;
+        return;
+    }
+
+    if (num_instr > 0) {
+        mod->line_refs_offsets = malloc(num_instr * sizeof(unsigned int));
+        if (IS_NULL_PTR(mod->line_refs_offsets)) {
+            fprintf(stderr, "Warning: Unable to allocate space for line refs offset, module has %" PRIu32 " instructions. Line information in stacktraces may be missing\n", num_instr);
+        }
+        mod->line_refs_offsets_count = 0;
     }
 }
 
 void module_insert_line_ref_offset(Module *mod, struct ListHead *line_refs, uint32_t line_ref, int offset)
 {
-    if (IS_NULL_PTR(mod->line_refs_table) || line_ref == 0) {
+    UNUSED(line_refs);
+    if (IS_NULL_PTR(mod->line_refs_table) || line_ref == 0 || IS_NULL_PTR(mod->line_refs_offsets)) {
         return;
     }
-    struct LineRefOffset *ref_offset = malloc(sizeof(struct LineRefOffset));
-    if (IS_NULL_PTR(ref_offset)) {
-        size_t num_refs = 0;
-        // Empty the list
-        while (!list_is_empty(line_refs)) {
-            struct ListHead *item = line_refs->next;
-            list_remove(item);
-            struct LineRefOffset *previous_ref_offset = GET_LIST_ENTRY(item, struct LineRefOffset, head);
-            free(previous_ref_offset);
-            num_refs++;
-        }
-        fprintf(stderr, "Warning: Unable to allocate space for an additional line ref offset (we had %zu).  Line information in stacktraces may be missing\n", num_refs);
-        // Give up having line numbers for this module.
-        mod->line_refs_table = NULL;
-        return;
-    }
-    ref_offset->offset = offset;
-    list_append(line_refs, &ref_offset->head);
+    mod->line_refs_offsets[mod->line_refs_offsets_count++] = offset;
 }
 
 static bool module_find_line_ref(Module *mod, uint16_t line_ref, uint32_t *line, size_t *filename_len, const uint8_t **filename)
