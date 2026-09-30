@@ -82,12 +82,12 @@ static bool write_entire_file(const char *filename, const void *data, size_t siz
     return true;
 }
 
-static uint8_t *process_beam_binary(const uint8_t *beam_data, size_t beam_size, size_t *out_beam_size)
+static uint8_t *process_beam_binary(const uint8_t *beam_data, size_t beam_size, size_t *out_beam_size, bool strip_lines)
 {
     size_t labt_chunk_size = 0;
     void *labt_chunk = module_create_labt_chunk(beam_data, beam_size, &labt_chunk_size);
-    if (!labt_chunk) {
-        // No LabT chunk generated (already has LabT or no Code chunk)
+    if (!labt_chunk && !strip_lines) {
+        // No LabT chunk generated (already has LabT or no Code chunk) and no line stripping
         *out_beam_size = beam_size;
         uint8_t *copy = malloc(beam_size);
         if (copy) {
@@ -96,30 +96,57 @@ static uint8_t *process_beam_binary(const uint8_t *beam_data, size_t beam_size, 
         return copy;
     }
 
-    size_t aligned_chunk_size = align4(labt_chunk_size);
-    size_t new_size = beam_size + aligned_chunk_size;
-    uint8_t *new_beam = malloc(new_size);
+    size_t aligned_labt = labt_chunk ? align4(labt_chunk_size) : 0;
+    size_t max_size = beam_size + aligned_labt;
+    uint8_t *new_beam = malloc(max_size);
     if (!new_beam) {
         free(labt_chunk);
         return NULL;
     }
 
-    memcpy(new_beam, beam_data, beam_size);
-    memcpy(new_beam + beam_size, labt_chunk, labt_chunk_size);
-    if (aligned_chunk_size > labt_chunk_size) {
-        memset(new_beam + beam_size + labt_chunk_size, 0, aligned_chunk_size - labt_chunk_size);
+    // Write IFF header
+    memcpy(new_beam, beam_data, 12);
+    size_t out_offset = 12;
+
+    // Walk existing chunks, skipping Line chunk if strip_lines is enabled
+    size_t in_offset = 12;
+    while (in_offset + 8 <= beam_size) {
+        const uint8_t *chunk_hdr = beam_data + in_offset;
+        uint32_t chunk_data_size = READ_32_UNALIGNED(chunk_hdr + 4);
+        uint32_t chunk_aligned_data_size = align4(chunk_data_size);
+        size_t chunk_wire_size = 8 + chunk_aligned_data_size;
+        if (in_offset + chunk_wire_size > beam_size) {
+            break;
+        }
+
+        if (strip_lines && memcmp(chunk_hdr, "Line", 4) == 0) {
+            in_offset += chunk_wire_size;
+            continue;
+        }
+
+        memcpy(new_beam + out_offset, chunk_hdr, chunk_wire_size);
+        out_offset += chunk_wire_size;
+        in_offset += chunk_wire_size;
     }
-    free(labt_chunk);
+
+    // Append LabT chunk if generated
+    if (labt_chunk) {
+        memcpy(new_beam + out_offset, labt_chunk, labt_chunk_size);
+        if (aligned_labt > labt_chunk_size) {
+            memset(new_beam + out_offset + labt_chunk_size, 0, aligned_labt - labt_chunk_size);
+        }
+        out_offset += aligned_labt;
+        free(labt_chunk);
+    }
 
     // Update IFF size at offset 4
-    uint32_t current_iff_size = READ_32_UNALIGNED(new_beam + 4);
-    WRITE_32_UNALIGNED(new_beam + 4, current_iff_size + (uint32_t) aligned_chunk_size);
+    WRITE_32_UNALIGNED(new_beam + 4, (uint32_t) (out_offset - 8));
 
-    *out_beam_size = new_size;
+    *out_beam_size = out_offset;
     return new_beam;
 }
 
-static bool process_avm_archive(const uint8_t *avm_data, size_t avm_size, const char *output_file)
+static bool process_avm_archive(const uint8_t *avm_data, size_t avm_size, const char *output_file, bool strip_lines)
 {
     // Allocate generous output buffer
     size_t out_capacity = avm_size + 1024 * 1024;
@@ -160,7 +187,7 @@ static bool process_avm_archive(const uint8_t *avm_data, size_t avm_size, const 
 
         if ((flags & 2) != 0 && iff_is_valid_beam(file_data)) {
             size_t new_beam_size = 0;
-            uint8_t *new_beam = process_beam_binary(file_data, data_len, &new_beam_size);
+            uint8_t *new_beam = process_beam_binary(file_data, data_len, &new_beam_size, strip_lines);
             if (new_beam) {
                 if (new_beam_size != (size_t) data_len) {
                     modules_optimized++;
@@ -209,22 +236,61 @@ static bool process_avm_archive(const uint8_t *avm_data, size_t avm_size, const 
         in_offset += section_total_size;
     }
 
-    printf("Injected LabT chunks into %d module(s)\n", modules_optimized);
+    printf("Optimized %d module(s) (LabT%s)\n", modules_optimized, strip_lines ? ", stripped Line" : "");
 
     bool ok = write_entire_file(output_file, out_buf, out_offset);
     free(out_buf);
     return ok;
 }
 
+static bool is_boot_avm(const char *path)
+{
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    return (strstr(base, "boot") != NULL);
+}
+
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <input.avm|input.beam> [output_file]\n", argv[0]);
+    bool strip_lines = false;
+    bool explicit_strip_lines = false;
+    bool force_keep_lines = false;
+    int arg_idx = 1;
+    while (arg_idx < argc && argv[arg_idx][0] == '-') {
+        if (!strcmp(argv[arg_idx], "--strip-lines") ||
+            !strcmp(argv[arg_idx], "--strip_lines") ||
+            !strcmp(argv[arg_idx], "--remove_lines") ||
+            !strcmp(argv[arg_idx], "--remove-lines") ||
+            !strcmp(argv[arg_idx], "-r")) {
+            strip_lines = true;
+            explicit_strip_lines = true;
+            arg_idx++;
+        } else if (!strcmp(argv[arg_idx], "--keep-lines") ||
+                   !strcmp(argv[arg_idx], "--keep_lines") ||
+                   !strcmp(argv[arg_idx], "--no-strip-lines")) {
+            force_keep_lines = true;
+            arg_idx++;
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[arg_idx]);
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (arg_idx >= argc) {
+        fprintf(stderr, "Usage: %s [--strip-lines|-r|--keep-lines] <input.avm|input.beam> [output_file]\n", argv[0]);
         return EXIT_FAILURE;
     }
 
-    const char *input_file = argv[1];
-    const char *output_file = (argc >= 3) ? argv[2] : argv[1];
+    const char *input_file = argv[arg_idx];
+    const char *output_file = (arg_idx + 1 < argc) ? argv[arg_idx + 1] : argv[arg_idx];
+
+    // Default to stripping Line chunks for boot AVMs (e.g. esp32boot.avm, elixir_esp32boot.avm)
+    // to guarantee they fit within fixed flash boot partition limits (e.g. 0x80000 / 512KB).
+    if (!explicit_strip_lines && !force_keep_lines) {
+        if (is_boot_avm(input_file) || is_boot_avm(output_file)) {
+            strip_lines = true;
+        }
+    }
 
     size_t file_size = 0;
     uint8_t *data = read_entire_file(input_file, &file_size);
@@ -233,13 +299,13 @@ int main(int argc, char **argv)
     }
 
     if (avmpack_is_valid(data, file_size)) {
-        if (!process_avm_archive(data, file_size, output_file)) {
+        if (!process_avm_archive(data, file_size, output_file, strip_lines)) {
             free(data);
             return EXIT_FAILURE;
         }
     } else if (iff_is_valid_beam(data)) {
         size_t new_beam_size = 0;
-        uint8_t *new_beam = process_beam_binary(data, file_size, &new_beam_size);
+        uint8_t *new_beam = process_beam_binary(data, file_size, &new_beam_size, strip_lines);
         if (!new_beam) {
             free(data);
             return EXIT_FAILURE;
@@ -250,7 +316,7 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
         free(new_beam);
-        printf("Injected LabT chunk into %s\n", output_file);
+        printf("Optimized %s (LabT%s)\n", output_file, strip_lines ? ", stripped Line" : "");
     } else {
         fprintf(stderr, "Error: %s is neither a valid PackBEAM (.avm) nor BEAM file\n", input_file);
         free(data);
