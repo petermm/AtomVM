@@ -158,10 +158,15 @@ static inline atom_index_t get_dynamic_index_from_bucket(
     return ATOM_TABLE_NOT_FOUND_MARKER;
 }
 
+static inline unsigned long bucket_index_from_hash(const struct AtomTable *table, unsigned long hash)
+{
+    return hash & (table->capacity - 1);
+}
+
 static inline atom_index_t get_dynamic_index_with_hash(
     const struct AtomTable *table, const uint8_t *string, size_t string_len, unsigned long hash)
 {
-    unsigned long bucket_index = hash % table->capacity;
+    unsigned long bucket_index = bucket_index_from_hash(table, hash);
     return get_dynamic_index_from_bucket(table, bucket_index, string, string_len);
 }
 
@@ -313,7 +318,7 @@ static bool do_rehash(struct AtomTable *table, size_t new_capacity)
     size_t dyn_count = table->count - table->base_index;
     for (size_t i = 0; i < dyn_count; i++) {
         unsigned long hash = sdbm_hash(table->entries[i].data, table->entries[i].len);
-        unsigned long bucket_index = hash % table->capacity;
+        unsigned long bucket_index = bucket_index_from_hash(table, hash);
 
         table->entries[i].next = table->buckets[bucket_index];
         table->buckets[bucket_index] = (atom_index_t) i;
@@ -366,7 +371,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atom(
 
     unsigned long hash = sdbm_hash(atom_data, atom_len);
     SMP_WRLOCK(table);
-    unsigned long bucket_index = hash % table->capacity;
+    unsigned long bucket_index = bucket_index_from_hash(table, hash);
 
     atom_index_t found_idx = get_dynamic_index_from_bucket(table, bucket_index, atom_data, atom_len);
     if (found_idx != ATOM_TABLE_NOT_FOUND_MARKER) {
@@ -404,7 +409,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atom(
     }
 
     if (maybe_rehash(table, 1)) {
-        bucket_index = hash % table->capacity;
+        bucket_index = bucket_index_from_hash(table, hash);
     }
 
     *result = insert_entry(table, bucket_index, atom_data, atom_len);
@@ -497,7 +502,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atoms(struct AtomTable *table, 
 
             if (translate_table[i] == ATOM_TABLE_NOT_FOUND_MARKER) {
                 unsigned long hash = sdbm_hash(current_atom, atom_len);
-                unsigned long bucket_index = hash % table->capacity;
+                unsigned long bucket_index = bucket_index_from_hash(table, hash);
 
                 atom_index_t found_idx = get_dynamic_index_from_bucket(table, bucket_index, current_atom, atom_len);
                 if (found_idx != ATOM_TABLE_NOT_FOUND_MARKER) {
