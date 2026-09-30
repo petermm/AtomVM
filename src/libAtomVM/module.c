@@ -1398,6 +1398,12 @@ void *module_create_labt_chunk(const void *beam_file, unsigned long size, size_t
         return NULL;
     }
 
+    if (IS_NULL_PTR(mod->labels)) {
+        module_destroy(mod);
+        globalcontext_destroy(global);
+        return NULL;
+    }
+
     size_t payload_size = sizeof(struct LabTHeader) + num_labels * label_elem_size;
     size_t total_chunk_size = IFF_SECTION_HEADER_SIZE + payload_size;
     uint8_t *chunk = malloc(total_chunk_size);
