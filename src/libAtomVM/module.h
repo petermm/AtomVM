@@ -127,7 +127,7 @@ struct Module
     ModuleNativeEntryPoint native_code;
 #endif
 
-    unsigned int *line_refs_offsets;
+    void *line_refs_offsets;
     size_t line_refs_offsets_count;
 
     const struct ExportedFunction **imported_funcs;
@@ -147,6 +147,7 @@ struct Module
     unsigned int end_instruction_ii;
 
     unsigned int free_literals_data : 1;
+    unsigned int line_refs_offsets_is_u16 : 1;
 
 #ifndef AVM_NO_SMP
     Mutex *mutex;
