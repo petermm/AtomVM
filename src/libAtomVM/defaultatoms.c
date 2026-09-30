@@ -47,52 +47,13 @@ const uint8_t *defaultatoms_get_atom_string(atom_index_t index, size_t *out_len)
     return platform_defaultatoms_get_atom_string(index, out_len);
 }
 
-static const uint8_t generic_len_offsets[21] = {
-    0, 0, 0, 1, 9, 34, 59, 84, 101, 115, 127, 145, 162, 166, 174, 178, 184, 186, 188, 190, 191
-};
+#include "defaultatoms_tables.h"
 
-static const uint8_t generic_atoms_by_len[191] = {
-    // Len 2 (1 atom)
-    2,
-    // Len 3 (8 atoms)
-    90, 15, 148, 125, 149, 146, 173, 166,
-    // Len 4 (25 atoms)
-    51, 57, 174, 84, 16, 133, 97, 143, 106, 48, 152, 172, 121, 60, 96, 28, 44, 175, 88, 176, 118, 1, 120, 43, 80,
-    // Len 5 (25 atoms)
-    114, 115, 131, 161, 189, 122, 94, 3, 0, 83, 22, 108, 171, 124, 165, 85, 141, 41, 45, 182, 13, 46, 81, 82, 147,
-    // Len 6 (25 atoms)
-    73, 4, 6, 59, 58, 75, 95, 170, 132, 180, 117, 107, 24, 77, 26, 98, 78, 55, 50, 65, 99, 91, 30, 29, 79,
-    // Len 7 (17 atoms)
-    130, 40, 103, 137, 104, 76, 92, 112, 49, 53, 142, 183, 52, 136, 179, 134, 116,
-    // Len 8 (14 atoms)
-    5, 19, 10, 38, 123, 89, 69, 62, 21, 167, 127, 119, 47, 37,
-    // Len 9 (12 atoms)
-    17, 162, 135, 113, 23, 12, 155, 63, 188, 177, 56, 18,
-    // Len 10 (18 atoms)
-    35, 102, 150, 181, 105, 61, 156, 159, 153, 160, 68, 129, 34, 71, 39, 31, 178, 8,
-    // Len 11 (17 atoms)
-    11, 187, 151, 184, 185, 186, 154, 157, 158, 42, 67, 66, 168, 139, 100, 190, 14,
-    // Len 12 (4 atoms)
-    111, 144, 101, 20,
-    // Len 13 (8 atoms)
-    93, 140, 25, 32, 128, 9, 33, 70,
-    // Len 14 (4 atoms)
-    64, 87, 74, 138,
-    // Len 15 (6 atoms)
-    86, 7, 169, 126, 164, 109,
-    // Len 16 (2 atoms)
-    163, 54,
-    // Len 17 (2 atoms)
-    27, 72,
-    // Len 18 (2 atoms)
-    110, 145,
-    // Len 19 (1 atom)
-    36
-};
+_Static_assert(GENERIC_DEFAULTATOMS_COUNT == PLATFORM_ATOMS_BASE_INDEX, "generic defaultatoms count mismatch");
 
 bool defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
 {
-    if (atom_len >= 2 && atom_len <= 19) {
+    if (atom_len >= GENERIC_DEFAULTATOMS_MIN_LEN && atom_len <= GENERIC_DEFAULTATOMS_MAX_LEN) {
         size_t low = generic_len_offsets[atom_len];
         size_t high = generic_len_offsets[atom_len + 1];
         while (low < high) {

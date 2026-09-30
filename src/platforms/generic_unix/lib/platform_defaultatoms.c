@@ -45,17 +45,14 @@ const uint8_t *platform_defaultatoms_get_atom_string(atom_index_t index, size_t 
     return NULL;
 }
 
-static const uint8_t platform_len_offsets[21] = {
-    0, 0, 0, 1, 3, 6, 8, 14, 16, 17, 17, 19, 21, 23, 24, 24, 25, 25, 25, 25, 26
-};
+#include "platform_defaultatoms_tables.h"
 
-static const uint8_t platform_atoms_by_len[26] = {
-    23, 2, 1, 5, 8, 10, 4, 0, 22, 15, 16, 20, 9, 3, 13, 21, 7, 11, 19, 17, 6, 24, 18, 12, 25, 14
-};
+_Static_assert(PLATFORM_DEFAULTATOMS_COUNT == (ATOM_FIRST_AVAIL_INDEX - PLATFORM_ATOMS_BASE_INDEX),
+    "platform defaultatoms count mismatch");
 
 bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
 {
-    if (atom_len >= 2 && atom_len <= 19) {
+    if (atom_len >= PLATFORM_DEFAULTATOMS_MIN_LEN && atom_len <= PLATFORM_DEFAULTATOMS_MAX_LEN) {
         size_t low = platform_len_offsets[atom_len];
         size_t high = platform_len_offsets[atom_len + 1];
         while (low < high) {
