@@ -476,6 +476,27 @@ static size_t decode_nbits_integer(Context *ctx, const uint8_t *encoded, term *o
 
 // About X macro: https://en.wikipedia.org/wiki/X_macro
 #define X_OPCODE(op_name, num, lower_name, signature) \
+    op_name = num,
+
+#define X_OPCODE_HANDLER(op_name, num, lower_name, signature) \
+    op_name = num,
+
+#define X_OPCODE_REMOVED(op_name, num, lower_name) \
+    op_name = num,
+
+#define X_OPCODE_SKIP(...)
+
+enum beam_opcodes
+{
+#include "opcodes.def"
+};
+
+#undef X_OPCODE
+#undef X_OPCODE_HANDLER
+#undef X_OPCODE_REMOVED
+#undef X_OPCODE_SKIP
+
+#define X_OPCODE(op_name, num, lower_name, signature) \
     signature,
 
 #define X_OPCODE_HANDLER(op_name, num, lower_name, signature) \
@@ -657,16 +678,16 @@ static void handle_label_opcode(Module *mod, struct ListHead *line_refs, const u
 static void handle_line_opcode(Module *mod, struct ListHead *line_refs, const uint8_t **current_pc,
     int arg_index, uint32_t u32_arg)
 {
+    UNUSED(mod);
+    UNUSED(line_refs);
     UNUSED(arg_index);
     UNUSED(u32_arg);
 
     const uint8_t *pc = *current_pc;
-    unsigned int offset = pc - mod->code->code;
     uint32_t line_ref;
     DECODE_LITERAL(line_ref, pc);
+    UNUSED(line_ref);
     *current_pc = pc;
-
-    module_insert_line_ref_offset(mod, line_refs, line_ref, offset);
 }
 
 #define X_OPCODE(op_name, num, lower_name, signature) \
@@ -1282,19 +1303,6 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
 #endif
 #ifndef AVM_NO_EMU
         mod->end_instruction_ii = parse_core_chunk(mod, NULL);
-
-        if (mod->line_refs_offsets != NULL) {
-            if (mod->line_refs_offsets_count == 0) {
-                free(mod->line_refs_offsets);
-                mod->line_refs_offsets = NULL;
-            } else {
-                size_t elem_size = mod->line_refs_offsets_is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
-                void *compacted = realloc(mod->line_refs_offsets, mod->line_refs_offsets_count * elem_size);
-                if (compacted != NULL) {
-                    mod->line_refs_offsets = compacted;
-                }
-            }
-        }
 #endif
 #ifndef AVM_NO_JIT
     }
@@ -1311,7 +1319,6 @@ COLD_FUNC void module_destroy(Module *module)
 #endif
 
     free(module->literals_table);
-    free(module->line_refs_offsets);
     if (module->free_literals_data) {
         free(module->literals_data);
     }
@@ -1928,6 +1935,7 @@ static void module_parse_line_table(Module *mod, const uint8_t *data, size_t len
 
     CHECK_FREE_SPACE(4, "Error reading Line chunk: num_instr\n");
     uint32_t num_instr = READ_32_UNALIGNED(pos);
+    UNUSED(num_instr);
     pos += 4;
 
     CHECK_FREE_SPACE(4, "Error reading Line chunk: num_refs\n");
@@ -1957,30 +1965,6 @@ static void module_parse_line_table(Module *mod, const uint8_t *data, size_t len
         mod->locations_table = NULL;
         return;
     }
-
-    if (num_instr > 0) {
-        uint32_t code_size = mod->code ? ENDIAN_SWAP_32(mod->code->size) : 0;
-        size_t elem_size = (code_size <= 0xFFFF) ? sizeof(uint16_t) : sizeof(uint32_t);
-        mod->line_refs_offsets_is_u16 = (code_size <= 0xFFFF) ? 1 : 0;
-        mod->line_refs_offsets = malloc(num_instr * elem_size);
-        if (IS_NULL_PTR(mod->line_refs_offsets)) {
-            fprintf(stderr, "Warning: Unable to allocate space for line refs offset, module has %" PRIu32 " instructions. Line information in stacktraces may be missing\n", num_instr);
-        }
-        mod->line_refs_offsets_count = 0;
-    }
-}
-
-void module_insert_line_ref_offset(Module *mod, struct ListHead *line_refs, uint32_t line_ref, int offset)
-{
-    UNUSED(line_refs);
-    if (IS_NULL_PTR(mod->line_refs_table) || line_ref == 0 || IS_NULL_PTR(mod->line_refs_offsets)) {
-        return;
-    }
-    if (mod->line_refs_offsets_is_u16) {
-        ((uint16_t *) mod->line_refs_offsets)[mod->line_refs_offsets_count++] = (uint16_t) offset;
-    } else {
-        ((uint32_t *) mod->line_refs_offsets)[mod->line_refs_offsets_count++] = (uint32_t) offset;
-    }
 }
 
 static bool module_find_line_ref(Module *mod, uint16_t line_ref, uint32_t *line, size_t *filename_len, const uint8_t **filename)
@@ -1993,21 +1977,200 @@ static bool module_find_line_ref(Module *mod, uint16_t line_ref, uint32_t *line,
 }
 
 #ifndef AVM_NO_EMU
-static inline unsigned int get_line_ref_offset(const Module *mod, size_t i)
+COLD_FUNC static bool module_find_line_ref_by_scan(const Module *mod, size_t target_offset, uint32_t *out_line_ref)
 {
-    if (mod->line_refs_offsets_is_u16) {
-        return ((const uint16_t *) mod->line_refs_offsets)[i];
-    } else {
-        return ((const uint32_t *) mod->line_refs_offsets)[i];
+    if (IS_NULL_PTR(mod->line_refs_table) || UNLIKELY(mod->line_refs_count == 0)) {
+        return false;
     }
+
+    const uint8_t *code = mod->code->code;
+    const uint8_t *pc = code;
+    uint32_t last_line_ref = 0;
+    bool has_line_ref = false;
+
+    while (1) {
+        uint8_t opcode = *pc++;
+
+        if (UNLIKELY(opcode >= OPCODE_SIGNATURES_LEN)) {
+            break;
+        }
+
+        const char *opcode_signature = opcode_signatures[opcode];
+        if (UNLIKELY(opcode_signature == NULL)) {
+            break;
+        }
+
+        if (opcode == OP_LINE) {
+            unsigned int ref_offset = pc - code;
+            if (target_offset < ref_offset) {
+                if (!has_line_ref) {
+                    return false;
+                }
+                *out_line_ref = last_line_ref;
+                return true;
+            }
+            DECODE_LITERAL(last_line_ref, pc);
+            has_line_ref = true;
+            if (target_offset == ref_offset) {
+                *out_line_ref = last_line_ref;
+                return true;
+            }
+            continue;
+        }
+
+        int arg_index = 0;
+        int list_remaining = 0;
+        int loop_start = 0;
+
+        while (opcode_signature[arg_index]) {
+            switch (opcode_signature[arg_index]) {
+                case '[': {
+                    DECODE_EXTENDED_LIST_TAG(pc);
+                    DECODE_LITERAL(list_remaining, pc);
+                    arg_index++;
+                    loop_start = arg_index;
+                    int body_len = 0;
+                    while (opcode_signature[arg_index + body_len] != ']') {
+                        body_len++;
+                    }
+                    if (list_remaining == 0) {
+                        arg_index += body_len + 1;
+                    }
+                    continue;
+                }
+
+                case ']': {
+                    if (list_remaining > 0) {
+                        arg_index = loop_start;
+                    } else {
+                        arg_index++;
+                    }
+                    continue;
+                }
+
+                case 's':
+                case 'c': {
+                    term t;
+                    DECODE_COMPACT_TERM(t, pc);
+                    UNUSED(t);
+                    break;
+                }
+
+                case 'd':
+                case 'S': {
+                    DEST_REGISTER(dreg);
+                    DECODE_DEST_REGISTER(dreg, pc);
+                    break;
+                }
+
+                case 'x': {
+                    uint32_t reg;
+                    DECODE_XREG(reg, pc);
+                    UNUSED(reg);
+                    break;
+                }
+
+                case 'y': {
+                    uint32_t reg;
+                    DECODE_YREG(reg, pc);
+                    UNUSED(reg);
+                    break;
+                }
+
+                case 'a': {
+                    term atom;
+                    DECODE_ATOM(atom, pc);
+                    UNUSED(atom);
+                    break;
+                }
+
+                case 'j':
+                case 'f': {
+                    uint32_t label;
+                    DECODE_LABEL(label, pc);
+                    UNUSED(label);
+                    break;
+                }
+
+                case 'm': {
+                    term atom;
+                    uint32_t label = 0;
+                    DECODE_ATOM_OR_LABEL(atom, label, pc);
+                    UNUSED(atom);
+                    UNUSED(label);
+                    break;
+                }
+
+                case 't':
+                case 'I':
+                case 'A':
+                case 'P':
+                case 'Q':
+                case 'e':
+                case 'b':
+                case 'F': {
+                    uint32_t u32_arg;
+                    DECODE_LITERAL(u32_arg, pc);
+                    UNUSED(u32_arg);
+                    break;
+                }
+
+                case 'l': {
+                    uint32_t reg;
+                    DECODE_FP_REGISTER(reg, pc);
+                    UNUSED(reg);
+                    break;
+                }
+
+                case 'z': {
+                    uint32_t need;
+                    DECODE_ALLOCATOR_LIST(need, pc);
+                    UNUSED(need);
+                    break;
+                }
+
+                case '$': {
+                    if (has_line_ref) {
+                        *out_line_ref = last_line_ref;
+                        return true;
+                    }
+                    return false;
+                }
+
+                case '-': {
+                    if (opcode == OP_FMOVE) {
+                        handle_fmove_opcode((Module *) mod, NULL, &pc, arg_index, 0);
+                    }
+                    break;
+                }
+
+                default:
+                    return false;
+            }
+
+            list_remaining--;
+
+            if (opcode == OP_BS_MATCH) {
+                handle_bs_match_opcode((Module *) mod, NULL, &pc, arg_index, 0);
+            }
+
+            arg_index++;
+        }
+    }
+
+    if (has_line_ref) {
+        *out_line_ref = last_line_ref;
+        return true;
+    }
+    return false;
 }
 #endif
 
 bool module_find_line(Module *mod, size_t offset, uint32_t *line, size_t *filename_len, const uint8_t **filename)
 {
-    size_t i;
 #ifndef AVM_NO_JIT
     if (mod->native_code) {
+        size_t i;
 #ifdef JIT_JUMPTABLE_IS_DATA
         // WASM: lines data is stored in the JITWasmHeader metadata.
         // Both line offsets and query offsets use label * JTE_SIZE format.
@@ -2077,30 +2240,10 @@ bool module_find_line(Module *mod, size_t offset, uint32_t *line, size_t *filena
 #endif
 #ifndef AVM_NO_EMU
         uint32_t line_ref;
-        unsigned int ref_offset;
-        const uint8_t *ref_pc;
-        if (IS_NULL_PTR(mod->line_refs_offsets) || UNLIKELY(mod->line_refs_offsets_count == 0)) {
+        if (!module_find_line_ref_by_scan(mod, offset, &line_ref)) {
             return false;
         }
-        for (i = 0; i < mod->line_refs_offsets_count; i++) {
-            ref_offset = get_line_ref_offset(mod, i);
-            if (offset == ref_offset) {
-                ref_pc = &mod->code->code[ref_offset];
-                DECODE_LITERAL(line_ref, ref_pc);
-                return module_find_line_ref(mod, line_ref, line, filename_len, filename);
-            } else if (i == 0 && offset < ref_offset) {
-                return false;
-            } else if (offset < ref_offset) {
-                ref_offset = get_line_ref_offset(mod, i - 1);
-                ref_pc = &mod->code->code[ref_offset];
-                DECODE_LITERAL(line_ref, ref_pc);
-                return module_find_line_ref(mod, line_ref, line, filename_len, filename);
-            }
-        }
-        ref_offset = get_line_ref_offset(mod, i - 1);
-        ref_pc = &mod->code->code[ref_offset];
-        DECODE_LITERAL(line_ref, ref_pc);
-        return module_find_line_ref(mod, line_ref, line, filename_len, filename);
+        return module_find_line_ref(mod, (uint16_t) line_ref, line, filename_len, filename);
 #endif
 #ifndef AVM_NO_JIT
     }
