@@ -889,12 +889,6 @@ static enum ModuleLoadResult module_populate_atoms_table(Module *this_module, ui
 
     const char *current_atom = (const char *) table_data + 12;
 
-    this_module->local_atoms_to_global_table = calloc(atoms_count + 1, sizeof(atom_index_t));
-    if (IS_NULL_PTR(this_module->local_atoms_to_global_table)) {
-        fprintf(stderr, "Cannot allocate memory while loading module (line: %i).\n", __LINE__);
-        return MODULE_ERROR_FAILED_ALLOCATION;
-    }
-
     enum AtomTableEnsureAtomResult ensure_result = atom_table_ensure_atoms(
         glb->atom_table, current_atom, atoms_count, this_module->local_atoms_to_global_table + 1, ensure_opts);
     switch (ensure_result) {
@@ -917,12 +911,6 @@ static enum ModuleLoadResult module_populate_atoms_table(Module *this_module, ui
 static enum ModuleLoadResult module_build_imported_functions_table(Module *this_module, uint8_t *table_data, GlobalContext *glb)
 {
     int functions_count = READ_32_UNALIGNED(table_data + 8);
-
-    this_module->imported_funcs = calloc(functions_count, sizeof(struct ExportedFunction *));
-    if (IS_NULL_PTR(this_module->imported_funcs)) {
-        fprintf(stderr, "Cannot allocate memory while loading module (line: %i).\n", __LINE__);
-        return MODULE_ERROR_FAILED_ALLOCATION;
-    }
 
     for (int i = 0; i < functions_count; i++) {
         int local_module_atom_index = READ_32_UNALIGNED(table_data + i * 12 + 12);
@@ -1112,12 +1100,36 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     unsigned long sizes[MAX_SIZES];
     scan_iff(beam_file, size, offsets, sizes);
 
-    Module *mod = malloc(sizeof(Module));
+    int atoms_count = 0;
+    if (offsets[AT8U]) {
+        atoms_count = READ_32_UNALIGNED(beam_file + offsets[AT8U] + 8);
+        if (atoms_count < 0) {
+            atoms_count = -atoms_count;
+        }
+    }
+
+    int functions_count = 0;
+    if (offsets[IMPT]) {
+        functions_count = READ_32_UNALIGNED(beam_file + offsets[IMPT] + 8);
+    }
+
+    size_t atoms_table_size = size_align_up_pow2((atoms_count + 1) * sizeof(atom_index_t), sizeof(void *));
+    size_t imported_funcs_size = functions_count * sizeof(struct ExportedFunction *);
+    size_t total_size = sizeof(Module) + atoms_table_size + imported_funcs_size;
+
+    Module *mod = malloc(total_size);
     if (IS_NULL_PTR(mod)) {
         fprintf(stderr, "Error: Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
         return NULL;
     }
-    memset(mod, 0, sizeof(Module));
+    memset(mod, 0, total_size);
+
+    uint8_t *extra = (uint8_t *) (mod + 1);
+    mod->local_atoms_to_global_table = (atom_index_t *) extra;
+    extra += atoms_table_size;
+    if (functions_count > 0) {
+        mod->imported_funcs = (const struct ExportedFunction **) extra;
+    }
 
     mod->module_index = -1;
 
@@ -1315,9 +1327,7 @@ COLD_FUNC void module_destroy(Module *module)
 #endif
 
     free(module->labels);
-    free(module->imported_funcs);
     free(module->literals_table);
-    free(module->local_atoms_to_global_table);
     free(module->line_refs_offsets);
     if (module->free_literals_data) {
         free(module->literals_data);
