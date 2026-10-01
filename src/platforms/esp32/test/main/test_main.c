@@ -20,6 +20,7 @@
 
 #include "unity.h"
 #include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -44,6 +45,8 @@
 #include <esp_event.h>
 #include <esp_log.h>
 #include <esp_netif.h>
+#include <esp_system.h>
+#include <esp_timer.h>
 #include <esp_vfs.h>
 #include <esp_vfs_fat.h>
 #include <sdmmc_cmd.h>
@@ -58,6 +61,12 @@ extern const size_t size asm("esp32_test_modules_avm_length");
 #define TAG "AtomVM"
 
 const struct Nif *platform_nifs_get_nif(const char *nifname);
+
+static void log_boot_stats(const char *stage)
+{
+    ESP_LOGI(TAG, "[%s] uptime %" PRId64 " ms, free heap %" PRIu32 " bytes",
+        stage, esp_timer_get_time() / 1000, esp_get_free_heap_size());
+}
 
 TEST_CASE("atomvm_platform_0", "[platform_nifs]")
 {
@@ -170,10 +179,17 @@ term avm_test_case(const char *test_module)
     avmpack_data->base.data = main_avm;
     synclist_append(&glb->avmpack_data, &avmpack_data->base.avmpack_head);
 
+    uint32_t free_heap_before_load = esp_get_free_heap_size();
+    int64_t load_start = esp_timer_get_time();
+
     Module *mod = globalcontext_load_module_from_avm(glb, test_module);
     TEST_ASSERT(mod != NULL);
 
     globalcontext_insert_module(glb, mod);
+
+    ESP_LOGI(TAG, "Loaded %s in %" PRId64 " us: %" PRIu32 " bytes heap used, %" PRIu32 " bytes free heap",
+        test_module, esp_timer_get_time() - load_start,
+        free_heap_before_load - esp_get_free_heap_size(), esp_get_free_heap_size());
 
     Context *ctx = context_new(glb);
     TEST_ASSERT(ctx != NULL);
@@ -730,7 +746,11 @@ TEST_CASE("test_twdt", "[test_run]")
 
 void app_main(void)
 {
+    log_boot_stats("boot");
+
     UNITY_BEGIN();
     unity_run_all_tests();
     UNITY_END();
+
+    log_boot_stats("tests completed");
 }

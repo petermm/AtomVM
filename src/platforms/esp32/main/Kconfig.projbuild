@@ -81,4 +81,21 @@ menu "AtomVM configuration"
         help
             Enable experimental optimized garbage collection mode that makes use of C realloc instead of copying data.
 
+    config AVM_BOOT_STATS
+        bool  "Log boot time and free heap at startup."
+        default n
+        help
+            Log the time since boot and the free heap at the beginning of app_main,
+            and again once the startup module has been loaded, right before it is
+            run.
+
+    config AVM_BOOT_STATS_LOADALL
+        bool  "Preload the whole AVM pack when logging boot stats."
+        default n
+        depends on AVM_BOOT_STATS
+        help
+            Preload every module of the startup AVM, so that the boot stats report
+            the cost of the fully loaded AtomVM runtime instead of just the startup
+            module.
+
 endmenu

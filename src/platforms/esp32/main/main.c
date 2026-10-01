@@ -20,10 +20,13 @@
 
 #include <esp_log.h>
 #include <esp_system.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <inttypes.h>
 #include <sdkconfig.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include <atom.h>
 #include <avm_version.h>
@@ -52,6 +55,81 @@ void init_usb_serial(void);
 
 #define TAG "AtomVM"
 
+#ifdef CONFIG_AVM_BOOT_STATS
+static void log_boot_stats(const char *stage)
+{
+    ESP_LOGI(TAG, "[%s] uptime %" PRId64 " ms, free heap %" PRIu32 " bytes",
+        stage, esp_timer_get_time() / 1000, esp_get_free_heap_size());
+}
+
+#ifdef CONFIG_AVM_BOOT_STATS_LOADALL
+// Keep this much heap free while preloading, so that the boot stats cannot
+// exhaust memory on the smallest targets.
+#define BOOT_STATS_MIN_FREE_HEAP 16384
+
+struct boot_stats
+{
+    GlobalContext *glb;
+    const char *startup_module_name;
+    int seen;
+    int loaded;
+};
+
+static void *load_pack_module(void *accum, const void *section_ptr, uint32_t section_size, const void *beam_ptr, uint32_t flags, const char *section_name)
+{
+    (void) section_ptr;
+
+    struct boot_stats *stats = accum;
+    if (!(flags & BEAM_CODE_FLAG)) {
+        // Not a BEAM module (e.g. an alignment padding section).
+        return accum;
+    }
+    if (!strcmp(section_name, stats->startup_module_name)) {
+        // Already loaded by app_main.
+        return accum;
+    }
+    stats->seen++;
+
+    if (esp_get_free_heap_size() < BOOT_STATS_MIN_FREE_HEAP) {
+        return accum;
+    }
+
+    Module *mod = module_new_from_iff_binary(stats->glb, beam_ptr, section_size);
+    if (mod == NULL) {
+        ESP_LOGW(TAG, "Failed to load %s", section_name);
+        return accum;
+    }
+
+    globalcontext_insert_module(stats->glb, mod);
+    stats->loaded++;
+    return accum;
+}
+#endif
+
+// Logs the [boot2] stat, before the startup module is run. With
+// AVM_BOOT_STATS_LOADALL every other module of the startup AVM is preloaded
+// first, so that the stat covers the fully loaded AtomVM runtime.
+static void log_boot2_stats(GlobalContext *glb, const void *startup_avm, const char *startup_module_name)
+{
+#ifdef CONFIG_AVM_BOOT_STATS_LOADALL
+    uint32_t free_heap_before = esp_get_free_heap_size();
+    int64_t load_start = esp_timer_get_time();
+
+    struct boot_stats stats = { .glb = glb, .startup_module_name = startup_module_name, .seen = 0, .loaded = 0 };
+    avmpack_fold(&stats, startup_avm, load_pack_module);
+
+    ESP_LOGI(TAG, "[boot2] preloaded %i/%i modules in %" PRId64 " us: %" PRIu32 " bytes heap used, %" PRIu32 " bytes free heap",
+        stats.loaded, stats.seen, esp_timer_get_time() - load_start,
+        free_heap_before - esp_get_free_heap_size(), esp_get_free_heap_size());
+#else
+    (void) glb;
+    (void) startup_avm;
+    (void) startup_module_name;
+    log_boot_stats("boot2");
+#endif
+}
+#endif
+
 #define ATOMVM_BANNER                                                   \
     "\n"                                                                \
     "    ###########################################################\n" \
@@ -69,6 +147,10 @@ void init_usb_serial(void);
 
 void app_main()
 {
+#ifdef CONFIG_AVM_BOOT_STATS
+    log_boot_stats("boot");
+#endif
+
     esp32_sys_queue_init();
 
 #ifdef CONFIG_USE_USB_SERIAL
@@ -120,6 +202,10 @@ void app_main()
         AVM_ABORT();
     }
     globalcontext_insert_module(glb, mod);
+
+#ifdef CONFIG_AVM_BOOT_STATS
+    log_boot2_stats(glb, startup_avm, startup_module_name);
+#endif
 
     ESP_LOGI(TAG, "Starting %s...", startup_module_name);
     fprintf(stdout, "---\n");
