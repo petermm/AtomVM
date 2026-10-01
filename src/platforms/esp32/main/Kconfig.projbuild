@@ -54,6 +54,15 @@ menu "AtomVM configuration"
             them from Flash. Increases heap usage by ~4-5 KB but improves runtime
             performance by avoiding Flash reads on atom lookups.
 
+    config AVM_LABT
+        bool "Use pre-computed LabT flash tables for BEAM labels"
+        default n
+        help
+            Use pre-computed LabT (Label Table) chunk in Flash for bytecode label
+            jump tables instead of scanning instructions and building the label table
+            in RAM at module load time. Saves ~22-28 KB DRAM across loaded modules,
+            but label lookups during execution read from Flash.
+
     config AVM_CREATE_STACKTRACES
         bool  "Create BEAM stack traces."
         default y

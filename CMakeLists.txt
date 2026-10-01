@@ -44,9 +44,14 @@ option(AVM_PRINT_PROCESS_CRASH_DUMPS "Print crash reports when processes die wit
 option(AVM_USE_LIBSODIUM "Enable optional libsodium backend for Ed25519 curve" OFF)
 option(AVM_MINIMAL_OPCODES "Reduce VM size by excluding opcodes for optional compiler flags (no_bs_match, no_ssa_opt_bs_ensure)" OFF)
 option(AVM_DEFAULT_ATOMS_IN_RAM "Copy default atoms table and strings to RAM at boot" OFF)
+option(AVM_LABT "Use pre-computed LabT flash tables for BEAM labels" OFF)
 
 if(AVM_DEFAULT_ATOMS_IN_RAM)
     add_compile_definitions(AVM_DEFAULT_ATOMS_IN_RAM)
+endif()
+
+if(NOT AVM_LABT)
+    add_compile_definitions(AVM_NO_LABT)
 endif()
 
 # JIT & execution of precompiled code

@@ -53,7 +53,22 @@ if(CONFIG_AVM_DEFAULT_ATOMS_IN_RAM)
     set(AVM_DEFAULT_ATOMS_IN_RAM ON)
 endif()
 
+if(CONFIG_AVM_LABT)
+    set(AVM_LABT ON)
+else()
+    set(AVM_LABT OFF)
+    set(AVM_NO_LABT ON)
+endif()
+
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../libAtomVM" "libAtomVM")
+
+if(AVM_DEFAULT_ATOMS_IN_RAM)
+    target_compile_definitions(libAtomVM PUBLIC AVM_DEFAULT_ATOMS_IN_RAM)
+endif()
+
+if(AVM_NO_LABT)
+    target_compile_definitions(libAtomVM PUBLIC AVM_NO_LABT)
+endif()
 
 # Add directory with platform_atomic.h if we mean to use it
 if (HAVE_PLATFORM_ATOMIC_H)

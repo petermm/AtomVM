@@ -294,6 +294,14 @@ if(AVM_CREATE_STACKTRACES)
     target_compile_definitions(libAtomVM PUBLIC AVM_CREATE_STACKTRACES)
 endif()
 
+if(AVM_DEFAULT_ATOMS_IN_RAM)
+    target_compile_definitions(libAtomVM PUBLIC AVM_DEFAULT_ATOMS_IN_RAM)
+endif()
+
+if(NOT AVM_LABT OR AVM_NO_LABT)
+    target_compile_definitions(libAtomVM PUBLIC AVM_NO_LABT)
+endif()
+
 # Automatically use zlib if present to load .beam files
 if ((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") OR
     (${CMAKE_SYSTEM_NAME} STREQUAL "Linux") OR
