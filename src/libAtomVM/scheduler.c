@@ -22,6 +22,7 @@
 
 #include <stdio.h>
 
+#include "avm_attrs.h"
 #include "debug.h"
 #include "list.h"
 #include "mailbox.h"
@@ -274,7 +275,7 @@ static Context *scheduler_run0(GlobalContext *global)
     return result;
 }
 
-Context *scheduler_run(GlobalContext *global)
+AVM_IRAM_VM_ATTR Context *scheduler_run(GlobalContext *global)
 {
     // Outer loop to process native contexts.
     Context *result = NULL;

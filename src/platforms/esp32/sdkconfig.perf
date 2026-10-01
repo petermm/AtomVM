@@ -5,3 +5,10 @@
 # benchmarks, neutral otherwise, no RAM cost. The flash chip must support it.
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_AVM_DEFAULT_ATOMS_IN_RAM=y
+# Keep hot VM code out of the flash cache. The full set costs ~22 KB of IRAM,
+# i.e. ~22 KB of heap on chips where IRAM and DRAM share the same SRAM
+# (ESP32-C3). The parts, in order of value: the GC hot path (~2 KB, the big
+# win), term_compare + scheduler_run + mailbox_process_outer_list (~7.6 KB,
+# removes the message-passing bottleneck), the integer/bitwise BIFs (~7 KB,
+# helps arithmetic-heavy code). Disable AVM_IRAM_HOT_* options to shrink it.
+CONFIG_AVM_IRAM_HOT=y

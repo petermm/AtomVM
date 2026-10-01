@@ -22,6 +22,7 @@
 
 #include "atom.h"
 #include "atom_table.h"
+#include "avm_attrs.h"
 #include "context.h"
 #include "defaultatoms.h"
 #include "interop.h"
@@ -544,7 +545,7 @@ static enum TermTypeIndex term_type_to_index(term t)
     }                                        \
     t = temp_stack_pop(&temp_stack);
 
-TermCompareResult term_compare(term t, term other, TermCompareOpts opts, GlobalContext *global)
+AVM_IRAM_VM_ATTR TermCompareResult term_compare(term t, term other, TermCompareOpts opts, GlobalContext *global)
 {
     struct TempStack temp_stack;
     if (UNLIKELY(temp_stack_init(&temp_stack) != TempStackOk)) {

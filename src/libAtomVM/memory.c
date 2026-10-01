@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "avm_attrs.h"
 #include "context.h"
 #include "debug.h"
 #include "dictionary.h"
@@ -148,7 +149,7 @@ static size_t next_fibonacci_heap_size(size_t size)
 
 #define FIBONACCI_HEAP_GROWTH_REDUCTION_THRESHOLD 10000
 
-enum MemoryGCResult memory_ensure_free_with_roots(Context *c, size_t size, size_t num_roots, term *roots, enum MemoryAllocMode alloc_mode)
+AVM_IRAM_GC_ATTR enum MemoryGCResult memory_ensure_free_with_roots(Context *c, size_t size, size_t num_roots, term *roots, enum MemoryAllocMode alloc_mode)
 {
     size_t free_space = context_avail_free_memory(c);
     if (alloc_mode == MEMORY_NO_GC) {
@@ -255,7 +256,7 @@ static inline void push_to_stack(term **stack, term value)
     **stack = value;
 }
 
-static enum MemoryGCResult memory_gc(Context *ctx, size_t new_size, size_t num_roots, term *roots)
+AVM_IRAM_GC_ATTR static enum MemoryGCResult memory_gc(Context *ctx, size_t new_size, size_t num_roots, term *roots)
 {
     TRACE("Going to perform gc on process %i\n", ctx->process_id);
     term old_mso_list = ctx->heap.root->mso_list;
@@ -573,7 +574,7 @@ unsigned long memory_estimate_usage(term t)
     return acc;
 }
 
-static void memory_scan_and_copy(HeapFragment *old_fragment, term *mem_start, const term *mem_end, term **new_heap_pos, term *mso_list, bool move)
+AVM_IRAM_GC_ATTR static void memory_scan_and_copy(HeapFragment *old_fragment, term *mem_start, const term *mem_end, term **new_heap_pos, term *mso_list, bool move)
 {
     term *ptr = mem_start;
     term *new_heap = *new_heap_pos;
@@ -830,7 +831,7 @@ HOT_FUNC static inline bool memory_heap_fragment_contains_pointer(HeapFragment *
     return false;
 }
 
-HOT_FUNC static term memory_shallow_copy_term(HeapFragment *old_fragment, term t, term **new_heap, bool move)
+HOT_FUNC AVM_IRAM_GC_ATTR static term memory_shallow_copy_term(HeapFragment *old_fragment, term t, term **new_heap, bool move)
 {
     switch (t & TERM_PRIMARY_MASK) {
         case TERM_PRIMARY_IMMED:

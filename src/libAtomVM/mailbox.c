@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 
+#include "avm_attrs.h"
 #include "context.h"
 #include "memory.h"
 #include "scheduler.h"
@@ -461,7 +462,7 @@ MailboxMessage *mailbox_process_outer_list_native(Mailbox *mbox)
     return previous_signal;
 }
 
-MailboxMessage *mailbox_process_outer_list(Context *ctx)
+AVM_IRAM_VM_ATTR MailboxMessage *mailbox_process_outer_list(Context *ctx)
 {
     Mailbox *mbox = &ctx->mailbox;
     MailboxMessage *current = detach_outer_list(mbox);

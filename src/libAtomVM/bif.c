@@ -19,6 +19,7 @@
  */
 
 #include "bif.h"
+#include "avm_attrs.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -748,7 +749,7 @@ static term add_boxed_helper(Context *ctx, uint32_t fail_label, uint32_t live, t
     }
 }
 
-term bif_erlang_add_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_add_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     UNUSED(live);
 
@@ -887,7 +888,7 @@ static term sub_boxed_helper(Context *ctx, uint32_t fail_label, uint32_t live, t
     }
 }
 
-term bif_erlang_sub_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_sub_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     UNUSED(live);
 
@@ -1030,7 +1031,7 @@ static term mul_boxed_helper(Context *ctx, uint32_t fail_label, uint32_t live, t
     }
 }
 
-term bif_erlang_mul_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_mul_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     UNUSED(live);
 
@@ -1048,7 +1049,7 @@ term bif_erlang_mul_2(Context *ctx, uint32_t fail_label, int live, term arg1, te
     }
 }
 
-term bif_erlang_fdiv_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_fdiv_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     UNUSED(live);
     if (UNLIKELY(!term_is_number(arg1))) {
@@ -1169,7 +1170,7 @@ static term div_boxed_helper(Context *ctx, uint32_t fail_label, uint32_t live, t
     }
 }
 
-term bif_erlang_div_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_div_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     UNUSED(live);
 
@@ -1272,7 +1273,7 @@ static term neg_boxed_helper(Context *ctx, uint32_t fail_label, uint32_t live, t
     }
 }
 
-term bif_erlang_neg_1(Context *ctx, uint32_t fail_label, int live, term arg1)
+AVM_IRAM_BIFS_ATTR term bif_erlang_neg_1(Context *ctx, uint32_t fail_label, int live, term arg1)
 {
     UNUSED(live);
 
@@ -1375,7 +1376,7 @@ static term abs_boxed_helper(Context *ctx, uint32_t fail_label, uint32_t live, t
     }
 }
 
-term bif_erlang_abs_1(Context *ctx, uint32_t fail_label, int live, term arg1)
+AVM_IRAM_BIFS_ATTR term bif_erlang_abs_1(Context *ctx, uint32_t fail_label, int live, term arg1)
 {
     UNUSED(live);
 
@@ -1483,7 +1484,7 @@ static term rem_boxed_helper(Context *ctx, uint32_t fail_label, uint32_t live, t
     }
 }
 
-term bif_erlang_rem_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_rem_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     UNUSED(live);
 
@@ -1695,7 +1696,7 @@ static inline int64_t bor(int64_t a, int64_t b)
     return a | b;
 }
 
-term bif_erlang_bor_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_bor_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     if (LIKELY(term_is_integer(arg1) && term_is_integer(arg2))) {
         return arg1 | arg2;
@@ -1709,7 +1710,7 @@ static inline int64_t band(int64_t a, int64_t b)
     return a & b;
 }
 
-term bif_erlang_band_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_band_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     if (LIKELY(term_is_integer(arg1) && term_is_integer(arg2))) {
         return arg1 & arg2;
@@ -1723,7 +1724,7 @@ static inline int64_t bxor(int64_t a, int64_t b)
     return a ^ b;
 }
 
-term bif_erlang_bxor_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_bxor_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     if (LIKELY(term_is_integer(arg1) && term_is_integer(arg2))) {
         return (arg1 ^ arg2) | TERM_INTEGER_TAG;
@@ -1732,7 +1733,7 @@ term bif_erlang_bxor_2(Context *ctx, uint32_t fail_label, int live, term arg1, t
     }
 }
 
-term bif_erlang_bsl_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_bsl_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     if (LIKELY(term_is_any_integer(arg1) && term_is_non_neg_int(arg2))) {
         size_t arg1_size = term_is_integer(arg1) ? 0 : term_boxed_size(arg1);
@@ -1791,7 +1792,7 @@ term bif_erlang_bsl_2(Context *ctx, uint32_t fail_label, int live, term arg1, te
     }
 }
 
-term bif_erlang_bsr_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
+AVM_IRAM_BIFS_ATTR term bif_erlang_bsr_2(Context *ctx, uint32_t fail_label, int live, term arg1, term arg2)
 {
     if (LIKELY(term_is_any_integer(arg1) && term_is_non_neg_int(arg2))) {
         size_t arg1_size = term_is_integer(arg1) ? 0 : term_boxed_size(arg1);
@@ -1890,7 +1891,7 @@ static term bnot_boxed_helper(Context *ctx, uint32_t fail_label, uint32_t live, 
     }
 }
 
-term bif_erlang_bnot_1(Context *ctx, uint32_t fail_label, int live, term arg1)
+AVM_IRAM_BIFS_ATTR term bif_erlang_bnot_1(Context *ctx, uint32_t fail_label, int live, term arg1)
 {
     UNUSED(live);
 

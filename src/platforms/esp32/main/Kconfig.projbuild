@@ -63,6 +63,39 @@ menu "AtomVM configuration"
             in RAM at module load time. Saves ~22-28 KB DRAM across loaded modules,
             but label lookups during execution read from Flash.
 
+    config AVM_IRAM_HOT
+        bool "Place hot VM code in IRAM"
+        default n
+        help
+            Move hot VM code from Flash into instruction RAM so it no longer
+            consumes the shared 16 KB Flash cache. Costs a few KB of IRAM, which on
+            chips where IRAM and DRAM share the same SRAM (ESP32-C3) reduces the
+            available heap by the same amount. Select below which parts to move.
+
+    config AVM_IRAM_HOT_GC
+        bool "  garbage collector hot path"
+        depends on AVM_IRAM_HOT
+        default y
+        help
+            Place the GC hot path (memory_gc, memory_ensure_free_with_roots,
+            memory_scan_and_copy, memory_shallow_copy_term) in IRAM.
+
+    config AVM_IRAM_HOT_BIFS
+        bool "  integer arithmetic and bitwise BIFs"
+        depends on AVM_IRAM_HOT
+        default y
+        help
+            Place the Erlang integer arithmetic and bitwise BIFs
+            (+ - * div rem fdiv neg abs band bor bxor bnot bsl bsr) in IRAM.
+
+    config AVM_IRAM_HOT_VM
+        bool "  VM hot path (term_compare, scheduler, mailbox)"
+        depends on AVM_IRAM_HOT
+        default y
+        help
+            Place term_compare (used by select_val, comparisons and map
+            lookups), scheduler_run and mailbox_process_outer_list in IRAM.
+
     config AVM_CREATE_STACKTRACES
         bool  "Create BEAM stack traces."
         default y
