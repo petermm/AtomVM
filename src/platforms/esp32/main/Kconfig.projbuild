@@ -96,6 +96,19 @@ menu "AtomVM configuration"
             Place term_compare (used by select_val, comparisons and map
             lookups), scheduler_run and mailbox_process_outer_list in IRAM.
 
+    config AVM_MODULES_IN_RAM
+        string "Experimental modules in RAM (comma separated names)"
+        default ""
+        help
+            Copy the listed modules into RAM when they are loaded, instead of
+            executing them from Flash. Costs the size of each module's BEAM
+            binary in RAM. Names are module names without the .beam suffix,
+            e.g. "erlang,lists,myapp". Modules that are only loaded on demand are
+            copied when they are first loaded.
+            An empty list disables copying. If the copy allocation fails, the
+            module is loaded from Flash. This is an experimental tuning option;
+            no meaningful speedup was measured for erlang and lists on ESP32-C3.
+
     config AVM_CREATE_STACKTRACES
         bool  "Create BEAM stack traces."
         default y

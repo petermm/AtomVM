@@ -138,6 +138,7 @@ struct Module
     unsigned int end_instruction_ii;
 
     unsigned int free_literals_data : 1;
+    unsigned int free_binary : 1;
     unsigned int labels_is_u16 : 1;
     unsigned int literals_is_u16 : 1;
     unsigned int labels_in_flash : 1;
@@ -249,6 +250,23 @@ void module_destroy(Module *module);
  * @param size the size of the buffer containing the IFF data.
  */
 Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary, unsigned long size);
+
+/**
+ * @brief Parse a BEAM file, copying it into RAM when it is in the
+ * AVM_MODULES_IN_RAM list.
+ *
+ * @details Like module_new_from_iff_binary, but when module_name matches an
+ * entry of the AVM_MODULES_IN_RAM list the BEAM binary is copied to the heap
+ * first, so bytecode and file-backed tables are read from RAM. The copy is
+ * released by module_destroy. If the copy allocation fails, the original
+ * binary is used instead. Atom strings always refer to the original binary,
+ * which must remain valid for the lifetime of the global atom table.
+ * @param global the global context.
+ * @param iff_binary the IFF file data.
+ * @param size the size of the buffer containing the IFF data.
+ * @param module_name the module name, with or without the .beam suffix.
+ */
+Module *module_new_from_iff_binary_maybe_in_ram(GlobalContext *global, const void *iff_binary, unsigned long size, const char *module_name);
 
 /**
  * @brief Gets a literal stored on the literal table of the specified module

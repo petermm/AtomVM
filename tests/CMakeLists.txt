@@ -117,6 +117,12 @@ target_link_libraries(test-mailbox PRIVATE libAtomVM libAtomVM${PLATFORM_LIB_SUF
 target_link_libraries(test-structs PRIVATE libAtomVM libAtomVM${PLATFORM_LIB_SUFFIX})
 target_link_libraries(test-term PRIVATE libAtomVM libAtomVM${PLATFORM_LIB_SUFFIX})
 
+# Compile the loader with test-only allocation failures and RAM module selection.
+add_executable(test-module test-module.c)
+target_compile_features(test-module PRIVATE c_std_11)
+target_include_directories(test-module PRIVATE ../src/libAtomVM)
+target_link_libraries(test-module PRIVATE libAtomVM libAtomVM${PLATFORM_LIB_SUFFIX})
+
 # Except for XCode, also compile beams
 if (NOT "${CMAKE_GENERATOR}" MATCHES "Xcode")
     add_dependencies(test-erlang erlang_test_modules)

@@ -83,6 +83,11 @@ if(CONFIG_AVM_IRAM_HOT)
     message(STATUS "Placing hot VM code in IRAM (GC=${CONFIG_AVM_IRAM_HOT_GC}, BIFs=${CONFIG_AVM_IRAM_HOT_BIFS}, VM=${CONFIG_AVM_IRAM_HOT_VM})")
 endif()
 
+if(NOT CONFIG_AVM_MODULES_IN_RAM STREQUAL "")
+    target_compile_definitions(libAtomVM PUBLIC "AVM_MODULES_IN_RAM=\"${CONFIG_AVM_MODULES_IN_RAM}\"")
+    message(STATUS "Loading modules into RAM: ${CONFIG_AVM_MODULES_IN_RAM}")
+endif()
+
 # Add directory with platform_atomic.h if we mean to use it
 if (HAVE_PLATFORM_ATOMIC_H)
     target_include_directories(libAtomVM PUBLIC ../avm_sys/)

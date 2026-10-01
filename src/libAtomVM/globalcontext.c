@@ -753,7 +753,7 @@ Module *globalcontext_load_module_from_avm(GlobalContext *global, const char *mo
         return NULL;
     }
 
-    return module_new_from_iff_binary(global, beam_module, beam_module_size);
+    return module_new_from_iff_binary_maybe_in_ram(global, beam_module, beam_module_size, module_name);
 }
 
 Module *globalcontext_get_module(GlobalContext *global, atom_index_t module_name_atom)

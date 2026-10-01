@@ -1122,6 +1122,75 @@ static void module_add_label(Module *mod, int index, const uint8_t *ptr)
 }
 #endif
 
+#ifdef AVM_MODULES_IN_RAM
+// AVM_MODULES_IN_RAM is a comma separated list of module names (without the
+// .beam suffix), for example "erlang,lists".
+static bool module_name_is_in_ram_list(const char *module_name)
+{
+    static const char beam_suffix[] = ".beam";
+    size_t name_len = strlen(module_name);
+    if (name_len > sizeof(beam_suffix) - 1
+        && !strcmp(module_name + name_len - (sizeof(beam_suffix) - 1), beam_suffix)) {
+        name_len -= sizeof(beam_suffix) - 1;
+    }
+
+    const char *list = AVM_MODULES_IN_RAM;
+    while (*list) {
+        const char *end = strchr(list, ',');
+        size_t entry_len = end ? (size_t) (end - list) : strlen(list);
+        if (entry_len == name_len && !strncmp(list, module_name, entry_len)) {
+            return true;
+        }
+        if (IS_NULL_PTR(end)) {
+            break;
+        }
+        list = end + 1;
+    }
+    return false;
+}
+#endif
+
+static Module *module_new_from_iff_binary_with_atoms(GlobalContext *global, const void *iff_binary, unsigned long size, const void *atoms_binary);
+
+Module *module_new_from_iff_binary_maybe_in_ram(GlobalContext *global, const void *iff_binary, unsigned long size, const char *module_name)
+{
+#ifdef AVM_MODULES_IN_RAM
+    if (module_name_is_in_ram_list(module_name)) {
+        // AVM section sizes include the section header, but iff_binary points
+        // past it. Copy only the BEAM file, not the following archive bytes.
+        if (size < 12 || memcmp(iff_binary, "FOR1", 4) || memcmp((const uint8_t *) iff_binary + 8, "BEAM", 4)) {
+            return NULL;
+        }
+        uint32_t iff_size = READ_32_UNALIGNED((const uint8_t *) iff_binary + 4);
+        if (iff_size < 4 || iff_size > size - 8) {
+            return NULL;
+        }
+        unsigned long beam_size = (unsigned long) iff_size + 8;
+        uint8_t *copy = malloc(beam_size);
+        if (!IS_NULL_PTR(copy)) {
+            memcpy(copy, iff_binary, beam_size);
+            // Atoms are retained globally even when loading fails or the
+            // module is destroyed. Keep their backing in the original pack.
+            Module *mod = module_new_from_iff_binary_with_atoms(global, copy, beam_size, iff_binary);
+            if (IS_NULL_PTR(mod)) {
+                free(copy);
+                return NULL;
+            }
+            mod->free_binary = 1;
+            return mod;
+        }
+    }
+#else
+    UNUSED(module_name);
+#endif
+    return module_new_from_iff_binary(global, iff_binary, size);
+}
+
+Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary, unsigned long size)
+{
+    return module_new_from_iff_binary_with_atoms(global, iff_binary, size, iff_binary);
+}
+
 #if !defined(AVM_NO_EMU) && !defined(AVM_NO_LABT)
 // LabT is an optional accelerator for valid bytecode. Validate its storage
 // and target bounds here; proving instruction boundaries would require the
@@ -1179,7 +1248,7 @@ static bool module_validate_labt(const uint8_t *beam_file, size_t beam_size, con
 }
 #endif
 
-Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary, unsigned long size)
+static Module *module_new_from_iff_binary_with_atoms(GlobalContext *global, const void *iff_binary, unsigned long size, const void *atoms_binary)
 {
     uint8_t *beam_file = (void *) iff_binary;
 
@@ -1256,7 +1325,7 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     mod->mutex = smp_mutex_create();
 #endif
 
-    if (UNLIKELY(module_populate_atoms_table(mod, beam_file + offsets[AT8U], global) != MODULE_LOAD_OK)) {
+    if (UNLIKELY(module_populate_atoms_table(mod, (uint8_t *) atoms_binary + offsets[AT8U], global) != MODULE_LOAD_OK)) {
         fprintf(stderr, "Error: Failed to populate atoms table: %s:%i.\n", __FILE__, __LINE__);
         module_destroy(mod);
         return NULL;
@@ -1280,6 +1349,7 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     mod->str_table_len = sizes[STRT];
     mod->binary = beam_file;
     mod->binary_size = size;
+    mod->free_binary = 0;
 #ifndef AVM_NO_JIT
     if (offsets[AVMN]) {
         NativeCodeChunk *native_code = (NativeCodeChunk *) (beam_file + offsets[AVMN]);
@@ -1409,6 +1479,9 @@ COLD_FUNC void module_destroy(Module *module)
     free(module->literals_table);
     if (module->free_literals_data) {
         free(module->literals_data);
+    }
+    if (module->free_binary) {
+        free(module->binary);
     }
 #ifndef AVM_NO_JIT
     if (module->native_code) {

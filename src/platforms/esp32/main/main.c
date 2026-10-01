@@ -94,7 +94,7 @@ static void *load_pack_module(void *accum, const void *section_ptr, uint32_t sec
         return accum;
     }
 
-    Module *mod = module_new_from_iff_binary(stats->glb, beam_ptr, section_size);
+    Module *mod = module_new_from_iff_binary_maybe_in_ram(stats->glb, beam_ptr, section_size, section_name);
     if (mod == NULL) {
         ESP_LOGW(TAG, "Failed to load %s", section_name);
         return accum;
@@ -196,7 +196,7 @@ void app_main()
     avmpack_data->base.data = startup_avm;
     synclist_append(&glb->avmpack_data, &avmpack_data->base.avmpack_head);
 
-    Module *mod = module_new_from_iff_binary(glb, startup_beam, startup_beam_size);
+    Module *mod = module_new_from_iff_binary_maybe_in_ram(glb, startup_beam, startup_beam_size, startup_module_name);
     if (IS_NULL_PTR(mod)) {
         ESP_LOGE(TAG, "Error!  Unable to load startup module %s", startup_module_name);
         AVM_ABORT();
