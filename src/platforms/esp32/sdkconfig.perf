@@ -1,1 +1,7 @@
+# AtomVM ESP32 performance profile: trades a few KB of RAM for speed.
+#
+# Quad flash mode. The ROM loads the 2nd stage bootloader in DIO, which then
+# switches the flash to QIO. Measured on ESP32-C3: up to -35% on flash-bound
+# benchmarks, neutral otherwise, no RAM cost. The flash chip must support it.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_AVM_DEFAULT_ATOMS_IN_RAM=y
