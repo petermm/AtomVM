@@ -539,6 +539,84 @@ static void test_atom_table_bulk_grow(void)
 #undef PER_BATCH
 }
 
+static void test_atom_table_index_width(void)
+{
+    struct AtomTable *table = atom_table_new();
+    assert(table != NULL);
+    // Leave two slots below the compact-table limit. Copy strings because the
+    // stack buffer is reused, and verify both name and direct-index lookups.
+    for (uint32_t i = 0; i < UINT16_MAX - 2U; i++) {
+        char name[32];
+        int len = snprintf(name, sizeof(name), "width_atom_%u", i);
+        atom_index_t index;
+        assert(atom_table_ensure_atom(table, (const uint8_t *) name, len, AtomTableCopyAtom, &index) == AtomTableEnsureAtomOk);
+        assert(index == i);
+    }
+    const uint8_t batch[] = "\x0c"
+                            "width_bulk_a"
+                            "\x0c"
+                            "width_bulk_b"
+                            "\x0c"
+                            "width_bulk_c";
+    atom_index_t translate[3];
+#ifdef AVM_NO_COMPACT_ATOM_INDICES
+    const size_t batch_count = 3;
+    assert(sizeof(atom_index_t) == 4);
+#else
+    const size_t batch_count = 2;
+    assert(sizeof(atom_index_t) == 2);
+    // A rejected batch must not partially insert atoms.
+    assert(atom_table_ensure_atoms(table, batch, 3, translate, EnsureAtomsNoOpts) == AtomTableEnsureAtomAllocFail);
+    assert(atom_table_count(table) == UINT16_MAX - 2U);
+    assert(atom_table_get_index_from_cstring(table, "width_bulk_a") == (atom_index_t) -1);
+#endif
+    assert(atom_table_ensure_atoms(table, batch, batch_count, translate, EnsureAtomsNoOpts) == AtomTableEnsureAtomOk);
+    for (size_t i = 0; i < batch_count; i++) {
+        assert(translate[i] == UINT16_MAX - 2U + i);
+    }
+#ifdef AVM_NO_COMPACT_ATOM_INDICES
+    // Force another rehash after crossing 65535. High collision links and bucket
+    // heads must remain intact, including the atom whose ID used to be sentinel.
+    for (uint32_t i = 65536; i < 90000; i++) {
+        char name[32];
+        int len = snprintf(name, sizeof(name), "width_atom_%u", i);
+        atom_index_t index;
+        assert(atom_table_ensure_atom(table, (const uint8_t *) name, len, AtomTableCopyAtom, &index) == AtomTableEnsureAtomOk);
+        assert(index == i);
+    }
+    assert(atom_table_count(table) == 90000);
+    for (uint32_t i = 65536; i < 90000; i++) {
+        char name[32];
+        int len = snprintf(name, sizeof(name), "width_atom_%u", i);
+        assert(atom_table_get_index_from_cstring(table, name) == i);
+        size_t stored_len;
+        const uint8_t *data = atom_table_get_atom_string(table, i, &stored_len);
+        assert(data != NULL && stored_len == (size_t) len && memcmp(data, name, len) == 0);
+    }
+#else
+    assert(atom_table_count(table) == UINT16_MAX);
+    atom_index_t index;
+    assert(atom_table_ensure_atom(table, (const uint8_t *) "over_limit", 10, AtomTableCopyAtom, &index) == AtomTableEnsureAtomAllocFail);
+    assert(atom_table_count(table) == UINT16_MAX);
+#endif
+    for (size_t i = 0; i < batch_count; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "width_bulk_%c", (int) ('a' + i));
+        assert(atom_table_get_index_from_cstring(table, name) == UINT16_MAX - 2U + i);
+        size_t len;
+        const uint8_t *data = atom_table_get_atom_string(table, translate[i], &len);
+        assert(data != NULL && len == 12 && memcmp(data, name, len) == 0);
+    }
+    // Existing atoms remain available, including when the table is full.
+    atom_index_t found;
+    assert(atom_table_ensure_atom(table, (const uint8_t *) "width_atom_7", 12, AtomTableAlreadyExisting, &found) == AtomTableEnsureAtomOk);
+    assert(found == 7);
+    assert(atom_table_ensure_atoms(table, batch, batch_count, translate, EnsureAtomsNoOpts) == AtomTableEnsureAtomOk);
+    assert(translate[0] == 65533 && translate[1] == 65534);
+    assert(atom_table_get_index_from_cstring(table, "width_missing") == (atom_index_t) -1);
+    atom_table_destroy(table);
+}
+
 static void test_atom_table_default_atoms(void)
 {
     struct AtomTable *table = atom_table_new();
@@ -651,6 +729,7 @@ int main(int argc, char **argv)
     test_valueshashtable();
     test_atom_table();
     test_atom_table_bulk_grow();
+    test_atom_table_index_width();
     test_atom_table_default_atoms();
     test_atom_table_default_atoms_ram();
 

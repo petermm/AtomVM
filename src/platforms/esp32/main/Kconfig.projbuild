@@ -54,6 +54,17 @@ menu "AtomVM configuration"
             them from Flash. Increases heap usage by ~4-5 KB but improves runtime
             performance by avoiding Flash reads on atom lookups.
 
+    config AVM_COMPACT_ATOM_INDICES
+        bool "Use 16-bit atom indices to reduce RAM usage"
+        default y
+        help
+            Use 2-byte global atom IDs, hash bucket and collision indices, and
+            module atom translation slots. Limits the VM to 65535 atoms in total,
+            including default atoms. Disable to use 4-byte indices and support
+            more atoms, subject to available RAM and atom-term encoding limits.
+            Both modes retain flat indexed tables, geometric growth, and generated
+            default-atom lookup tables. Width selection happens at compile time.
+
     config AVM_LABT
         bool "Use pre-computed LabT flash tables for BEAM labels"
         default n

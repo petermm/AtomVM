@@ -306,6 +306,10 @@ if(DEFINED AVM_COMPACT_LABELS AND NOT AVM_COMPACT_LABELS)
     target_compile_definitions(libAtomVM PUBLIC AVM_NO_COMPACT_LABELS)
 endif()
 
+if(DEFINED AVM_COMPACT_ATOM_INDICES AND NOT AVM_COMPACT_ATOM_INDICES)
+    target_compile_definitions(libAtomVM PUBLIC AVM_NO_COMPACT_ATOM_INDICES)
+endif()
+
 # Automatically use zlib if present to load .beam files
 if ((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") OR
     (${CMAKE_SYSTEM_NAME} STREQUAL "Linux") OR

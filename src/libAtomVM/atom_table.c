@@ -46,7 +46,9 @@
 #define DEFAULT_SIZE 32
 #endif
 #define MAX_ATOM_LEN ((1 << 12) - 1)
-#define ATOM_TABLE_NOT_FOUND_MARKER ((atom_index_t) 0xFFFF)
+#define ATOM_TABLE_NOT_FOUND_MARKER ((atom_index_t) -1)
+// Reserve the sentinel and never allocate an ID that cannot fit in an atom term.
+#define ATOM_TABLE_MAX_ATOMS MINI((size_t) ATOM_TABLE_NOT_FOUND_MARKER, (size_t) (UINTPTR_MAX >> TERM_IMMED2_TAG_SIZE) + 1)
 
 #define ATOM_TABLE_THRESHOLD(capacity) (capacity + (capacity >> 2))
 #define ATOM_STRING_CHUNK_SIZE 512
@@ -306,8 +308,8 @@ static bool ensure_entries_capacity(struct AtomTable *table, size_t needed)
     while (new_cap < needed) {
         new_cap *= 2;
     }
-    if (new_cap > ATOM_TABLE_NOT_FOUND_MARKER) {
-        new_cap = ATOM_TABLE_NOT_FOUND_MARKER;
+    if (new_cap > ATOM_TABLE_MAX_ATOMS) {
+        new_cap = ATOM_TABLE_MAX_ATOMS;
     }
     if (new_cap < needed) {
         return false;
@@ -427,7 +429,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atom(
         return AtomTableEnsureAtomNotFound;
     }
 
-    if (table->count >= ATOM_TABLE_NOT_FOUND_MARKER) {
+    if (table->count >= ATOM_TABLE_MAX_ATOMS) {
         SMP_UNLOCK(table);
         return AtomTableEnsureAtomAllocFail;
     }
@@ -513,7 +515,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atoms(struct AtomTable *table, 
     }
 
     if (new_atoms_count > 0) {
-        if (table->count + new_atoms_count >= ATOM_TABLE_NOT_FOUND_MARKER) {
+        if (new_atoms_count > ATOM_TABLE_MAX_ATOMS - table->count) {
             SMP_UNLOCK(table);
             return AtomTableEnsureAtomAllocFail;
         }

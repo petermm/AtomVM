@@ -515,6 +515,36 @@ static void test_labt_label_count(void)
 }
 #endif
 
+#ifdef AVM_NO_COMPACT_ATOM_INDICES
+static void test_module_wide_atom_index(void)
+{
+    GlobalContext *global = globalcontext_new();
+    assert(global != NULL);
+    while (atom_table_count(global->atom_table) < 65536) {
+        char name[32];
+        size_t expected = atom_table_count(global->atom_table);
+        int len = snprintf(name, sizeof(name), "module_width_%zu", expected);
+        atom_index_t index;
+        assert(atom_table_ensure_atom(global->atom_table, (const uint8_t *) name, len, AtomTableCopyAtom, &index) == AtomTableEnsureAtomOk);
+        assert(index == expected);
+    }
+    size_t beam_size;
+    uint8_t *pack = make_pack("wide_module", false, &beam_size);
+    const void *beam;
+    uint32_t section_size;
+    assert(avmpack_find_section_by_name(pack, "wide_module.beam", &beam, &section_size));
+    reset_allocations(0);
+    Module *mod = module_new_from_iff_binary(global, beam, beam_size);
+    assert(mod != NULL);
+    assert(mod->local_atoms_to_global_table[1] == 65536);
+    assert(module_get_name(mod) == 0x40000B);
+    assert(atom_table_get_index_from_cstring(global->atom_table, "wide_module") == 65536);
+    module_destroy(mod);
+    globalcontext_destroy(global);
+    free(pack);
+}
+#endif
+
 int main(void)
 {
     // Fail the copy, Module allocation, or unresolved import after atom insertion.
@@ -523,6 +553,9 @@ int main(void)
         test_module_in_ram(true, fail_at);
     }
     test_truncated_beam();
+#ifdef AVM_NO_COMPACT_ATOM_INDICES
+    test_module_wide_atom_index();
+#endif
 #ifndef AVM_NO_EMU
     test_labt_roundtrip(17);
     test_labt_roundtrip(UINT16_MAX - 20);
