@@ -23,10 +23,22 @@
 -define(MAX_ATOM_LEN, 4095).
 
 main([Archive, Generic, Platform, Output]) ->
+    generate_archive(Archive, Generic, Platform, Output, module_names);
+main(["--all-atoms", Archive, Generic, Platform, Output]) ->
+    generate_archive(Archive, Generic, Platform, Output, all_atoms);
+main(_) ->
+    io:format(
+        standard_error,
+        "usage: gen_library_atoms.escript [--all-atoms] <archive.avm> <generic.def> <platform.def> <output.h>~n",
+        []
+    ),
+    halt(2).
+
+generate_archive(Archive, Generic, Platform, Output, Mode) ->
     try
         Builtins = read_def(Generic) ++ read_def(Platform),
-        Modules = read_avm(Archive),
-        Additional = lists:usort([Name || Name <- Modules, not lists:member(Name, Builtins)]),
+        Names = read_avm(Archive, Mode),
+        Additional = lists:usort([Name || Name <- Names, not lists:member(Name, Builtins)]),
         check_lengths(Additional),
         Header = generate(length(Builtins), Additional),
         Changed = write_if_changed(Output, Header),
@@ -41,14 +53,7 @@ main([Archive, Generic, Platform, Output]) ->
         Class:Reason:Stack ->
             io:format(standard_error, "gen_library_atoms: ~p:~p~n~p~n", [Class, Reason, Stack]),
             halt(1)
-    end;
-main(_) ->
-    io:format(
-        standard_error,
-        "usage: gen_library_atoms.escript <archive.avm> <generic.def> <platform.def> <output.h>~n",
-        []
-    ),
-    halt(2).
+    end.
 
 read_file(Path) ->
     case file:read_file(Path) of
@@ -160,18 +165,20 @@ take_hex(Rest, Acc) ->
 take_octal([C | Rest], Acc, N) when N > 0, C >= $0, C =< $7 -> take_octal(Rest, [C | Acc], N - 1);
 take_octal(Rest, Acc, _) -> {lists:reverse(Acc), Rest}.
 
-read_avm(Path) ->
+read_avm(Path, Mode) ->
     case read_file(Path) of
-        <<"#!/usr/bin/env AtomVM\n", 0, 0, Rest/binary>> -> parse_members(Rest, Path, 24, []);
+        <<"#!/usr/bin/env AtomVM\n", 0, 0, Rest/binary>> -> parse_members(Rest, Path, 24, [], Mode);
         _ -> throw({error, io_lib:format("~s: invalid AVM v1 header", [Path])})
     end.
 
-parse_members(<<0:32/big, Flags:32/big, Reserved:32/big, Tail/binary>>, Path, Offset, Acc) ->
+parse_members(<<0:32/big, Flags:32/big, Reserved:32/big, Tail/binary>>, Path, Offset, Acc, _) ->
     case {Flags, Reserved, Tail} of
-        {0, 0, <<"end", 0>>} -> lists:reverse(Acc);
+        {0, 0, <<"end", 0>>} -> lists:append(lists:reverse(Acc));
         _ -> throw({error, io_lib:format("~s: malformed end marker at byte ~B", [Path, Offset])})
     end;
-parse_members(<<Size:32/big, Flags:32/big, Reserved:32/big, _/binary>> = All, Path, Offset, Acc) ->
+parse_members(
+    <<Size:32/big, Flags:32/big, Reserved:32/big, _/binary>> = All, Path, Offset, Acc, Mode
+) ->
     if
         Size < 16 ->
             throw(
@@ -190,12 +197,12 @@ parse_members(<<Size:32/big, Flags:32/big, Reserved:32/big, _/binary>> = All, Pa
             {Name, Beam} = member_body(Body, Path, Offset),
             NewAcc =
                 case Flags band 2 of
-                    2 -> [beam_module(Beam, Path, Offset, Name) | Acc];
+                    2 -> [beam_atoms(Beam, Path, Offset, Name, Mode) | Acc];
                     _ -> Acc
                 end,
-            parse_members(Rest, Path, Offset + Size, NewAcc)
+            parse_members(Rest, Path, Offset + Size, NewAcc, Mode)
     end;
-parse_members(_, Path, Offset, _) ->
+parse_members(_, Path, Offset, _, _) ->
     throw({error, io_lib:format("~s: truncated member header at byte ~B", [Path, Offset])}).
 
 member_body(Body, Path, Offset) ->
@@ -228,11 +235,16 @@ member_body(Body, Path, Offset) ->
             end
     end.
 
-beam_module(Beam, Path, Offset, MemberName) ->
+beam_atoms(Beam, Path, Offset, MemberName, Mode) ->
     try
         case beam_lib:chunks(Beam, [atoms]) of
-            {ok, {Module, [{atoms, [{1, Module} | _]}]}} when is_atom(Module) ->
-                atom_to_binary(Module, utf8);
+            {ok, {Module, [{atoms, [{1, Module} | _] = Atoms}]}} when is_atom(Module) ->
+                Names =
+                    case Mode of
+                        module_names -> [Module];
+                        all_atoms -> [Atom || {_, Atom} <- Atoms]
+                    end,
+                [atom_to_binary(Atom, utf8) || Atom <- Names];
             {error, beam_lib, Why} ->
                 erlang:error(Why);
             _ ->
@@ -243,7 +255,7 @@ beam_module(Beam, Path, Offset, MemberName) ->
             throw(
                 {error,
                     io_lib:format(
-                        "~s: cannot extract module name from BEAM member ~ts at byte ~B "
+                        "~s: cannot extract atoms from BEAM member ~ts at byte ~B "
                         "(~p:~0P; generator OTP ~s). Use the archive-producing OTP toolchain "
                         "or a compatible newer release.",
                         [
@@ -267,7 +279,7 @@ check_lengths(Names) ->
             throw(
                 {error,
                     io_lib:format(
-                        "module atom is ~B bytes; maximum is ~B: ~tp",
+                        "atom is ~B bytes; maximum is ~B: ~tp",
                         [byte_size(N), ?MAX_ATOM_LEN, N]
                     )}
             )

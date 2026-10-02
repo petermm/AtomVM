@@ -48,6 +48,7 @@ option(AVM_LABT "Use pre-computed LabT flash tables for BEAM labels" OFF)
 option(AVM_COMPACT_LABELS "Use 16-bit label offsets when Code fits" ON)
 option(AVM_COMPACT_ATOM_INDICES "Use 16-bit atom indices to reduce RAM usage" ON)
 option(AVM_STATIC_LIBRARY_ATOMS "Reserve boot-library module names as static atoms" OFF)
+option(AVM_STATIC_LIBRARY_ALL_ATOMS "Reserve all boot-library atom-chunk names as static atoms" OFF)
 set(AVM_STATIC_LIBRARY_ATOMS_ARCHIVE "" CACHE FILEPATH "Prebuilt boot archive supplying static module atoms")
 
 if(AVM_DEFAULT_ATOMS_IN_RAM)

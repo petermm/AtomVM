@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.0-beta.1] - Unreleased
 
 ### Added
+- Added opt-in `AVM_STATIC_LIBRARY_ALL_ATOMS` (ESP32:
+  `CONFIG_AVM_STATIC_LIBRARY_ALL_ATOMS`) to extend the experimental static
+  registry to all selected boot-library atom-chunk names, not just module names.
+  Requires `AVM_STATIC_LIBRARY_ATOMS`; both options remain disabled by default.
 - Added opt-in experimental `AVM_STATIC_LIBRARY_ATOMS` (ESP32:
   `CONFIG_AVM_STATIC_LIBRARY_ATOMS`) to reserve module-name atoms from a prebuilt
   boot archive. Flash placement avoids dynamic atom entries for these names;

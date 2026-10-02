@@ -163,12 +163,22 @@ $ cmake -S . -B build-static-atoms -DAVM_STATIC_LIBRARY_ATOMS=ON \
 $ cmake --build build-static-atoms
 ```
 
+To include every atom in the selected boot BEAMs' `AtU8` chunks (or legacy `Atom`
+chunks), also enable `AVM_STATIC_LIBRARY_ALL_ATOMS`. This flag defaults to `OFF`
+and requires `AVM_STATIC_LIBRARY_ATOMS=ON`; without it, only module names are
+registered. For example, add `-DAVM_STATIC_LIBRARY_ALL_ATOMS=ON` to the configure
+command above. Names shared by modules and builtin names are deduplicated.
+Atoms found only in literal ETF data are not scanned. Application-only and
+runtime-created names outside the registry remain dynamic.
+
 With `AVM_DEFAULT_ATOMS_IN_RAM=OFF`, registered names and lookup metadata stay in
 read-only storage and need no dynamic RAM entries. With it `ON`, all registered
 names are copied to RAM at startup. Both 16-bit and 32-bit atom indices are
 supported, independently of LabT. Module-local atom mappings still reside in RAM.
 The generated name pool duplicates text in the BEAM archive, increasing flash
 usage; RAM savings depend on which modules load and atom-table capacity boundaries.
+The all-atoms mode enlarges this pool and can change lookup performance; it does
+not guarantee a speedup or RAM savings with RAM defaults enabled.
 
 This changes observable behavior: `erlang:system_info(atom_count)` includes the
 whole registry from startup, and `binary_to_existing_atom` recognizes these names
@@ -179,7 +189,8 @@ the archive on a device does not update the firmware's registry.
 Generation requires `escript` from the archive-producing OTP toolchain or a
 compatible newer release. In particular, compact-length `AtU8` atom chunks
 require OTP 28 or newer. Extraction uses `beam_lib` to decode atom chunks in the
-host VM and emits only module names; it is not complete BEAM validation.
+host VM and emits names according to the selected mode; it is not complete BEAM
+validation.
 This first version supports Generic UNIX and ESP32 interpreter-only builds;
 JIT and precompiled-code builds are rejected.
 Run generator tests with `cmake --build <build-directory> --target test-gen-library-atoms`.
@@ -324,6 +335,9 @@ the selected `build/libs/esp32boot/esp32boot.avm`, or `elixir_esp32boot.avm` wit
 Elixir support enabled. This includes all modules packed into that archive,
 including generated Elixir modules; unrelated platforms and applications are
 not scanned. Missing archives and unsupported boot layouts fail configuration.
+To include all atom-chunk names rather than only module names, also select
+"Include all boot-library atom-chunk names"
+(`CONFIG_AVM_STATIC_LIBRARY_ALL_ATOMS=y`). This option defaults to disabled.
 
 You can now build AtomVM using the build command:
 

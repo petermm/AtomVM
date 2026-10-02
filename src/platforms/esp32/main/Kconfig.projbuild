@@ -69,6 +69,20 @@ menu "AtomVM configuration"
             Module atom mappings remain in RAM; application-only atoms still
             use the dynamic table. Independent of atom index width and LabT.
 
+    config AVM_STATIC_LIBRARY_ALL_ATOMS
+        bool "Include all boot-library atom-chunk names (experimental)"
+        depends on AVM_STATIC_LIBRARY_ATOMS
+        default n
+        help
+            Extend the static registry to every atom in the selected boot BEAMs'
+            AtU8 (or legacy Atom) chunks, not just module names. Does not scan
+            atoms occurring only in literal ETF data or unrelated archives.
+            With flash defaults, this can reduce dynamic atom-table RAM at the
+            cost of more flash and workload-dependent lookup performance.
+            With RAM defaults, the larger registry is copied to RAM at startup.
+            All registered names count as existing atoms before modules load.
+            Module-local atom mappings remain in RAM.
+
     config AVM_COMPACT_ATOM_INDICES
         bool "Use 16-bit atom indices to reduce RAM usage"
         default y

@@ -102,6 +102,7 @@ run_tests(Generator, Tmp) ->
 
     test_empty(Generator, Tmp),
     test_wide_indices(Generator, Tmp),
+    test_all_atoms(Generator, Tmp, Generic, Platform),
     test_failures(Generator, Tmp, Generic, Platform).
 
 test_empty(Generator, Tmp) ->
@@ -137,6 +138,63 @@ test_wide_indices(Generator, Tmp) ->
     {0, _} = command(Generator, [Avm, Def, Def, Out]),
     {ok, H} = file:read_file(Out),
     assert(lists:max(array(H, "library_atoms_by_len")) =:= 269, wide_metadata).
+
+test_all_atoms(Generator, Tmp, Generic, Platform) ->
+    Extra = unicode:characters_to_binary("vø"),
+    Beams = [
+        {<<"wrong-a">>, make_beam(<<"library_a">>, binary_to_atom(Extra, utf8))},
+        {<<"wrong-b">>, make_beam(<<"library_b">>, dup)},
+        {<<"wrong-c">>, make_beam(<<"library_c">>, '')}
+    ],
+    Archive = path(Tmp, "all-atoms.avm"),
+    write_avm(Archive, Beams ++ Beams),
+    Output = path(Tmp, "all-atoms.h"),
+    Args = [Archive, Generic, Platform, Output],
+    {0, _} = command(Generator, Args),
+    {ok, ModuleHeader} = file:read_file(Output),
+    assert(macro(ModuleHeader, "LIBRARY_ATOMS_COUNT") =:= 3, module_only_count),
+    assert(
+        array(ModuleHeader, "library_atoms_data") =:= "library_alibrary_blibrary_c",
+        module_only_names
+    ),
+    {0, _} = command(Generator, ["--all-atoms" | Args]),
+    {ok, AllHeader} = file:read_file(Output),
+    %% f is repeated in every BEAM; dup is already a builtin; assets are ignored.
+    %% The compiler also emits module_info exports and an erlang:get_module_info import.
+    Expected = [
+        <<>>,
+        <<"erlang">>,
+        <<"f">>,
+        <<"get_module_info">>,
+        <<"library_a">>,
+        <<"library_b">>,
+        <<"library_c">>,
+        <<"module_info">>,
+        Extra
+    ],
+    assert(macro(AllHeader, "LIBRARY_ATOMS_COUNT") =:= 9, all_atom_count),
+    assert(macro(AllHeader, "LIBRARY_ATOMS_BUILTIN_COUNT") =:= 3, all_atom_builtin_count),
+    assert(
+        array(AllHeader, "library_atoms_data") =:= binary_to_list(iolist_to_binary(Expected)),
+        all_atom_names
+    ),
+    assert(
+        array(AllHeader, "library_atoms_offsets") =:= expected_offsets(Expected), all_atom_offsets
+    ),
+    assert(
+        array(AllHeader, "library_atoms_by_len") =:= [0, 2, 8, 1, 4, 5, 6, 7, 3], all_atom_by_length
+    ),
+    assert(
+        array(AllHeader, "library_atoms_len_offsets") =:=
+            [0, 1, 2, 2, 3, 3, 3, 4, 4, 4, 7, 7, 8, 8, 8, 8, 9],
+        all_atom_length_boundaries
+    ),
+    write_avm(Archive, lists:reverse(Beams)),
+    {0, Log} = command(Generator, ["--all-atoms" | Args]),
+    assert(contains(Log, <<"unchanged">>), all_atom_determinism),
+    {ok, AllHeader} = file:read_file(Output),
+    {0, _} = command(Generator, Args),
+    {ok, ModuleHeader} = file:read_file(Output).
 
 test_failures(Generator, Tmp, Generic, Platform) ->
     BadAvm = path(Tmp, "bad.avm"),
@@ -205,6 +263,32 @@ run_build_tests(Root, Tmp, BuildGenerator) ->
     {0, _} = configure_build(Root, Build, BuildGenerator, ["-DAVM_STATIC_LIBRARY_ATOMS=OFF"]),
     {0, _} = configure_build(Root, Build, BuildGenerator, ["-DAVM_STATIC_LIBRARY_ATOMS=ON"]),
     assert(not contains(build_registry(Build), <<"library atoms:">>), reenabled_unchanged_registry),
+    {0, _} = configure_build(Root, Build, BuildGenerator, ["-DAVM_STATIC_LIBRARY_ALL_ATOMS=ON"]),
+    assert(contains(build_registry(Build), <<"updated">>), all_atom_mode_enabled),
+    {ok, AllHeader} = file:read_file(Header),
+    %% ok is a builtin, f is not: the archive itself has not changed.
+    assert(array(AllHeader, "library_atoms_data") =:= "flibrary_b", all_atom_mode_contents),
+    assert(not contains(build_registry(Build), <<"library atoms:">>), all_atom_mode_noop),
+    {StatusAll, LogAll} = configure_build(
+        Root,
+        Build,
+        BuildGenerator,
+        ["-DAVM_STATIC_LIBRARY_ATOMS=OFF"]
+    ),
+    assert(
+        StatusAll =/= 0 andalso
+            contains(LogAll, <<"AVM_STATIC_LIBRARY_ALL_ATOMS requires AVM_STATIC_LIBRARY_ATOMS">>),
+        all_atom_mode_requires_registry
+    ),
+    {0, _} = configure_build(
+        Root,
+        Build,
+        BuildGenerator,
+        ["-DAVM_STATIC_LIBRARY_ATOMS=ON", "-DAVM_STATIC_LIBRARY_ALL_ATOMS=OFF"]
+    ),
+    assert(contains(build_registry(Build), <<"updated">>), all_atom_mode_disabled),
+    {ok, SelectedHeader} = file:read_file(Header),
+    assert(not contains(build_registry(Build), <<"library atoms:">>), module_mode_noop),
     SelectionAlias = path(Tmp, "selection-alias.avm"),
     ok = file:make_symlink(Archive, SelectionAlias),
     {0, _} = configure_build(
@@ -290,12 +374,15 @@ build_registry(Build) ->
     Log.
 
 make_beam(Name) ->
+    make_beam(Name, ok).
+
+make_beam(Name, ReturnAtom) ->
     CompileName = binary:replace(Name, <<0>>, <<"X">>, [global]),
     Module = binary_to_atom(CompileName, utf8),
     Forms = [
         {attribute, 1, module, Module},
         {attribute, 2, export, [{f, 0}]},
-        {function, 3, f, 0, [{clause, 3, [], [], [{atom, 3, ok}]}]}
+        {function, 3, f, 0, [{clause, 3, [], [], [{atom, 3, ReturnAtom}]}]}
     ],
     {ok, Module, Beam} = compile:forms(Forms, [binary]),
     binary:replace(Beam, CompileName, Name, [global]).

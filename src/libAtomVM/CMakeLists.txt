@@ -137,6 +137,9 @@ endif()
 
 add_library(libAtomVM ${SOURCE_FILES} ${HEADER_FILES})
 generate_defaultatoms(libAtomVM "${CMAKE_CURRENT_SOURCE_DIR}/defaultatoms.def" "${CMAKE_CURRENT_BINARY_DIR}/defaultatoms_tables.h" generic)
+if(AVM_STATIC_LIBRARY_ALL_ATOMS AND NOT AVM_STATIC_LIBRARY_ATOMS)
+    message(FATAL_ERROR "AVM_STATIC_LIBRARY_ALL_ATOMS requires AVM_STATIC_LIBRARY_ATOMS")
+endif()
 if(AVM_STATIC_LIBRARY_ATOMS)
     if(NOT AVM_DISABLE_JIT OR AVM_ENABLE_PRECOMPILED)
         message(FATAL_ERROR "AVM_STATIC_LIBRARY_ATOMS currently requires an interpreter-only build")
@@ -156,13 +159,17 @@ if(AVM_STATIC_LIBRARY_ATOMS)
         message(FATAL_ERROR "escript is required to generate static library atoms")
     endif()
     set(_library_atoms_generator "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/gen_library_atoms.escript")
-    # A changed archive selection must regenerate even if the new archive is older.
+    set(_library_atoms_options)
+    if(AVM_STATIC_LIBRARY_ALL_ATOMS)
+        list(APPEND _library_atoms_options --all-atoms)
+    endif()
+    # Archive selection and collection mode must invalidate the success stamp.
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library_atoms_config.txt"
-        CONTENT "${_library_atoms_archive}\n${_library_atoms_archive_real}\n${AVM_PLATFORM_ATOMS_DEF}\n")
+        CONTENT "${_library_atoms_archive}\n${_library_atoms_archive_real}\n${AVM_PLATFORM_ATOMS_DEF}\n${_library_atoms_options}\n")
     add_custom_command(
         OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.stamp"
         BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.h"
-        COMMAND "${ESCRIPT_PATH}" "${_library_atoms_generator}" "${_library_atoms_archive}"
+        COMMAND "${ESCRIPT_PATH}" "${_library_atoms_generator}" ${_library_atoms_options} "${_library_atoms_archive}"
             "${CMAKE_CURRENT_SOURCE_DIR}/defaultatoms.def" "${AVM_PLATFORM_ATOMS_DEF}"
             "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.h"
         COMMAND "${CMAKE_COMMAND}" -E touch "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.stamp"

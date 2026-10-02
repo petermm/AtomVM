@@ -74,6 +74,7 @@ endif()
 
 include(../../GetBootAVM.cmake)
 set(AVM_STATIC_LIBRARY_ATOMS "${CONFIG_AVM_STATIC_LIBRARY_ATOMS}")
+set(AVM_STATIC_LIBRARY_ALL_ATOMS "${CONFIG_AVM_STATIC_LIBRARY_ALL_ATOMS}")
 if(AVM_STATIC_LIBRARY_ATOMS)
     if(BOOT_LIBS STREQUAL "NONE")
         message(FATAL_ERROR "Static library atoms require a supported boot archive layout")
