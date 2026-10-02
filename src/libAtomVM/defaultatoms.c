@@ -27,6 +27,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef AVM_STATIC_LIBRARY_ATOMS
+#include "library_atoms.h"
+#include "platform_defaultatoms.h"
+
+_Static_assert(LIBRARY_ATOMS_BUILTIN_COUNT == ATOM_FIRST_AVAIL_INDEX, "library atom defaults mismatch");
+_Static_assert((size_t) LIBRARY_ATOMS_BUILTIN_COUNT + LIBRARY_ATOMS_COUNT <= (atom_index_t) -1,
+    "static library atoms exceed the atom index limit");
+_Static_assert((size_t) LIBRARY_ATOMS_BUILTIN_COUNT + LIBRARY_ATOMS_COUNT - 1 <= UINTPTR_MAX >> TERM_IMMED2_TAG_SIZE,
+    "static library atoms exceed the atom term limit");
+#endif
+
 // About X macro: https://en.wikipedia.org/wiki/X_macro
 #define X(name, lenstr, str) \
     lenstr str,
@@ -39,6 +50,15 @@ static const char *const generic_atoms[] = {
 };
 #undef X
 
+atom_index_t defaultatoms_count(void)
+{
+#ifdef AVM_STATIC_LIBRARY_ATOMS
+    return LIBRARY_ATOMS_BUILTIN_COUNT + LIBRARY_ATOMS_COUNT;
+#else
+    return platform_defaultatoms_count();
+#endif
+}
+
 const uint8_t *defaultatoms_get_atom_string(atom_index_t index, size_t *out_len)
 {
     if (index < PLATFORM_ATOMS_BASE_INDEX) {
@@ -46,6 +66,16 @@ const uint8_t *defaultatoms_get_atom_string(atom_index_t index, size_t *out_len)
         *out_len = (size_t) (uint8_t) entry[0];
         return (const uint8_t *) (entry + 1);
     }
+#ifdef AVM_STATIC_LIBRARY_ATOMS
+    if (index >= LIBRARY_ATOMS_BUILTIN_COUNT) {
+        size_t local_index = index - LIBRARY_ATOMS_BUILTIN_COUNT;
+        if (local_index >= LIBRARY_ATOMS_COUNT) {
+            return NULL;
+        }
+        *out_len = library_atoms_offsets[local_index + 1] - library_atoms_offsets[local_index];
+        return library_atoms_data + library_atoms_offsets[local_index];
+    }
+#endif
     return platform_defaultatoms_get_atom_string(index, out_len);
 }
 
@@ -73,7 +103,30 @@ bool defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t
             }
         }
     }
-    return platform_defaultatoms_lookup(atom_data, atom_len, out_index);
+    if (platform_defaultatoms_lookup(atom_data, atom_len, out_index)) {
+        return true;
+    }
+#ifdef AVM_STATIC_LIBRARY_ATOMS
+    if (atom_len <= LIBRARY_ATOMS_MAX_LEN) {
+        size_t low = library_atoms_len_offsets[atom_len];
+        size_t high = library_atoms_len_offsets[atom_len + 1];
+        while (low < high) {
+            size_t mid = low + (high - low) / 2;
+            uint32_t index = library_atoms_by_len[mid];
+            const uint8_t *data = library_atoms_data + library_atoms_offsets[index];
+            int cmp = memcmp(atom_data, data, atom_len);
+            if (cmp == 0) {
+                *out_index = (atom_index_t) (LIBRARY_ATOMS_BUILTIN_COUNT + index);
+                return true;
+            } else if (cmp < 0) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+    }
+#endif
+    return false;
 }
 
 void defaultatoms_init(GlobalContext *glb)
@@ -88,7 +141,17 @@ void defaultatoms_init(GlobalContext *glb)
         }
     }
 #else
-    atom_table_set_default_atoms(glb->atom_table, platform_defaultatoms_count());
+    atom_table_set_default_atoms(glb->atom_table, defaultatoms_count());
 #endif
     platform_defaultatoms_init(glb);
+#if defined(AVM_STATIC_LIBRARY_ATOMS) && (defined(CONFIG_AVM_DEFAULT_ATOMS_IN_RAM) || defined(AVM_DEFAULT_ATOMS_IN_RAM))
+    for (size_t i = LIBRARY_ATOMS_BUILTIN_COUNT; i < defaultatoms_count(); i++) {
+        size_t len;
+        const uint8_t *data = defaultatoms_get_atom_string((atom_index_t) i, &len);
+        term atom_term = globalcontext_insert_atom_maybe_copy(glb, data, len, true);
+        if (UNLIKELY(term_to_atom_index(atom_term) != i)) {
+            AVM_ABORT();
+        }
+    }
+#endif
 }

@@ -73,6 +73,7 @@ static inline bool atom_is_boolean(term t)
 }
 
 void defaultatoms_init(GlobalContext *glb);
+atom_index_t defaultatoms_count(void);
 
 void platform_defaultatoms_init(GlobalContext *glb);
 

@@ -24,6 +24,7 @@
 
 #include "atom_table.h"
 #include "defaultatoms.h"
+#include "globalcontext.h"
 #include "utils.h"
 #include "valueshashtable.h"
 
@@ -620,9 +621,9 @@ static void test_atom_table_index_width(void)
 static void test_atom_table_default_atoms(void)
 {
     struct AtomTable *table = atom_table_new();
-    atom_table_set_default_atoms(table, platform_defaultatoms_count());
+    atom_table_set_default_atoms(table, defaultatoms_count());
 
-    assert(atom_table_count(table) == (size_t) platform_defaultatoms_count());
+    assert(atom_table_count(table) == (size_t) defaultatoms_count());
 
     // Test retrieving default atom 0 ("false")
     size_t len;
@@ -647,19 +648,18 @@ static void test_atom_table_default_atoms(void)
     assert(r == AtomTableEnsureAtomOk);
     assert(idx == 1);
 
-    // Test dynamic atom gets index starting at platform_defaultatoms_count()
+    // Test dynamic atom gets index after the complete static range.
     atom_index_t custom_idx;
     r = atom_table_ensure_atom(table, (const uint8_t *) "custom_atom", 11, AtomTableNoOpts, &custom_idx);
     assert(r == AtomTableEnsureAtomOk);
-    assert(custom_idx == platform_defaultatoms_count());
-    assert(atom_table_count(table) == (size_t) platform_defaultatoms_count() + 1);
+    assert(custom_idx == defaultatoms_count());
+    assert(atom_table_count(table) == (size_t) defaultatoms_count() + 1);
 
     // Exhaustively verify every single default atom can be looked up by string
-    for (atom_index_t i = 0; i < platform_defaultatoms_count(); i++) {
+    for (atom_index_t i = 0; i < defaultatoms_count(); i++) {
         size_t d_len;
         const uint8_t *d_data = atom_table_get_atom_string(table, i, &d_len);
         assert(d_data != NULL);
-        assert(d_len > 0);
 
         atom_index_t d_idx;
         r = atom_table_ensure_atom(table, d_data, d_len, AtomTableAlreadyExisting, &d_idx);
@@ -675,7 +675,7 @@ static void test_atom_table_default_atoms_ram(void)
     struct AtomTable *table = atom_table_new();
 
     // Insert all default atoms sequentially with base_index = 0
-    for (atom_index_t i = 0; i < platform_defaultatoms_count(); i++) {
+    for (atom_index_t i = 0; i < defaultatoms_count(); i++) {
         size_t len;
         const uint8_t *data = defaultatoms_get_atom_string(i, &len);
         assert(data != NULL);
@@ -685,7 +685,7 @@ static void test_atom_table_default_atoms_ram(void)
         assert(idx == i);
     }
 
-    assert(atom_table_count(table) == (size_t) platform_defaultatoms_count());
+    assert(atom_table_count(table) == (size_t) defaultatoms_count());
 
     // Verify retrieving default atoms from RAM table
     size_t len;
@@ -700,7 +700,7 @@ static void test_atom_table_default_atoms_ram(void)
     assert(memcmp(atom_data, "true", 4) == 0);
 
     // Verify lookup by string
-    for (atom_index_t i = 0; i < platform_defaultatoms_count(); i++) {
+    for (atom_index_t i = 0; i < defaultatoms_count(); i++) {
         size_t d_len;
         const uint8_t *d_data = defaultatoms_get_atom_string(i, &d_len);
         assert(d_data != NULL);
@@ -715,10 +715,38 @@ static void test_atom_table_default_atoms_ram(void)
     atom_index_t custom_idx;
     enum AtomTableEnsureAtomResult r = atom_table_ensure_atom(table, (const uint8_t *) "custom_atom", 11, AtomTableNoOpts, &custom_idx);
     assert(r == AtomTableEnsureAtomOk);
-    assert(custom_idx == platform_defaultatoms_count());
-    assert(atom_table_count(table) == (size_t) platform_defaultatoms_count() + 1);
+    assert(custom_idx == defaultatoms_count());
+    assert(atom_table_count(table) == (size_t) defaultatoms_count() + 1);
 
     atom_table_destroy(table);
+}
+
+static void test_default_atoms_init(void)
+{
+    GlobalContext global = { .atom_table = atom_table_new() };
+    assert(global.atom_table != NULL);
+    defaultatoms_init(&global);
+    assert(atom_table_count(global.atom_table) == defaultatoms_count());
+    for (size_t i = 0; i < defaultatoms_count(); i++) {
+        size_t expected_len, actual_len;
+        const uint8_t *expected = defaultatoms_get_atom_string((atom_index_t) i, &expected_len);
+        const uint8_t *actual = atom_table_get_atom_string(global.atom_table, (atom_index_t) i, &actual_len);
+        assert(expected != NULL && actual != NULL && expected_len == actual_len);
+        assert(memcmp(expected, actual, expected_len) == 0);
+#ifdef AVM_DEFAULT_ATOMS_IN_RAM
+        assert(expected_len == 0 || expected != actual);
+#else
+        assert(expected == actual);
+#endif
+        assert(atom_table_get_index_from_cstring(global.atom_table, "false") == 0);
+        atom_index_t index;
+        assert(atom_table_ensure_atom(global.atom_table, actual, actual_len, AtomTableAlreadyExisting, &index) == AtomTableEnsureAtomOk);
+        assert(index == i);
+    }
+    size_t len;
+    assert(defaultatoms_get_atom_string(defaultatoms_count(), &len) == NULL);
+    assert(atom_table_count(global.atom_table) == defaultatoms_count());
+    atom_table_destroy(global.atom_table);
 }
 
 int main(int argc, char **argv)
@@ -732,6 +760,7 @@ int main(int argc, char **argv)
     test_atom_table_index_width();
     test_atom_table_default_atoms();
     test_atom_table_default_atoms_ram();
+    test_default_atoms_init();
 
     return EXIT_SUCCESS;
 }

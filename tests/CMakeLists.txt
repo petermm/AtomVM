@@ -123,6 +123,22 @@ target_compile_features(test-module PRIVATE c_std_11)
 target_include_directories(test-module PRIVATE ../src/libAtomVM)
 target_link_libraries(test-module PRIVATE libAtomVM libAtomVM${PLATFORM_LIB_SUFFIX})
 
+# Run independently of the static-registry option, using synthetic AVM archives.
+find_program(ESCRIPT_PATH escript)
+if(ESCRIPT_PATH)
+    add_custom_target(test-gen-library-atoms
+        COMMAND "${ESCRIPT_PATH}" "${CMAKE_CURRENT_SOURCE_DIR}/test_gen_library_atoms.escript"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+        VERBATIM
+    )
+    add_custom_target(test-gen-library-atoms-build
+        COMMAND "${ESCRIPT_PATH}" "${CMAKE_CURRENT_SOURCE_DIR}/test_gen_library_atoms.escript"
+            --build "${CMAKE_GENERATOR}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+        VERBATIM
+    )
+endif()
+
 # Except for XCode, also compile beams
 if (NOT "${CMAKE_GENERATOR}" MATCHES "Xcode")
     add_dependencies(test-erlang erlang_test_modules)

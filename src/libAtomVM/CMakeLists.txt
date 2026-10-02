@@ -137,6 +137,47 @@ endif()
 
 add_library(libAtomVM ${SOURCE_FILES} ${HEADER_FILES})
 generate_defaultatoms(libAtomVM "${CMAKE_CURRENT_SOURCE_DIR}/defaultatoms.def" "${CMAKE_CURRENT_BINARY_DIR}/defaultatoms_tables.h" generic)
+if(AVM_STATIC_LIBRARY_ATOMS)
+    if(NOT AVM_DISABLE_JIT OR AVM_ENABLE_PRECOMPILED)
+        message(FATAL_ERROR "AVM_STATIC_LIBRARY_ATOMS currently requires an interpreter-only build")
+    endif()
+    if(NOT EXISTS "${AVM_STATIC_LIBRARY_ATOMS_ARCHIVE}" OR NOT EXISTS "${AVM_PLATFORM_ATOMS_DEF}")
+        message(FATAL_ERROR "AVM_STATIC_LIBRARY_ATOMS requires a prebuilt boot archive and platform atom definitions")
+    endif()
+    get_filename_component(_library_atoms_archive "${AVM_STATIC_LIBRARY_ATOMS_ARCHIVE}" ABSOLUTE)
+    get_filename_component(_library_atoms_archive_real "${_library_atoms_archive}" REALPATH)
+    get_filename_component(_library_atoms_build_real "${CMAKE_BINARY_DIR}" REALPATH)
+    string(FIND "${_library_atoms_archive_real}" "${_library_atoms_build_real}/" _library_atoms_in_build)
+    if(_library_atoms_in_build EQUAL 0)
+        message(FATAL_ERROR "Build the static-atom archive in a separate bootstrap build to avoid a dependency cycle")
+    endif()
+    find_program(ESCRIPT_PATH escript)
+    if(NOT ESCRIPT_PATH)
+        message(FATAL_ERROR "escript is required to generate static library atoms")
+    endif()
+    set(_library_atoms_generator "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/gen_library_atoms.escript")
+    # A changed archive selection must regenerate even if the new archive is older.
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library_atoms_config.txt"
+        CONTENT "${_library_atoms_archive}\n${_library_atoms_archive_real}\n${AVM_PLATFORM_ATOMS_DEF}\n")
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.stamp"
+        BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.h"
+        COMMAND "${ESCRIPT_PATH}" "${_library_atoms_generator}" "${_library_atoms_archive}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/defaultatoms.def" "${AVM_PLATFORM_ATOMS_DEF}"
+            "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.h"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.stamp"
+        DEPENDS "${_library_atoms_generator}" "${_library_atoms_archive}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/defaultatoms.def" "${AVM_PLATFORM_ATOMS_DEF}"
+            "${CMAKE_CURRENT_BINARY_DIR}/library_atoms_config.txt"
+        VERBATIM
+    )
+    add_custom_target(libAtomVM_library_atoms DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.stamp")
+    add_dependencies(libAtomVM libAtomVM_library_atoms)
+    target_sources(libAtomVM PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library_atoms.h")
+    get_filename_component(_library_atoms_platform_dir "${AVM_PLATFORM_ATOMS_DEF}" DIRECTORY)
+    target_include_directories(libAtomVM PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${_library_atoms_platform_dir}")
+    target_compile_definitions(libAtomVM PUBLIC AVM_STATIC_LIBRARY_ATOMS)
+endif()
 target_include_directories(libAtomVM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(libAtomVM PUBLIC c_std_11)
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")

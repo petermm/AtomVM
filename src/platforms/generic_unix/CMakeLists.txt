@@ -58,6 +58,7 @@ if (NOT DEFINED AVM_SYSTEM_ARCHITECTURE_STRING OR "${AVM_SYSTEM_ARCHITECTURE_STR
     avm_get_system_architecture_string(AVM_SYSTEM_ARCHITECTURE_STRING)
 endif()
 
+set(AVM_PLATFORM_ATOMS_DEF "${CMAKE_CURRENT_SOURCE_DIR}/lib/platform_defaultatoms.def")
 add_subdirectory(../../libAtomVM libAtomVM)
 target_link_libraries(AtomVM PRIVATE libAtomVM)
 

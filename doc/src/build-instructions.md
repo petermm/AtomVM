@@ -145,6 +145,47 @@ Upon completion, the `AtomVM` executable can be found in the `build/src` directo
 
 The AtomVM core Erlang library can be found in the generated `libs/atomvmlib.avm` AVM file.
 
+#### Experimental static library atoms
+
+`AVM_STATIC_LIBRARY_ATOMS` is disabled by default. Enable it to generate a static
+registry of module-name atoms from a prebuilt boot AVM. It collects module names
+from BEAM contents, not archive filenames, and deduplicates them against the
+generic and selected platform defaults. Existing builtin IDs remain unchanged;
+additional names receive deterministic IDs after them. Application-only names
+and other atoms still use the dynamic table.
+
+For a Generic UNIX build, supply an existing archive outside the runtime build
+directory to avoid a bootstrap dependency cycle:
+
+```shell
+$ cmake -S . -B build-static-atoms -DAVM_STATIC_LIBRARY_ATOMS=ON \
+    -DAVM_STATIC_LIBRARY_ATOMS_ARCHIVE="$PWD/build/libs/atomvmlib.avm"
+$ cmake --build build-static-atoms
+```
+
+With `AVM_DEFAULT_ATOMS_IN_RAM=OFF`, registered names and lookup metadata stay in
+read-only storage and need no dynamic RAM entries. With it `ON`, all registered
+names are copied to RAM at startup. Both 16-bit and 32-bit atom indices are
+supported, independently of LabT. Module-local atom mappings still reside in RAM.
+The generated name pool duplicates text in the BEAM archive, increasing flash
+usage; RAM savings depend on which modules load and atom-table capacity boundaries.
+
+This changes observable behavior: `erlang:system_info(atom_count)` includes the
+whole registry from startup, and `binary_to_existing_atom` recognizes these names
+before their modules load. Keep the firmware and its selected boot archive in
+sync when rebuilding. Updating an archive regenerates the header; changing only
+the archive on a device does not update the firmware's registry.
+
+Generation requires `escript` from the archive-producing OTP toolchain or a
+compatible newer release. In particular, compact-length `AtU8` atom chunks
+require OTP 28 or newer. Extraction uses `beam_lib` to decode atom chunks in the
+host VM and emits only module names; it is not complete BEAM validation.
+This first version supports Generic UNIX and ESP32 interpreter-only builds;
+JIT and precompiled-code builds are rejected.
+Run generator tests with `cmake --build <build-directory> --target test-gen-library-atoms`.
+Run configuration and incremental-build regressions with the
+`test-gen-library-atoms-build` target (tested with Ninja and Unix Makefiles).
+
 Use the `install` target to install the `atomvm` command and associated binary files.  On most UNIX systems, these artifacts will be installed in the `/usr/local` directory tree.
 
 ```{attention}
@@ -274,6 +315,15 @@ Elixir supported build under the "Partition Table" setting select the Custom par
 set this to `partitions-elixir.csv`. Extreme caution should be used when changing any non AtomVM
 settings. You can quit the program by typing `Q`. Save the changes, and the program will exit.
 ```
+
+To enable [experimental static library atoms](#experimental-static-library-atoms),
+select "Reserve boot-library module names as static atoms" in the AtomVM menu
+(`CONFIG_AVM_STATIC_LIBRARY_ATOMS=y`). Build the host boot libraries first in the
+source tree's top-level `build` directory. The ESP32 build automatically scans
+the selected `build/libs/esp32boot/esp32boot.avm`, or `elixir_esp32boot.avm` with
+Elixir support enabled. This includes all modules packed into that archive,
+including generated Elixir modules; unrelated platforms and applications are
+not scanned. Missing archives and unsupported boot layouts fail configuration.
 
 You can now build AtomVM using the build command:
 

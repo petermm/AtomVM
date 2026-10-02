@@ -72,6 +72,16 @@ else()
     set(AVM_COMPACT_ATOM_INDICES OFF)
 endif()
 
+include(../../GetBootAVM.cmake)
+set(AVM_STATIC_LIBRARY_ATOMS "${CONFIG_AVM_STATIC_LIBRARY_ATOMS}")
+if(AVM_STATIC_LIBRARY_ATOMS)
+    if(BOOT_LIBS STREQUAL "NONE")
+        message(FATAL_ERROR "Static library atoms require a supported boot archive layout")
+    endif()
+    set(AVM_STATIC_LIBRARY_ATOMS_ARCHIVE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../build/libs/esp32boot/${BOOT_LIBS}")
+    set(AVM_PLATFORM_ATOMS_DEF "${CMAKE_CURRENT_SOURCE_DIR}/../avm_sys/include/platform_defaultatoms.def")
+endif()
+
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../libAtomVM" "libAtomVM")
 
 if(AVM_DEFAULT_ATOMS_IN_RAM)
@@ -122,5 +132,4 @@ if (AVM_USE_LIBSODIUM)
     target_compile_definitions(libAtomVM PUBLIC HAVE_LIBSODIUM)
 endif()
 
-include(../../GetBootAVM.cmake)
 partition_table_get_partition_info(boot_offset "--partition-name boot.avm" "offset")

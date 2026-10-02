@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "avmpack.h"
+#include "defaultatoms.h"
 
 static unsigned int allocation_count;
 static unsigned int fail_allocation;
@@ -545,6 +546,57 @@ static void test_module_wide_atom_index(void)
 }
 #endif
 
+#ifdef AVM_STATIC_LIBRARY_ATOMS
+static void test_module_static_atoms(void)
+{
+    // Exercise two registered module names in both loading orders. Only short
+    // names fit make_pack's deliberately small BEAM fixture.
+    char names[2][28];
+    atom_index_t indices[2];
+    size_t count = 0;
+    for (size_t i = platform_defaultatoms_count(); i < defaultatoms_count() && count < 2; i++) {
+        size_t len;
+        const uint8_t *data = defaultatoms_get_atom_string((atom_index_t) i, &len);
+        if (len > 0 && len < sizeof(names[0]) && memchr(data, 0, len) == NULL) {
+            memcpy(names[count], data, len);
+            names[count][len] = 0;
+            indices[count++] = (atom_index_t) i;
+        }
+    }
+    for (size_t order = 0; order < 2; order++) {
+        GlobalContext *global = globalcontext_new();
+        assert(global != NULL);
+        size_t initial_count = atom_table_count(global->atom_table);
+        for (size_t i = 0; i < count; i++) {
+            size_t n = order == 0 ? i : count - 1 - i;
+            assert(atom_table_get_index_from_cstring(global->atom_table, names[n]) == indices[n]);
+            size_t beam_size;
+            uint8_t *pack = make_pack(names[n], false, &beam_size);
+            const void *beam;
+            uint32_t section_size;
+            char section_name[sizeof(names[0]) + 5];
+            snprintf(section_name, sizeof(section_name), "%s.beam", names[n]);
+            assert(avmpack_find_section_by_name(pack, section_name, &beam, &section_size));
+            reset_allocations(0);
+            Module *mod = module_new_from_iff_binary(global, beam, beam_size);
+            assert(mod != NULL);
+            assert(mod->local_atoms_to_global_table[1] == indices[n]);
+            assert(module_get_name(mod) == term_from_atom_index(indices[n]));
+            assert(atom_table_count(global->atom_table) == initial_count);
+            module_destroy(mod);
+            free(pack);
+            assert(atom_table_get_index_from_cstring(global->atom_table, names[n]) == indices[n]);
+        }
+        // Names outside the registry still use the dynamic table.
+        atom_index_t index;
+        assert(atom_table_ensure_atom(global->atom_table, (const uint8_t *) "registry_dynamic", 16, AtomTableCopyAtom, &index) == AtomTableEnsureAtomOk);
+        assert(index == initial_count);
+        assert(atom_table_count(global->atom_table) == initial_count + 1);
+        globalcontext_destroy(global);
+    }
+}
+#endif
+
 int main(void)
 {
     // Fail the copy, Module allocation, or unresolved import after atom insertion.
@@ -553,6 +605,9 @@ int main(void)
         test_module_in_ram(true, fail_at);
     }
     test_truncated_beam();
+#ifdef AVM_STATIC_LIBRARY_ATOMS
+    test_module_static_atoms();
+#endif
 #ifdef AVM_NO_COMPACT_ATOM_INDICES
     test_module_wide_atom_index();
 #endif

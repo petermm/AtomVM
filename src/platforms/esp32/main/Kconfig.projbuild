@@ -54,6 +54,21 @@ menu "AtomVM configuration"
             them from Flash. Increases heap usage by ~4-5 KB but improves runtime
             performance by avoiding Flash reads on atom lookups.
 
+    config AVM_STATIC_LIBRARY_ATOMS
+        bool "Reserve boot-library module names as static atoms (experimental)"
+        depends on !JIT_ENABLED
+        default n
+        help
+            Generate a static module-name registry from the selected prebuilt
+            boot AVM. Existing generic and platform atom IDs are unchanged.
+            With AVM_DEFAULT_ATOMS_IN_RAM disabled, these names do not need
+            dynamic RAM entries. With it enabled, copy them to RAM at boot too.
+            Names are interned before modules load, increasing atom_count and
+            allowing binary_to_existing_atom to recognize them earlier.
+            Requires a host-built boot archive and escript during compilation.
+            Module atom mappings remain in RAM; application-only atoms still
+            use the dynamic table. Independent of atom index width and LabT.
+
     config AVM_COMPACT_ATOM_INDICES
         bool "Use 16-bit atom indices to reduce RAM usage"
         default y
