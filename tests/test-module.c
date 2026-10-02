@@ -267,12 +267,21 @@ static void check_labt_load(const uint8_t *beam, size_t beam_size, size_t opcode
     accepted = false;
     is_u16 = opcode_size + 20 <= UINT16_MAX;
 #endif
+#ifdef AVM_NO_COMPACT_LABELS
+    if (is_u16) {
+        accepted = false;
+    }
+    is_u16 = false;
+#endif
     assert(mod->labels_in_flash == accepted);
     assert(mod->labels_is_u16 == is_u16);
     assert(mod->end_instruction_ii == opcode_size - 1);
     assert(module_get_label_address(mod, 0) == mod->code->code);
     assert(module_get_label_address(mod, 1) == mod->code->code + 2);
     assert(module_get_label_address(mod, 2) == mod->code->code + opcode_size - 1);
+    assert(module_label_code_offset(mod, 0) == 0);
+    assert(module_label_code_offset(mod, 1) == 2);
+    assert(module_label_code_offset(mod, 2) == opcode_size - 1);
     if (accepted) {
         unsigned long offsets[MAX_OFFS];
         unsigned long sizes[MAX_SIZES];
@@ -287,7 +296,11 @@ static void test_labt_roundtrip(size_t opcode_size)
 {
     size_t beam_size;
     uint8_t *beam = make_labt_beam(opcode_size, 3, &beam_size);
+#ifdef AVM_NO_COMPACT_LABELS
+    bool is_u16 = false;
+#else
     bool is_u16 = opcode_size + 20 <= UINT16_MAX;
+#endif
     check_labt_load(beam, beam_size, opcode_size, false, is_u16);
     size_t chunk_size;
     uint8_t *chunk = module_create_labt_chunk(beam, beam_size, &chunk_size);
@@ -318,6 +331,10 @@ static void test_labt_rejections(void)
     size_t chunk_size;
     uint8_t *chunk = module_create_labt_chunk(beam, beam_size, &chunk_size);
     assert(chunk != NULL);
+    struct LabTHeader original_header;
+    memcpy(&original_header, chunk + 8, sizeof(original_header));
+    bool is_u16 = !(original_header.flags & LABT_FLAG_32BIT);
+    size_t entry_size = is_u16 ? 2 : 4;
     for (int test = 0; test < 13; test++) {
         uint8_t altered[32] = { 0 };
         memcpy(altered, chunk, chunk_size);
@@ -329,7 +346,7 @@ static void test_labt_rejections(void)
                 altered_size = 12;
                 break;
             case 1: // Missing final entry.
-                altered_size -= 2;
+                altered_size -= entry_size;
                 break;
             case 2: // Unspecified extension bytes.
                 altered_size += 4;
@@ -350,8 +367,13 @@ static void test_labt_rejections(void)
                 header.end_instruction_ii = 2;
                 break;
             case 8: { // Label targets after the end instruction.
-                uint16_t invalid_offset = opcode_size;
-                memcpy(altered + 16 + 2, &invalid_offset, sizeof(invalid_offset));
+                if (is_u16) {
+                    uint16_t invalid_offset = opcode_size;
+                    memcpy(altered + 16 + entry_size, &invalid_offset, sizeof(invalid_offset));
+                } else {
+                    uint32_t invalid_offset = opcode_size;
+                    memcpy(altered + 16 + entry_size, &invalid_offset, sizeof(invalid_offset));
+                }
                 break;
             }
             case 9: // Declared payload extends beyond the BEAM allocation.
@@ -365,9 +387,13 @@ static void test_labt_rejections(void)
                 header.num_labels = __builtin_bswap16(header.num_labels);
                 header.flags = __builtin_bswap16(header.flags ^ LABT_FLAG_BIG_ENDIAN);
                 for (int i = 0; i < 3; i++) {
-                    uint8_t tmp = altered[16 + i * 2];
-                    altered[16 + i * 2] = altered[17 + i * 2];
-                    altered[17 + i * 2] = tmp;
+                    for (size_t j = 0; j < entry_size / 2; j++) {
+                        size_t first = 16 + i * entry_size + j;
+                        size_t last = 16 + (i + 1) * entry_size - 1 - j;
+                        uint8_t tmp = altered[first];
+                        altered[first] = altered[last];
+                        altered[last] = tmp;
+                    }
                 }
                 break;
             case 12: // Legacy opposite-endian header with its endian bit missing.
@@ -382,7 +408,7 @@ static void test_labt_rejections(void)
         }
         size_t packed_size;
         uint8_t *packed = beam_with_labt(beam, beam_size, altered, altered_size, &packed_size);
-        check_labt_load(packed, packed_size, opcode_size, false, true);
+        check_labt_load(packed, packed_size, opcode_size, false, is_u16);
         free(packed);
     }
     size_t packed_size;
@@ -390,17 +416,40 @@ static void test_labt_rejections(void)
     uint8_t *unaligned = malloc(packed_size + 1);
     assert(unaligned != NULL);
     memcpy(unaligned + 1, packed, packed_size);
-    check_labt_load(unaligned + 1, packed_size, opcode_size, false, true);
+    check_labt_load(unaligned + 1, packed_size, opcode_size, false, is_u16);
     free(unaligned);
 
     // Exactly the payload fits; outer IFF alignment padding is not table data.
-    write_u32(packed + 4, packed_size - 10);
-    check_labt_load(packed, packed_size, opcode_size, true, true);
+    size_t payload_end = beam_size + chunk_size;
+    write_u32(packed + 4, payload_end - 8);
+    check_labt_load(packed, packed_size, opcode_size, true, is_u16);
     // The chunk fits the supplied buffer, but not the declared BEAM extent.
-    write_u32(packed + 4, packed_size - 12);
-    check_labt_load(packed, packed_size, opcode_size, false, true);
+    write_u32(packed + 4, payload_end - 10);
+    check_labt_load(packed, packed_size, opcode_size, false, is_u16);
     free(packed);
     free(chunk);
+    free(beam);
+}
+
+static void test_labt_narrow_entries(void)
+{
+    size_t beam_size;
+    uint8_t *beam = make_labt_beam(17, 3, &beam_size);
+    // A narrow accelerator from a compact-labels build remains loadable when
+    // compact labels are disabled, but must be rebuilt as a wide RAM table.
+    uint8_t chunk[22] = { 'L', 'a', 'b', 'T' };
+    write_u32(chunk + 4, 14);
+    struct LabTHeader header = { .end_instruction_ii = 16, .flags = 0, .num_labels = 3 };
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    header.flags |= LABT_FLAG_BIG_ENDIAN;
+#endif
+    memcpy(chunk + 8, &header, sizeof(header));
+    const uint16_t entries[] = { 0, 2, 16 };
+    memcpy(chunk + 16, entries, sizeof(entries));
+    size_t packed_size;
+    uint8_t *packed = beam_with_labt(beam, beam_size, chunk, sizeof(chunk), &packed_size);
+    check_labt_load(packed, packed_size, 17, true, true);
+    free(packed);
     free(beam);
 }
 
@@ -480,6 +529,7 @@ int main(void)
     test_labt_roundtrip(UINT16_MAX - 19);
     test_labt_roundtrip(UINT16_MAX + 17U);
     test_labt_rejections();
+    test_labt_narrow_entries();
     test_labt_wide_entries();
     test_labt_label_count();
 #endif

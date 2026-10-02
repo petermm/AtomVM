@@ -63,6 +63,18 @@ menu "AtomVM configuration"
             in RAM at module load time. Saves ~22-28 KB DRAM across loaded modules,
             but label lookups during execution read from Flash.
 
+    config AVM_COMPACT_LABELS
+        bool "Use 16-bit label offsets when Code fits"
+        default y
+        help
+            Use 2-byte label offsets for small Code chunks and 4-byte offsets for
+            larger ones. Disable to always use 4-byte offsets, removing runtime
+            width selection at the cost of larger RAM or Flash label tables.
+            Independent of AVM_LABT. With this option disabled, 16-bit LabT chunks
+            fall back to building 32-bit tables in RAM. To keep tables in Flash,
+            regenerate archives using a host packbeam_labt built with
+            AVM_COMPACT_LABELS=OFF, starting from archives without LabT chunks.
+
     config AVM_IRAM_HOT
         bool "Place hot VM code in IRAM"
         default n

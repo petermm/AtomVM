@@ -1103,22 +1103,25 @@ term module_get_exported_functions(Module *this_module, Heap *heap)
 // Keep the width test shared instead of duplicating it at every VM jump.
 const uint8_t *module_get_label_address(const Module *mod, int label)
 {
+#ifndef AVM_NO_COMPACT_LABELS
     if (mod->labels_is_u16) {
         return (const uint8_t *) mod->code->code + ((const uint16_t *) mod->labels)[label];
-    } else {
-        return (const uint8_t *) mod->code->code + ((const uint32_t *) mod->labels)[label];
     }
+#endif
+    return (const uint8_t *) mod->code->code + ((const uint32_t *) mod->labels)[label];
 }
 
 #ifndef AVM_NO_EMU
 static void module_add_label(Module *mod, int index, const uint8_t *ptr)
 {
     size_t offset = ptr - (const uint8_t *) mod->code->code;
+#ifndef AVM_NO_COMPACT_LABELS
     if (mod->labels_is_u16) {
         ((uint16_t *) mod->labels)[index] = (uint16_t) offset;
-    } else {
-        ((uint32_t *) mod->labels)[index] = (uint32_t) offset;
+        return;
     }
+#endif
+    ((uint32_t *) mod->labels)[index] = (uint32_t) offset;
 }
 #endif
 
@@ -1228,7 +1231,14 @@ static bool module_validate_labt(const uint8_t *beam_file, size_t beam_size, con
         return false;
     }
 
+#ifdef AVM_NO_COMPACT_LABELS
+    if (!(header->flags & LABT_FLAG_32BIT)) {
+        return false;
+    }
+    const size_t entry_size = sizeof(uint32_t);
+#else
     size_t entry_size = (header->flags & LABT_FLAG_32BIT) ? sizeof(uint32_t) : sizeof(uint16_t);
+#endif
     const uint8_t *entries = beam_file + offsets[LABT] + IFF_SECTION_HEADER_SIZE + sizeof(*header);
     if (sizes[LABT] != sizeof(*header) + num_labels * entry_size
         || (uintptr_t) entries % entry_size != 0) {
@@ -1239,7 +1249,11 @@ static bool module_validate_labt(const uint8_t *beam_file, size_t beam_size, con
         return false;
     }
     for (uint32_t i = 0; i < num_labels; i++) {
+#ifdef AVM_NO_COMPACT_LABELS
+        uint32_t offset = ((const uint32_t *) entries)[i];
+#else
         uint32_t offset = entry_size == sizeof(uint16_t) ? ((const uint16_t *) entries)[i] : ((const uint32_t *) entries)[i];
+#endif
         if (offset > header->end_instruction_ii) {
             return false;
         }
@@ -1270,12 +1284,16 @@ static Module *module_new_from_iff_binary_with_atoms(GlobalContext *global, cons
     }
 
     uint32_t num_labels = 0;
+#ifndef AVM_NO_COMPACT_LABELS
     uint32_t code_size = 0;
+#endif
 #ifndef AVM_NO_EMU
     if (offsets[CODE]) {
         const CodeChunk *code_chunk = (const CodeChunk *) (beam_file + offsets[CODE]);
         num_labels = ENDIAN_SWAP_32(code_chunk->labels);
+#ifndef AVM_NO_COMPACT_LABELS
         code_size = ENDIAN_SWAP_32(code_chunk->size);
+#endif
     }
 #endif
 
@@ -1285,8 +1303,13 @@ static Module *module_new_from_iff_binary_with_atoms(GlobalContext *global, cons
     has_labt = module_validate_labt(beam_file, size, offsets, sizes, &labt_header);
 #endif
 
+#ifdef AVM_NO_COMPACT_LABELS
+    bool labels_is_u16 = false;
+    size_t label_elem_size = sizeof(uint32_t);
+#else
     bool labels_is_u16 = (code_size <= 0xFFFF);
     size_t label_elem_size = labels_is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
+#endif
     size_t atoms_table_size = size_align_up_pow2((atoms_count + 1) * sizeof(atom_index_t), sizeof(void *));
     size_t imported_funcs_size = functions_count * sizeof(struct ExportedFunction *);
     size_t labels_size = has_labt ? 0 : size_align_up_pow2(num_labels * label_elem_size, sizeof(void *));
@@ -1506,13 +1529,9 @@ void *module_create_labt_chunk(const void *beam_file, unsigned long size, size_t
 
     const CodeChunk *code_chunk = (const CodeChunk *) ((const uint8_t *) beam_file + offsets[CODE]);
     uint32_t num_labels = ENDIAN_SWAP_32(code_chunk->labels);
-    uint32_t code_size = ENDIAN_SWAP_32(code_chunk->size);
     if (num_labels == 0 || num_labels > UINT16_MAX) {
         return NULL;
     }
-
-    bool is_u16 = (code_size <= 0xFFFF);
-    size_t label_elem_size = is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
 
     GlobalContext *global = globalcontext_new();
     if (IS_NULL_PTR(global)) {
@@ -1531,6 +1550,8 @@ void *module_create_labt_chunk(const void *beam_file, unsigned long size, size_t
         return NULL;
     }
 
+    bool is_u16 = mod->labels_is_u16;
+    size_t label_elem_size = is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
     size_t payload_size = sizeof(struct LabTHeader) + num_labels * label_elem_size;
     size_t total_chunk_size = IFF_SECTION_HEADER_SIZE + payload_size;
     uint8_t *chunk = malloc(total_chunk_size);
@@ -2639,11 +2660,12 @@ uint32_t module_label_code_offset(Module *mod, int label)
     } else {
 #endif
 #ifndef AVM_NO_EMU
+#ifndef AVM_NO_COMPACT_LABELS
         if (mod->labels_is_u16) {
             return ((const uint16_t *) mod->labels)[label];
-        } else {
-            return ((const uint32_t *) mod->labels)[label];
         }
+#endif
+        return ((const uint32_t *) mod->labels)[label];
 #else
     UNUSED(mod);
     UNUSED(label);

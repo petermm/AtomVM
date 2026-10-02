@@ -60,6 +60,12 @@ else()
     set(AVM_NO_LABT ON)
 endif()
 
+if(CONFIG_AVM_COMPACT_LABELS)
+    set(AVM_COMPACT_LABELS ON)
+else()
+    set(AVM_COMPACT_LABELS OFF)
+endif()
+
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../libAtomVM" "libAtomVM")
 
 if(AVM_DEFAULT_ATOMS_IN_RAM)

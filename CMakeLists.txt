@@ -45,6 +45,7 @@ option(AVM_USE_LIBSODIUM "Enable optional libsodium backend for Ed25519 curve" O
 option(AVM_MINIMAL_OPCODES "Reduce VM size by excluding opcodes for optional compiler flags (no_bs_match, no_ssa_opt_bs_ensure)" OFF)
 option(AVM_DEFAULT_ATOMS_IN_RAM "Copy default atoms table and strings to RAM at boot" OFF)
 option(AVM_LABT "Use pre-computed LabT flash tables for BEAM labels" OFF)
+option(AVM_COMPACT_LABELS "Use 16-bit label offsets when Code fits" ON)
 
 if(AVM_DEFAULT_ATOMS_IN_RAM)
     add_compile_definitions(AVM_DEFAULT_ATOMS_IN_RAM)
