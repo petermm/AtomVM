@@ -1079,6 +1079,16 @@ term module_get_exported_functions(Module *this_module, Heap *heap)
     return result_list;
 }
 
+// Keep the width test shared instead of duplicating it at every VM jump.
+const uint8_t *module_get_label_address(const Module *mod, int label)
+{
+    if (mod->labels_is_u16) {
+        return (const uint8_t *) mod->code->code + ((const uint16_t *) mod->labels)[label];
+    } else {
+        return (const uint8_t *) mod->code->code + ((const uint32_t *) mod->labels)[label];
+    }
+}
+
 #ifndef AVM_NO_EMU
 static void module_add_label(Module *mod, int index, const uint8_t *ptr)
 {

@@ -160,14 +160,7 @@ struct Module
 typedef struct Module Module;
 #endif
 
-static inline const uint8_t *module_get_label_address(const Module *mod, int label)
-{
-    if (mod->labels_is_u16) {
-        return (const uint8_t *) mod->code->code + ((const uint16_t *) mod->labels)[label];
-    } else {
-        return (const uint8_t *) mod->code->code + ((const uint32_t *) mod->labels)[label];
-    }
-}
+const uint8_t *module_get_label_address(const Module *mod, int label);
 
 enum ModuleLoadResult
 {
