@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed the ESP32 UART driver blocking the scheduler, until the task watchdog reset the chip,
   when a read had already taken the bytes of a pending data event, or when `uart:read/2` counted
   bytes that the other scheduler then took
+- Fixed TLS connections with `verify_none` being limited to TLS 1.2 when built
+  with MbedTLS 3.6.1 or later and TLS 1.3 support enabled
 
 ## [0.7.0-beta.0] - 2026-09-28
 
