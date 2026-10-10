@@ -47,6 +47,7 @@
 #include <lwip/api.h>
 #include <lwip/inet.h>
 #include <lwip/ip_addr.h>
+#include <lwip/priv/tcpip_priv.h>
 #include <lwip/tcp.h>
 #include <lwip/tcpip.h>
 #pragma GCC diagnostic pop
@@ -84,41 +85,41 @@ static const char *const getopt_atom = ATOM_STR("\x6", "getopt");
 
 struct NodelayRequest
 {
+    struct tcpip_api_call_data call;
     struct netconn *conn;
     bool set;
     bool value;
-    err_t status;
 };
 
 // All PCB access, including the null check after a TCP error, runs in the core.
-static void nodelay_callback(void *arg)
+static err_t nodelay_callback(struct tcpip_api_call_data *call)
 {
-    struct NodelayRequest *request = arg;
+    struct NodelayRequest *request = (struct NodelayRequest *) call;
     struct tcp_pcb *pcb = request->conn->pcb.tcp;
     if (pcb == NULL) {
-        request->status = ERR_CONN;
+        return ERR_CONN;
     } else if (pcb->state == LISTEN) {
-        request->status = ERR_VAL;
-    } else {
-        if (request->set) {
-            if (request->value) {
-                tcp_nagle_disable(pcb);
-            } else {
-                tcp_nagle_enable(pcb);
-            }
-        }
-        request->value = tcp_nagle_disabled(pcb);
-        request->status = ERR_OK;
+        return ERR_VAL;
     }
+
+    if (request->set) {
+        if (request->value) {
+            tcp_nagle_disable(pcb);
+        } else {
+            tcp_nagle_enable(pcb);
+        }
+    }
+    request->value = tcp_nagle_disabled(pcb);
+
+    return ERR_OK;
 }
 
 static err_t socket_nodelay(struct netconn *conn, bool set, bool *value)
 {
     struct NodelayRequest request = { .conn = conn, .set = set, .value = *value };
-    err_t status = tcpip_callback_wait(nodelay_callback, &request);
+    err_t status = tcpip_api_call(nodelay_callback, &request.call);
     if (status == ERR_OK) {
         *value = request.value;
-        status = request.status;
     }
     return status;
 }
