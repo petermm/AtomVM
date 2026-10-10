@@ -47,6 +47,8 @@
 #include <lwip/api.h>
 #include <lwip/inet.h>
 #include <lwip/ip_addr.h>
+#include <lwip/tcp.h>
+#include <lwip/tcpip.h>
 #pragma GCC diagnostic pop
 
 //#define ENABLE_TRACE 1
@@ -76,6 +78,50 @@ static const char *gen_tcp_moniker_atom = ATOM_STR("\xC", "$avm_gen_tcp");
 static const char *native_tcp_module_atom = ATOM_STR("\xC", "gen_tcp_inet");
 static const char *gen_udp_moniker_atom = ATOM_STR("\xC", "$avm_gen_udp");
 static const char *native_udp_module_atom = ATOM_STR("\xC", "gen_udp_inet");
+static const char *const nodelay_atom = ATOM_STR("\x7", "nodelay");
+static const char *const setopt_atom = ATOM_STR("\x6", "setopt");
+static const char *const getopt_atom = ATOM_STR("\x6", "getopt");
+
+struct NodelayRequest
+{
+    struct netconn *conn;
+    bool set;
+    bool value;
+    err_t status;
+};
+
+// All PCB access, including the null check after a TCP error, runs in the core.
+static void nodelay_callback(void *arg)
+{
+    struct NodelayRequest *request = arg;
+    struct tcp_pcb *pcb = request->conn->pcb.tcp;
+    if (pcb == NULL) {
+        request->status = ERR_CONN;
+    } else if (pcb->state == LISTEN) {
+        request->status = ERR_VAL;
+    } else {
+        if (request->set) {
+            if (request->value) {
+                tcp_nagle_disable(pcb);
+            } else {
+                tcp_nagle_enable(pcb);
+            }
+        }
+        request->value = tcp_nagle_disabled(pcb);
+        request->status = ERR_OK;
+    }
+}
+
+static err_t socket_nodelay(struct netconn *conn, bool set, bool *value)
+{
+    struct NodelayRequest request = { .conn = conn, .set = set, .value = *value };
+    err_t status = tcpip_callback_wait(nodelay_callback, &request);
+    if (status == ERR_OK) {
+        *value = request.value;
+        status = request.status;
+    }
+    return status;
+}
 
 static inline term create_socket_wrapper(term pid, const char *moniker_atom, const char *module_atom, Heap *heap, GlobalContext *global)
 {
@@ -187,6 +233,7 @@ struct SocketData
     size_t buffer;
     bool active : 1;
     bool binary : 1;
+    bool nodelay : 1;
     bool read_condition : 1;
 };
 
@@ -392,6 +439,7 @@ static void socket_data_init(struct SocketData *data, Context *ctx, struct netco
     data->avail_bytes = 0;
     data->active = true;
     data->binary = true;
+    data->nodelay = false;
     data->read_condition = false;
     data->buffer = 512;
 
@@ -534,6 +582,14 @@ static err_t accept_conn(Context *ctx, struct TCPServerSocketData *tcp_data, uin
 
     TRACE("accepted conn: %p\n", (void *) accepted_conn);
 
+    bool nodelay = tcp_data->socket_data.nodelay;
+    status = socket_nodelay(accepted_conn, true, &nodelay);
+    if (status != ERR_OK) {
+        netconn_delete(accepted_conn);
+        do_send_error_reply(ctx, status, ref_ticks, pid);
+        return status;
+    }
+
     Context *new_ctx = context_new(glb);
     new_ctx->native_handler = socket_consume_mailbox;
 
@@ -564,6 +620,7 @@ static err_t accept_conn(Context *ctx, struct TCPServerSocketData *tcp_data, uin
     }
     new_tcp_data->socket_data.active = tcp_data->socket_data.active;
     new_tcp_data->socket_data.binary = tcp_data->socket_data.binary;
+    new_tcp_data->socket_data.nodelay = nodelay;
     new_tcp_data->socket_data.buffer = tcp_data->socket_data.buffer;
 
     if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2) + REPLY_SIZE + TUPLE_SIZE(2)) != MEMORY_GC_OK)) {
@@ -920,6 +977,12 @@ static void do_connect(Context *ctx, const GenMessage *gen_message)
     term controlling_process_term = interop_proplist_get_value(params, CONTROLLING_PROCESS_ATOM);
 
     bool ok = term_is_local_pid(controlling_process_term);
+    term nodelay_term = interop_proplist_get_value_default(params, globalcontext_make_atom(glb, nodelay_atom), FALSE_ATOM);
+    if (nodelay_term != TRUE_ATOM && nodelay_term != FALSE_ATOM) {
+        do_send_error_reply(ctx, ERR_ARG, ref_ticks, pid);
+        return;
+    }
+    bool nodelay = nodelay_term == TRUE_ATOM;
     if (UNLIKELY(!ok)) {
         do_send_error_reply(ctx, ERR_ARG, ref_ticks, pid);
         return;
@@ -968,6 +1031,13 @@ static void do_connect(Context *ctx, const GenMessage *gen_message)
         AVM_ABORT();
     }
 
+    status = socket_nodelay(conn, true, &nodelay);
+    if (status != ERR_OK) {
+        netconn_delete(conn);
+        do_send_error_reply(ctx, status, ref_ticks, pid);
+        return;
+    }
+
     // Publish the socket before the blocking connect
     struct ListHead *sockets = socket_data_preinit(platform);
     struct TCPClientSocketData *tcp_data = tcp_client_socket_data_new(ctx, conn, sockets, controlling_process_pid);
@@ -976,6 +1046,7 @@ static void do_connect(Context *ctx, const GenMessage *gen_message)
     }
     tcp_data->socket_data.active = active;
     tcp_data->socket_data.binary = binary;
+    tcp_data->socket_data.nodelay = nodelay;
     socket_data_postinit(platform);
 
     status = netconn_connect(conn, &remote_ip, port);
@@ -1017,6 +1088,12 @@ static void do_listen(Context *ctx, const GenMessage *gen_message)
     term binary_term = interop_proplist_get_value_default(params, BINARY_ATOM, FALSE_ATOM);
     term active_term = interop_proplist_get_value_default(params, ACTIVE_ATOM, TRUE_ATOM);
     term buffer_term = interop_proplist_get_value(params, BUFFER_ATOM);
+
+    term nodelay_term = interop_proplist_get_value_default(params, globalcontext_make_atom(glb, nodelay_atom), FALSE_ATOM);
+    if (nodelay_term != TRUE_ATOM && nodelay_term != FALSE_ATOM) {
+        do_send_error_reply(ctx, ERR_ARG, ref_ticks, pid);
+        return;
+    }
 
     avm_int_t port = term_to_int(port_term);
     avm_int_t backlog = term_to_int(backlog_term);
@@ -1075,6 +1152,8 @@ static void do_listen(Context *ctx, const GenMessage *gen_message)
     tcp_data->socket_data.port = nport;
     tcp_data->socket_data.active = active;
     tcp_data->socket_data.binary = binary;
+    // A listening PCB has no TCP flags. Store for explicit application on accept.
+    tcp_data->socket_data.nodelay = nodelay_term == TRUE_ATOM;
     tcp_data->socket_data.buffer = buffer;
 
     if (UNLIKELY(memory_ensure_free(ctx, REPLY_SIZE) != MEMORY_GC_OK)) {
@@ -1475,6 +1554,44 @@ static void do_controlling_process(Context *ctx, const GenMessage *gen_message)
     }
 }
 
+static void do_nodelay(Context *ctx, const GenMessage *message, bool set)
+{
+    GlobalContext *global = ctx->global;
+    int32_t pid = term_to_local_process_id(message->pid);
+    uint64_t ref_ticks = term_to_ref_ticks(message->ref);
+    term request = message->req;
+    if (memory_ensure_free_with_roots(ctx, TUPLE_SIZE(2) + REPLY_SIZE, 1, &request, MEMORY_CAN_SHRINK) != MEMORY_GC_OK) {
+        AVM_ABORT();
+    }
+    struct SocketData *data = ctx->platform_data;
+    term reply;
+    if (data == NULL) {
+        reply = port_create_error_tuple(ctx, CLOSED_ATOM);
+    } else if (term_get_tuple_arity(request) != (set ? 3 : 2)
+        || term_get_tuple_element(request, 1) != globalcontext_make_atom(global, nodelay_atom)
+        || data->type == UDPSocket) {
+        reply = port_create_error_tuple(ctx, globalcontext_make_atom(global, ATOM_STR("\x6", "einval")));
+    } else {
+        bool value = data->nodelay;
+        if (set) {
+            term value_term = term_get_tuple_element(request, 2);
+            if (value_term != TRUE_ATOM && value_term != FALSE_ATOM) {
+                do_send_error_reply(ctx, ERR_ARG, ref_ticks, pid);
+                return;
+            }
+            value = value_term == TRUE_ATOM;
+        }
+        err_t status = data->type == TCPServerSocket ? ERR_OK : socket_nodelay(data->conn, set, &value);
+        if (status != ERR_OK) {
+            do_send_error_reply(ctx, status, ref_ticks, pid);
+            return;
+        }
+        data->nodelay = value;
+        reply = set ? OK_ATOM : port_create_ok_tuple(ctx, value ? TRUE_ATOM : FALSE_ATOM);
+    }
+    do_send_reply(ctx, reply, ref_ticks, pid);
+}
+
 static NativeHandlerResult socket_consume_mailbox(Context *ctx)
 {
     TRACE("START socket_consume_mailbox\n");
@@ -1515,6 +1632,12 @@ static NativeHandlerResult socket_consume_mailbox(Context *ctx)
         }
 
         term cmd_name = term_get_tuple_element(gen_message.req, 0);
+
+        if (cmd_name == globalcontext_make_atom(glb, setopt_atom) || cmd_name == globalcontext_make_atom(glb, getopt_atom)) {
+            do_nodelay(ctx, &gen_message, cmd_name == globalcontext_make_atom(glb, setopt_atom));
+            mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+            continue;
+        }
 
         switch (cmd_name) {
             //TODO: remove this

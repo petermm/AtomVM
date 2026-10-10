@@ -22,6 +22,9 @@
 
 -export([start_server/2, reply/3, reply/4, parse_query_string/1]).
 
+%% @doc Start an HTTP server. A route handler receives the accepted gen_tcp
+%% socket as `proplists:get_value(socket, Conn)'. It can enable TCP_NODELAY
+%% with `inet:setopts(Socket, [{nodelay, true}])' before sending a response.
 start_server(Port, Router) ->
     case gen_tcp:listen(Port, []) of
         {ok, ListenSocket} ->

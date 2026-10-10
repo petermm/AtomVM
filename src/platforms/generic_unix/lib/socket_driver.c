@@ -81,6 +81,7 @@ typedef struct SocketDriverData
     term controlling_process;
     bool binary;
     bool active;
+    bool nodelay;
     size_t buffer;
     ActiveRecvListener *active_listener;
     PassiveRecvListener *passive_listener;
@@ -126,6 +127,10 @@ static const char *gen_tcp_moniker_atom = ATOM_STR("\xC", "$avm_gen_tcp");
 static const char *native_tcp_module_atom = ATOM_STR("\xC", "gen_tcp_inet");
 static const char *gen_udp_moniker_atom = ATOM_STR("\xC", "$avm_gen_udp");
 static const char *native_udp_module_atom = ATOM_STR("\xC", "gen_udp_inet");
+static const char *const nodelay_atom = ATOM_STR("\x7", "nodelay");
+static const char *const setopt_atom = ATOM_STR("\x6", "setopt");
+static const char *const getopt_atom = ATOM_STR("\x6", "getopt");
+static const char *const setsockopt_atom = ATOM_STR("\xA", "setsockopt");
 
 static EventListener *active_recv_callback(GlobalContext *glb, EventListener *listener);
 static EventListener *passive_recv_callback(GlobalContext *glb, EventListener *listener);
@@ -340,6 +345,12 @@ static term init_client_tcp_socket(Context *ctx, SocketDriverData *socket_data, 
         return port_create_sys_error_tuple(ctx, SOCKET_ATOM, errno);
     }
     socket_data->sockfd = sockfd;
+    int flag = socket_data->nodelay;
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) != 0) {
+        int err = errno;
+        close(sockfd);
+        return port_create_sys_error_tuple(ctx, globalcontext_make_atom(glb, setsockopt_atom), err);
+    }
     term address = interop_proplist_get_value(params, ADDRESS_ATOM);
     term port = interop_proplist_get_value(params, PORT_ATOM);
     term ret = do_connect(socket_data, ctx, address, port);
@@ -386,6 +397,12 @@ static term init_server_tcp_socket(Context *ctx, SocketDriverData *socket_data, 
 
     int flag = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *) &flag, sizeof(int));
+    flag = socket_data->nodelay;
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) != 0) {
+        int err = errno;
+        close(sockfd);
+        return port_create_sys_error_tuple(ctx, globalcontext_make_atom(ctx->global, setsockopt_atom), err);
+    }
 
     if (fcntl(socket_data->sockfd, F_SETFL, O_NONBLOCK) == -1) {
         close(sockfd);
@@ -486,6 +503,11 @@ term socket_driver_do_init(Context *ctx, term params)
         term ret = init_udp_socket(ctx, socket_data, params);
         return ret;
     } else if (proto == TCP_ATOM) {
+        term nodelay = interop_proplist_get_value_default(params, globalcontext_make_atom(ctx->global, nodelay_atom), FALSE_ATOM);
+        if (nodelay != TRUE_ATOM && nodelay != FALSE_ATOM) {
+            return port_create_error_tuple(ctx, BADARG_ATOM);
+        }
+        socket_data->nodelay = nodelay == TRUE_ATOM;
         term connect = interop_proplist_get_value_default(params, CONNECT_ATOM, FALSE_ATOM);
         if (connect == TRUE_ATOM) {
             return init_client_tcp_socket(ctx, socket_data, params);
@@ -1072,12 +1094,19 @@ static EventListener *accept_callback(GlobalContext *glb, EventListener *base_li
         TRACE("socket_driver|accept_callback: accepted connection.  fd: %i\n", fd);
 
         term pid = listener->pid;
-        if (UNLIKELY(fcntl(fd, F_SETFL, O_NONBLOCK) == -1)) {
+        term syscall = FCNTL_ATOM;
+        int status = fcntl(fd, F_SETFL, O_NONBLOCK);
+        if (status != -1) {
+            int flag = socket_data->nodelay;
+            syscall = globalcontext_make_atom(glb, setsockopt_atom);
+            status = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+        }
+        if (UNLIKELY(status == -1)) {
             int err = errno;
             close(fd);
             BEGIN_WITH_STACK_HEAP(12, heap);
             term ref = term_from_ref_ticks(listener->ref_ticks, &heap);
-            term reply = port_heap_create_reply(&heap, ref, port_heap_create_sys_error_tuple(&heap, FCNTL_ATOM, err));
+            term reply = port_heap_create_reply(&heap, ref, port_heap_create_sys_error_tuple(&heap, syscall, err));
             port_send_message_nolock(glb, pid, reply);
             END_WITH_STACK_HEAP(heap, glb);
             if (socket_data->passive_listener == listener) {
@@ -1092,6 +1121,7 @@ static EventListener *accept_callback(GlobalContext *glb, EventListener *base_li
         new_socket_data->proto = socket_data->proto;
         new_socket_data->active = socket_data->active;
         new_socket_data->binary = socket_data->binary;
+        new_socket_data->nodelay = socket_data->nodelay;
         new_socket_data->buffer = socket_data->buffer;
         new_socket_data->controlling_process = pid;
 
@@ -1185,7 +1215,38 @@ static NativeHandlerResult socket_consume_mailbox(Context *ctx)
     term cmd = gen_message.req;
 
     term cmd_name = term_get_tuple_element(cmd, 0);
-    if (cmd_name == globalcontext_make_atom(glb, init_a)) {
+    if (cmd_name == globalcontext_make_atom(glb, setopt_atom) || cmd_name == globalcontext_make_atom(glb, getopt_atom)) {
+        SocketDriverData *socket_data = ctx->platform_data;
+        bool set = cmd_name == globalcontext_make_atom(glb, setopt_atom);
+        term reply;
+        if (term_get_tuple_arity(cmd) != (set ? 3 : 2)
+            || term_get_tuple_element(cmd, 1) != globalcontext_make_atom(glb, nodelay_atom)
+            || socket_data->proto != TCP_ATOM) {
+            reply = port_create_error_tuple(ctx, globalcontext_make_atom(glb, ATOM_STR("\x6", "einval")));
+        } else if (set) {
+            term value = term_get_tuple_element(cmd, 2);
+            int flag = value == TRUE_ATOM;
+            if (value != TRUE_ATOM && value != FALSE_ATOM) {
+                reply = port_create_error_tuple(ctx, BADARG_ATOM);
+            } else if (setsockopt(socket_data->sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) != 0) {
+                reply = port_create_sys_error_tuple(ctx, globalcontext_make_atom(glb, setsockopt_atom), errno);
+            } else {
+                synclist_wrlock(&glb->listeners);
+                socket_data->nodelay = flag;
+                synclist_unlock(&glb->listeners);
+                reply = OK_ATOM;
+            }
+        } else {
+            int flag;
+            socklen_t len = sizeof(flag);
+            if (getsockopt(socket_data->sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, &len) != 0) {
+                reply = port_create_sys_error_tuple(ctx, globalcontext_make_atom(glb, ATOM_STR("\xA", "getsockopt")), errno);
+            } else {
+                reply = port_create_ok_tuple(ctx, flag ? TRUE_ATOM : FALSE_ATOM);
+            }
+        }
+        port_send_reply(ctx, pid, ref, reply);
+    } else if (cmd_name == globalcontext_make_atom(glb, init_a)) {
         TRACE("init\n");
         term params = term_get_tuple_element(cmd, 1);
         term reply = socket_driver_do_init(ctx, params);

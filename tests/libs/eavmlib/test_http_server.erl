@@ -46,6 +46,13 @@ connect_client(Retries) when Retries > 0 ->
     end.
 
 handle_req("GET", [], Conn) ->
+    Socket = proplists:get_value(socket, Conn),
+    {ok, [{nodelay, false}]} = inet:getopts(Socket, [nodelay]),
+    ok = inet:setopts(Socket, [{nodelay, true}]),
+    {ok, [{nodelay, true}]} = inet:getopts(Socket, [nodelay]),
+    ok = inet:setopts(Socket, [{nodelay, false}]),
+    {ok, [{nodelay, false}]} = inet:getopts(Socket, [nodelay]),
+    ok = inet:setopts(Socket, [{nodelay, true}]),
     Body = [34, <<"hello">>],
     http_server:reply(200, Body, Conn).
 

@@ -26,7 +26,7 @@
 ]).
 
 %% inet API
--export([port/1, sockname/1, peername/1]).
+-export([port/1, sockname/1, peername/1, setopt/3, getopt/2]).
 
 -type reason() :: term().
 
@@ -34,6 +34,7 @@
     {active, boolean()}
     | {buffer, pos_integer()}
     | {timeout, timeout()}
+    | {nodelay, boolean()}
     | list
     | binary
     | {binary, boolean()}.
@@ -162,6 +163,14 @@ sockname(Socket) ->
 %% @hidden
 peername(Socket) ->
     call(Socket, {peername}).
+
+%% @hidden
+setopt(Socket, nodelay, Value) ->
+    call(Socket, {setopt, nodelay, Value}).
+
+%% @hidden
+getopt(Socket, nodelay) ->
+    call(Socket, {getopt, nodelay}).
 
 %% internal operations
 

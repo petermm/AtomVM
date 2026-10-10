@@ -37,7 +37,7 @@
 -include_lib("kernel/include/logger.hrl").
 
 %% inet API
--export([port/1, sockname/1, peername/1]).
+-export([port/1, sockname/1, peername/1, setopt/3, getopt/2]).
 
 %% gen_server implementation (hidden)
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -48,6 +48,7 @@
     {active, boolean()}
     | {buffer, pos_integer()}
     | {timeout, timeout()}
+    | {nodelay, boolean()}
     | list
     | binary.
 
@@ -70,7 +71,8 @@
 %% @hidden
 connect(Address, Port, Options) ->
     ControllingProcess = self(),
-    case socket:open(inet, stream, tcp) of
+    EffectiveOptions = maps:merge(?DEFAULT_OPTIONS, proplist_to_map(Options)),
+    case open_socket(EffectiveOptions) of
         {ok, Socket} ->
             case inet:getaddr(Address, inet) of
                 {ok, Address0} ->
@@ -78,12 +80,7 @@ connect(Address, Port, Options) ->
                         socket:connect(Socket, #{family => inet, addr => Address0, port => Port})
                     of
                         ok ->
-                            EffectiveOptions = maps:merge(
-                                ?DEFAULT_OPTIONS, proplist_to_map(Options)
-                            ),
-                            gen_server:start_link(
-                                ?MODULE, {Socket, ControllingProcess, connect, EffectiveOptions}, []
-                            );
+                            start_socket(Socket, ControllingProcess, connect, EffectiveOptions);
                         ConnectError ->
                             socket:close(Socket),
                             ConnectError
@@ -118,23 +115,13 @@ recv(Socket, Length, Timeout) ->
     {ok, ListeningSocket :: inet:socket()} | {error, Reason :: reason()}.
 listen(Port, Options) ->
     ControllingProcess = self(),
-    case socket:open(inet, stream, tcp) of
+    EffectiveOptions = maps:merge(?DEFAULT_OPTIONS, proplist_to_map(Options)),
+    case open_socket(EffectiveOptions) of
         {ok, Socket} ->
-            EffectiveOptions = maps:merge(
-                ?DEFAULT_OPTIONS, proplist_to_map(Options)
-            ),
             Addr = maps:get(ifaddr, EffectiveOptions, any),
             case socket:bind(Socket, #{family => inet, addr => Addr, port => Port}) of
                 ok ->
-                    case socket:listen(Socket) of
-                        ok ->
-                            gen_server:start_link(
-                                ?MODULE, {Socket, ControllingProcess, listen, EffectiveOptions}, []
-                            );
-                        ListenError ->
-                            socket:close(Socket),
-                            ListenError
-                    end;
+                    start_socket(Socket, ControllingProcess, listen, EffectiveOptions);
                 BindError ->
                     socket:close(Socket),
                     BindError
@@ -184,6 +171,48 @@ sockname(Socket) ->
 peername(Socket) ->
     call(Socket, peername).
 
+%% @hidden
+setopt(Socket, nodelay, Value) ->
+    call(Socket, {setopt, nodelay, Value}).
+
+%% @hidden
+getopt(Socket, nodelay) ->
+    call(Socket, {getopt, nodelay}).
+
+%% Validate and apply TCP options before connect/listen (lwIP BSD requires this).
+open_socket(Options) ->
+    case socket:open(inet, stream, tcp) of
+        {ok, Socket} ->
+            case socket:setopt(Socket, {tcp, nodelay}, maps:get(nodelay, Options, false)) of
+                ok ->
+                    {ok, Socket};
+                {error, invalid_value} ->
+                    socket:close(Socket),
+                    {error, badarg};
+                Error ->
+                    socket:close(Socket),
+                    Error
+            end;
+        Error ->
+            Error
+    end.
+
+%% Accepted sockets get an explicit setting; never assume native inheritance.
+start_socket(Socket, ControllingProcess, Mode, Options) ->
+    Result =
+        case Mode of
+            accept -> socket:setopt(Socket, {tcp, nodelay}, maps:get(nodelay, Options, false));
+            listen -> socket:listen(Socket);
+            connect -> ok
+        end,
+    case Result of
+        ok ->
+            gen_server:start_link(?MODULE, {Socket, ControllingProcess, Mode, Options}, []);
+        Error ->
+            socket:close(Socket),
+            Error
+    end.
+
 %%
 %% gen_server implementation
 %%
@@ -193,6 +222,7 @@ peername(Socket) ->
     controlling_process = undefined,
     monitor_ref = undefined,
     active,
+    listening = false,
     options,
     pending_selects = #{}
 }).
@@ -232,11 +262,27 @@ init({Socket, ControllingProcess, Mode, Options}) ->
             {ok, #state{
                 socket = Socket,
                 active = false,
+                listening = Mode =:= listen,
                 options = Options
             }}
     end.
 
 %% @hidden
+handle_call({setopt, nodelay, Value}, _From, #state{listening = true} = State) ->
+    Options = State#state.options,
+    {reply, ok, State#state{options = Options#{nodelay => Value}}};
+handle_call({setopt, nodelay, Value}, _From, State) ->
+    case socket:setopt(State#state.socket, {tcp, nodelay}, Value) of
+        ok ->
+            Options = State#state.options,
+            {reply, ok, State#state{options = Options#{nodelay => Value}}};
+        Error ->
+            {reply, Error, State}
+    end;
+handle_call({getopt, nodelay}, _From, #state{listening = true} = State) ->
+    {reply, {ok, maps:get(nodelay, State#state.options, false)}, State};
+handle_call({getopt, nodelay}, _From, State) ->
+    {reply, socket:getopt(State#state.socket, {tcp, nodelay}), State};
 handle_call({accept, Timeout, AcceptingProc}, From, State) ->
     ?LOG_DEBUG("handle_call [~p], ~p, ~p]", [
         {accept, Timeout, AcceptingProc}, From, State
@@ -456,9 +502,7 @@ handle_accept(State, From, AcceptingProc) ->
     case socket:nif_accept(Socket) of
         {ok, ConnectedSocket} ->
             Reply =
-                gen_server:start_link(
-                    ?MODULE, {ConnectedSocket, ControllingProcess, accept, Options}, []
-                ),
+                start_socket(ConnectedSocket, ControllingProcess, accept, Options),
             ?LOG_INFO("Accepted connection.  Attempted to start connected socket: ~p", [Reply]),
             gen_server:reply(From, Reply),
             State;
@@ -555,7 +599,12 @@ handle_passive_recv(State, From, Length, _Timeout) ->
 
 %% @private
 call(Pid, Request) ->
-    gen_server:call(Pid, Request, infinity).
+    try gen_server:call(Pid, Request, infinity) of
+        Reply -> Reply
+    catch
+        exit:{noproc, _} -> {error, closed};
+        exit:{normal, _} -> {error, closed}
+    end.
 
 %% @private
 maybe_encode_binary(Options, Data) ->

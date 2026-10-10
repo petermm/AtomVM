@@ -72,7 +72,8 @@
 -type socket_option() ::
     {socket, reuseaddr | linger | type}
     | {otp, recvbuf}
-    | {ip, add_membership}.
+    | {ip, add_membership}
+    | {tcp, nodelay}.
 
 -export_type([
     socket/0,
@@ -625,6 +626,7 @@ sendto(Socket, Data, Dest) ->
 %%          Currently, the following options are supported:
 %%          <table>
 %%              <tr><td>`{socket, type}'</td><td>`type()'</td></tr>
+%%              <tr><td>`{tcp, nodelay}'</td><td>`boolean()'</td></tr>
 %%          </table>
 %%
 %% Example:
@@ -652,7 +654,13 @@ getopt(_Socket, _SocketOption) ->
 %%              <tr><td>`{socket, linger}'</td><td>`#{onoff => boolean(), linger => non_neg_integer()}'</td></tr>
 %%              <tr><td>`{otp, recvbuf}'</td><td>`non_neg_integer()'</td></tr>
 %%              <tr><td>`{ip, add_membership}'</td><td>`ip_mreq()'</td></tr>
+%%              <tr><td>`{tcp, nodelay}'</td><td>`boolean()'</td></tr>
 %%          </table>
+%%
+%%          For `nodelay', true disables Nagle's algorithm, false enables it,
+%%          and other values return `{error, invalid_value}'. On ESP32's BSD
+%%          backend, set TCP options before `listen/1'; lwIP rejects them on
+%%          listening sockets. Set the option explicitly on accepted sockets.
 %%
 %% Example:
 %%

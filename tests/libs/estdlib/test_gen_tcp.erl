@@ -31,6 +31,57 @@ test() ->
     ok = test_connect_parameters(),
     ok = test_connect_bad_address(),
     ok = test_tcp_double_close(),
+    ok = test_nodelay(),
+    ok.
+
+test_nodelay() ->
+    lists:foreach(
+        fun(Backend) ->
+            lists:foreach(fun(Value) -> test_nodelay(Backend, Value) end, [false, true]),
+            {error, _} = gen_tcp:listen(0, [{nodelay, invalid} | Backend]),
+            {ok, UDP} = gen_udp:open(0, Backend),
+            {error, einval} = inet:setopts(UDP, [{nodelay, true}]),
+            {error, einval} = inet:getopts(UDP, [nodelay]),
+            ok = gen_udp:close(UDP)
+        end,
+        [[], [{inet_backend, socket}]]
+    ),
+    ok.
+
+test_nodelay(Backend, Value) ->
+    Options = [{active, false} | Backend],
+    {ok, Listener} = gen_tcp:listen(0, [{nodelay, Value} | Options]),
+    {ok, {_, Port}} = inet:sockname(Listener),
+    {ok, [{nodelay, Value}]} = inet:getopts(Listener, [nodelay]),
+    {ok, Client} = gen_tcp:connect({127, 0, 0, 1}, Port, [{nodelay, not Value} | Options]),
+    {ok, Accepted} = gen_tcp:accept(Listener),
+    {ok, [{nodelay, Value}]} = inet:getopts(Accepted, [nodelay]),
+    {ok, [{nodelay, ClientValue}]} = inet:getopts(Client, [nodelay]),
+    true = ClientValue =:= not Value,
+    {error, _} = gen_tcp:connect({127, 0, 0, 1}, Port, [{nodelay, invalid} | Options]),
+    {error, einval} = inet:setopts(Accepted, [{nodelay, 1}]),
+    {error, einval} = inet:setopts(Accepted, [{unsupported, true}]),
+    {error, einval} = inet:setopts(Accepted, invalid),
+    {error, einval} = inet:getopts(Accepted, [unsupported]),
+    {ok, [{nodelay, Value}]} = inet:getopts(Accepted, [nodelay]),
+    ok = inet:setopts(Accepted, [{nodelay, not Value}]),
+    {ok, [{nodelay, ClientValue}]} = inet:getopts(Accepted, [nodelay]),
+    ok = inet:setopts(Accepted, [{nodelay, Value}]),
+    %% Changing a listener affects future accepts, not existing connections.
+    ok = inet:setopts(Listener, [{nodelay, not Value}]),
+    {ok, [{nodelay, ClientValue}]} = inet:getopts(Listener, [nodelay]),
+    {ok, [{nodelay, Value}]} = inet:getopts(Accepted, [nodelay]),
+    {ok, NextClient} = gen_tcp:connect({127, 0, 0, 1}, Port, Options),
+    {ok, [{nodelay, false}]} = inet:getopts(NextClient, [nodelay]),
+    {ok, NextAccepted} = gen_tcp:accept(Listener),
+    {ok, [{nodelay, ClientValue}]} = inet:getopts(NextAccepted, [nodelay]),
+    ok = gen_tcp:close(NextAccepted),
+    ok = gen_tcp:close(NextClient),
+    ok = gen_tcp:close(Accepted),
+    {error, closed} = inet:setopts(Accepted, [{nodelay, true}]),
+    {error, closed} = inet:getopts(Accepted, [nodelay]),
+    ok = gen_tcp:close(Client),
+    ok = gen_tcp:close(Listener),
     ok.
 
 test_echo_server() ->

@@ -49,6 +49,7 @@
     {active, boolean()}
     | {buffer, pos_integer()}
     | {timeout, timeout()}
+    | {nodelay, boolean()}
     | list
     | binary
     | {binary, boolean()}
@@ -78,6 +79,7 @@
 %%              <li><b>buffer</b> Size of the receive buffer to use in active mode (default: 512)</li>
 %%              <li><b>binary</b> data is received as binaries (as opposed to lists)</li>
 %%              <li><b>list</b> data is received as lists (default)</li>
+%%              <li><b>nodelay</b> Disable Nagle's algorithm (default: false)</li>
 %%          </ul>
 %%
 %%          If the socket is connected in active mode, then the calling process
@@ -158,7 +160,9 @@ recv({?GEN_TCP_MONIKER, Socket, Module}, Length, Timeout) ->
 %% @returns a listening socket, which is appropriate for use in accept/1
 %% @doc     Create a server-side listening socket.
 %%
-%%          This function is currently unimplemented
+%%          `{nodelay, true}' disables Nagle's algorithm on subsequently accepted
+%%          sockets. The default is false. Settings are applied explicitly on
+%%          accept, and can be changed using `inet:setopts/2'.
 %% @end
 %%-----------------------------------------------------------------------------
 -spec listen(Port :: inet:port_number(), Options :: [listen_option()]) ->

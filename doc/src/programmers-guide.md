@@ -2333,6 +2333,43 @@ In this case, the server program will continuously echo the received input back 
 
 For more information about the `gen_tcp` server interface, consult the AtomVM [API Reference Documentation](./apidocs/erlang/estdlib/gen_tcp.md).
 
+#### TCP_NODELAY and HTTP responses
+
+Use `{nodelay, true}` with `gen_tcp:listen/2` or `gen_tcp:connect/3` to disable
+Nagle's algorithm for outgoing TCP data. The default is `false`; explicitly setting
+`false` enables Nagle's algorithm again. A listener's setting is applied to every
+accepted connection, without relying on native inheritance. Changing the listener
+with `inet:setopts/2` affects future accepts, not existing connections.
+
+For `http_server`, keep the existing `http_server:start_server(Port, Router)` call.
+Enable nodelay in the route handler using its existing accepted-socket access:
+
+```erlang
+handle_req("GET", [], Conn) ->
+    Socket = proplists:get_value(socket, Conn),
+    ok = inet:setopts(Socket, [{nodelay, true}]),
+    http_server:reply(200, <<"hello">>, Conn).
+```
+
+This works with the default legacy `gen_tcp` backend on Unix and ESP32, as well as
+`{inet_backend, socket}` on BSD and raw lwIP platforms. No HTTP server configuration
+change is needed. The setting affects the server's outgoing response, not the
+client's request or data already sent.
+
+`inet:getopts(Socket, [nodelay])` returns `{ok, [{nodelay, Boolean}]}`. Connected
+sockets read native TCP state; lwIP listeners retain the setting for future accepts
+because their smaller listening PCBs have no Nagle flags. `inet:setopts/2` and
+`inet:getopts/2` currently support only nodelay: invalid values, unsupported options
+and UDP sockets return `{error, einval}`. Closed TCP sockets return `{error, closed}`.
+
+For the lower-level `socket` API, use `socket:setopt(Socket, {tcp, nodelay}, true)`
+and `socket:getopt(Socket, {tcp, nodelay})`. Invalid values return
+`{error, invalid_value}`; UDP sockets return a backend-specific error. On ESP32's
+lwIP BSD API, TCP options must be set **before** `socket:listen/1` (option operations
+on an already listening socket return `einval`). Raw lwIP retains listener settings
+separately. With this lower-level API, explicitly set nodelay on accepted sockets;
+the `gen_tcp` layer performs that step for you.
+
 #### Client-side TCP
 
 Client side TCP requires establishing a connection with an endpoint, and then using a combination of sending and receiving packets over the established connection.

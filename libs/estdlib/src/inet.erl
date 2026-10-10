@@ -20,7 +20,7 @@
 
 -module(inet).
 
--export([port/1, close/1, sockname/1, peername/1, getaddr/2]).
+-export([port/1, close/1, sockname/1, peername/1, getaddr/2, setopts/2, getopts/2]).
 -export([ntoa/1, parse_address/1, parse_ipv4_address/1, parse_ipv4strict_address/1]).
 
 -include("inet-priv.hrl").
@@ -87,6 +87,39 @@ sockname({Moniker, Socket, Module}) when
     {ok, {ip_address(), port_number()}} | {error, Reason :: term()}.
 peername({?GEN_TCP_MONIKER, Socket, Module}) ->
     Module:peername(Socket).
+
+%% @doc Set TCP options. Currently only `{nodelay, boolean()}' is supported.
+%% Disabling Nagle's algorithm affects outgoing data on this socket only.
+%% Listener settings are explicitly applied to subsequently accepted sockets.
+%% Invalid values, unsupported options and UDP sockets return `{error, einval}'.
+-spec setopts(socket(), [{nodelay, boolean()}]) -> ok | {error, term()}.
+setopts(_Socket, []) ->
+    ok;
+setopts({?GEN_TCP_MONIKER, Socket, Module} = Wrapped, [{nodelay, Value} | Rest]) when
+    is_boolean(Value)
+->
+    case Module:setopt(Socket, nodelay, Value) of
+        ok -> setopts(Wrapped, Rest);
+        Error -> Error
+    end;
+setopts(_Socket, _Options) ->
+    {error, einval}.
+
+%% @doc Read TCP options. Currently only `nodelay' is supported.
+%% Connected sockets report native TCP state, not just the requested setting.
+-spec getopts(socket(), [nodelay]) -> {ok, [{nodelay, boolean()}]} | {error, term()}.
+getopts(Socket, Options) ->
+    getopts(Socket, Options, []).
+
+getopts(_Socket, [], Acc) ->
+    {ok, lists:reverse(Acc)};
+getopts({?GEN_TCP_MONIKER, Socket, Module} = Wrapped, [nodelay | Rest], Acc) ->
+    case Module:getopt(Socket, nodelay) of
+        {ok, Value} -> getopts(Wrapped, Rest, [{nodelay, Value} | Acc]);
+        Error -> Error
+    end;
+getopts(_Socket, _Options, _Acc) ->
+    {error, einval}.
 
 %%-----------------------------------------------------------------------------
 %% @param   Name the name to resolve
