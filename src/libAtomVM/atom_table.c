@@ -311,11 +311,9 @@ static bool ensure_entries_capacity(struct AtomTable *table, size_t needed)
     if (needed <= table->entries_capacity) {
         return true;
     }
-    size_t new_cap = table->entries_capacity < ATOM_TABLE_ENTRIES_STEP
-        ? table->entries_capacity * 2
-        : table->entries_capacity + ATOM_TABLE_ENTRIES_STEP;
+    size_t new_cap = table->entries_capacity;
     while (new_cap < needed) {
-        new_cap += ATOM_TABLE_ENTRIES_STEP;
+        new_cap = new_cap < ATOM_TABLE_ENTRIES_STEP ? new_cap * 2 : new_cap + ATOM_TABLE_ENTRIES_STEP;
     }
     if (new_cap > ATOM_TABLE_MAX_ATOMS) {
         new_cap = ATOM_TABLE_MAX_ATOMS;
