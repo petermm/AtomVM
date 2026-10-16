@@ -45,10 +45,23 @@
     pbkdf2_hmac/5,
     hash_equals/2,
     strong_rand_bytes/1,
-    info_lib/0
+    info_lib/0,
+    supports/0,
+    supports/1
 ]).
 
--type hash_algorithm() :: md5 | sha | sha224 | sha256 | sha384 | sha512.
+-type hash_algorithm() ::
+    md5
+    | ripemd160
+    | sha
+    | sha224
+    | sha256
+    | sha384
+    | sha512
+    | sha3_224
+    | sha3_256
+    | sha3_384
+    | sha3_512.
 -type digest() :: binary().
 
 -export_type([hash_state/0]).
@@ -104,7 +117,7 @@
     | brainpoolP384r1
     | brainpoolP512r1.
 
--type edwards_curve_dh() :: x25519.
+-type edwards_curve_dh() :: x25519 | x448.
 %% Supported EdDSA curve (Ed25519 via libsodium when AVM_USE_LIBSODIUM is enabled).
 -type edwards_curve_ed() :: ed25519.
 
@@ -131,7 +144,7 @@
     | aes_256_cbc
     | aes_256_ecb.
 
--type mac_subtype() :: cmac_subtype() | hash_algorithm() | ripemd160.
+-type mac_subtype() :: cmac_subtype() | hash_algorithm().
 
 -export_type([mac_state/0]).
 -opaque mac_state() :: reference().
@@ -633,4 +646,35 @@ strong_rand_bytes(_N) ->
 %%-----------------------------------------------------------------------------
 -spec info_lib() -> [{binary(), integer(), binary()}].
 info_lib() ->
+    erlang:nif_error(undefined).
+
+%%-----------------------------------------------------------------------------
+%% @returns Returns a proplist of the algorithms this build can run.
+%% @doc     Get the cryptographic algorithms supported by this build.
+%%
+%%          Same shape as OTP `crypto:supports/0', including the `hashs' key.
+%%          An entry is omitted when this build of Mbed TLS (or libsodium)
+%%          cannot perform it. `public_keys' is the key algorithms, as in OTP;
+%%          the curves they accept are under `curves'.
+%% @end
+%%-----------------------------------------------------------------------------
+-spec supports() -> [{atom(), [atom()]}].
+supports() ->
+    [
+        {hashs, ?MODULE:supports(hashs)},
+        {ciphers, ?MODULE:supports(ciphers)},
+        {macs, ?MODULE:supports(macs)},
+        {curves, ?MODULE:supports(curves)},
+        {public_keys, ?MODULE:supports(public_keys)},
+        {rsa_opts, ?MODULE:supports(rsa_opts)}
+    ].
+
+%%-----------------------------------------------------------------------------
+%% @param   Type `hashs', `ciphers', `macs', `curves', `public_keys' or `rsa_opts'
+%% @returns Returns the atoms of that kind this build accepts.
+%% @doc     Get one group of supported cryptographic algorithms.
+%% @end
+%%-----------------------------------------------------------------------------
+-spec supports(hashs | ciphers | macs | curves | public_keys | rsa_opts) -> [atom()].
+supports(_Type) ->
     erlang:nif_error(undefined).

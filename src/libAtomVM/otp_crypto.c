@@ -3274,6 +3274,321 @@ static const char *get_mbedtls_version_string_full(char *buf, size_t buf_size)
 #endif
 }
 
+// ESP-IDF's hardware AES backend can support 256-bit keys but not 192-bit keys.
+// esp_config.h includes soc_caps.h, so this also follows software AES builds.
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH) && (!defined(CONFIG_MBEDTLS_HARDWARE_AES) || SOC_AES_SUPPORT_AES_192)
+#define CRYPTO_AES_192_AVAILABLE 1
+#endif
+
+// Mbed TLS 2.28 defines some PSA_WANT_* macros (such as PSA_WANT_ECC_*) with
+// an empty expansion instead of 1; 1 - M - 1 evaluates to 2 when M is empty,
+// -1 when M is 1, and 0 when M is 0.
+#define PSA_WANT_IS_ENABLED(M) ((1 - M - 1) != 0)
+
+// Algorithm and curve wants alone do not enable PSA key management. Mbed TLS
+// 3.5 split the key-pair want into operation-specific wants. A curve is usable
+// through private-key import or through generation plus private/public export.
+#if defined(HAVE_PSA_CRYPTO)
+#if MBEDTLS_VERSION_NUMBER >= 0x03050000
+#if defined(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_IMPORT) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_IMPORT)
+#define CRYPTO_ECC_IMPORT_AVAILABLE 1
+#endif
+#if defined(CRYPTO_ECC_IMPORT_AVAILABLE) || (defined(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE) && defined(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_EXPORT) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_EXPORT) && defined(PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY))
+#define CRYPTO_ECC_KEY_PAIR_AVAILABLE 1
+#endif
+#elif defined(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR)
+#define CRYPTO_ECC_IMPORT_AVAILABLE 1
+#define CRYPTO_ECC_KEY_PAIR_AVAILABLE 1
+#endif
+#if defined(HAVE_MBEDTLS_ECDSA_RAW_TO_DER) && defined(HAVE_MBEDTLS_ECDSA_DER_TO_RAW) && defined(PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY) && defined(PSA_WANT_ALG_ECDSA) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_ECDSA)
+#define CRYPTO_PSA_ECDSA_AVAILABLE 1
+#endif
+#if (defined(PSA_WANT_ECC_SECP_R1_256) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_SECP_R1_256)) \
+    || (defined(PSA_WANT_ECC_SECP_R1_384) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_SECP_R1_384)) \
+    || (defined(PSA_WANT_ECC_SECP_R1_521) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_SECP_R1_521)) \
+    || (defined(PSA_WANT_ECC_SECP_K1_256) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_SECP_K1_256)) \
+    || (defined(PSA_WANT_ECC_BRAINPOOL_P_R1_256) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_BRAINPOOL_P_R1_256)) \
+    || (defined(PSA_WANT_ECC_BRAINPOOL_P_R1_384) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_BRAINPOOL_P_R1_384)) \
+    || (defined(PSA_WANT_ECC_BRAINPOOL_P_R1_512) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_BRAINPOOL_P_R1_512))
+#define CRYPTO_PSA_WEIERSTRASS_CURVE_AVAILABLE 1
+#endif
+#if (defined(PSA_WANT_ECC_MONTGOMERY_255) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_MONTGOMERY_255)) \
+    || (defined(PSA_WANT_ECC_MONTGOMERY_448) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_MONTGOMERY_448))
+#define CRYPTO_PSA_MONTGOMERY_CURVE_AVAILABLE 1
+#endif
+#endif
+
+static term crypto_supports_list(Context *ctx, const AtomString *names, size_t count)
+{
+    // Make every atom before allocating the cons cells. A later
+    // globalcontext_make_atom can GC, and an atom not yet on the heap is not a root.
+    term atoms[32];
+    if (UNLIKELY(count > 32)) {
+        RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+    }
+    size_t enabled = 0;
+    for (size_t i = 0; i < count; i++) {
+        // A leading empty string marks a name this build does not implement,
+        // so a table is never a zero-length array.
+        if (atom_string_len(names[i]) == 0) {
+            continue;
+        }
+        atoms[enabled++] = globalcontext_make_atom(ctx->global, names[i]);
+    }
+    if (UNLIKELY(memory_ensure_free_with_roots(ctx, LIST_SIZE(enabled, 0), enabled, atoms, MEMORY_CAN_SHRINK) != MEMORY_GC_OK)) {
+        RAISE_ERROR(OUT_OF_MEMORY_ATOM);
+    }
+
+    term list = term_nil();
+    for (size_t i = enabled; i > 0; i--) {
+        list = term_list_prepend(atoms[i - 1], list, &ctx->heap);
+    }
+    return list;
+}
+
+// Names this build can actually run. Each entry is compiled in only when the
+// NIF that implements it is compiled in.
+term nif_crypto_supports(Context *ctx, int argc, term argv[])
+{
+    UNUSED(argc);
+    term type = argv[0];
+    if (!term_is_atom(type)) {
+        RAISE_ERROR(FUNCTION_CLAUSE_ATOM);
+    }
+
+    GlobalContext *glb = ctx->global;
+    // hash/2 uses the legacy MD API below Mbed TLS 4, so a disabled SHA-384
+    // (MBEDTLS_SHA384_C unset, or MBEDTLS_SHA512_NO_SHA384 on 2.x) must not
+    // be advertised. SHA-3 and RIPEMD-160 are hash/2 algorithms only on 4.x.
+    if (globalcontext_is_term_equal_to_atom_string(glb, type, ATOM_STR("\x5", "hashs"))) {
+        static const AtomString hashs[] = {
+#if (MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_MD5_C)) || (MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_MD5) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_MD5))
+            ATOM_STR("\x3", "md5"),
+#endif
+#if (MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_SHA1_C)) || (MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA_1) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA_1))
+            ATOM_STR("\x3", "sha"),
+#endif
+#if (MBEDTLS_VERSION_NUMBER < 0x03000000 && defined(MBEDTLS_SHA256_C)) || (MBEDTLS_VERSION_NUMBER >= 0x03000000 && MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_SHA224_C)) || (MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA_224) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA_224))
+            ATOM_STR("\x6", "sha224"),
+#endif
+#if (MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_SHA256_C)) || (MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA_256) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA_256))
+            ATOM_STR("\x6", "sha256"),
+#endif
+#if (MBEDTLS_VERSION_NUMBER < 0x03000000 && defined(MBEDTLS_SHA512_C) && !defined(MBEDTLS_SHA512_NO_SHA384)) || (MBEDTLS_VERSION_NUMBER >= 0x03000000 && MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_SHA384_C)) || (MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA_384) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA_384))
+            ATOM_STR("\x6", "sha384"),
+#endif
+#if (MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_SHA512_C)) || (MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA_512) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA_512))
+            ATOM_STR("\x6", "sha512"),
+#endif
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA3_224) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA3_224)
+            ATOM_STR("\x8", "sha3_224"),
+#endif
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA3_256) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA3_256)
+            ATOM_STR("\x8", "sha3_256"),
+#endif
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA3_384) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA3_384)
+            ATOM_STR("\x8", "sha3_384"),
+#endif
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_SHA3_512) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_SHA3_512)
+            ATOM_STR("\x8", "sha3_512"),
+#endif
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_ALG_RIPEMD160) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_RIPEMD160)
+            ATOM_STR("\x9", "ripemd160"),
+#endif
+            ATOM_STR("\x0", "")
+        };
+        return crypto_supports_list(ctx, hashs, sizeof(hashs) / sizeof(hashs[0]));
+    }
+    // crypto_one_time uses the legacy cipher table below Mbed TLS 4 and PSA
+    // only on 4.x. There is no MBEDTLS_CIPHER_MODE_ECB; AES ECB is MBEDTLS_AES_C.
+    // OFB uses the PSA streaming NIF on earlier versions too. Key sizes follow
+    // both the configured AES key lengths and the hardware backend's limits.
+    if (globalcontext_is_term_equal_to_atom_string(glb, type, ATOM_STR("\x7", "ciphers"))) {
+        static const AtomString ciphers[] = {
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_KEY_TYPE_AES) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_AES) && defined(PSA_WANT_ALG_ECB_NO_PADDING) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_ECB_NO_PADDING)
+            ATOM_STR("\xB", "aes_128_ecb"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_ecb"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_ecb"),
+#endif
+#elif MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_AES_C)
+            ATOM_STR("\xB", "aes_128_ecb"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_ecb"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_ecb"),
+#endif
+#endif
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_KEY_TYPE_AES) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_AES) && defined(PSA_WANT_ALG_CBC_NO_PADDING) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_CBC_NO_PADDING)
+            ATOM_STR("\xB", "aes_128_cbc"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_cbc"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_cbc"),
+#endif
+#elif MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_AES_C) && defined(MBEDTLS_CIPHER_MODE_CBC)
+            ATOM_STR("\xB", "aes_128_cbc"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_cbc"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_cbc"),
+#endif
+#endif
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_KEY_TYPE_AES) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_AES) && defined(PSA_WANT_ALG_CFB) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_CFB)
+            ATOM_STR("\xE", "aes_128_cfb128"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xE", "aes_192_cfb128"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xE", "aes_256_cfb128"),
+#endif
+#elif MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_AES_C) && defined(MBEDTLS_CIPHER_MODE_CFB)
+            ATOM_STR("\xE", "aes_128_cfb128"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xE", "aes_192_cfb128"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xE", "aes_256_cfb128"),
+#endif
+#endif
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000 && defined(PSA_WANT_KEY_TYPE_AES) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_AES) && defined(PSA_WANT_ALG_CTR) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_CTR)
+            ATOM_STR("\xB", "aes_128_ctr"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_ctr"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_ctr"),
+#endif
+#elif MBEDTLS_VERSION_NUMBER < 0x04000000 && defined(MBEDTLS_AES_C) && defined(MBEDTLS_CIPHER_MODE_CTR)
+            ATOM_STR("\xB", "aes_128_ctr"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_ctr"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_ctr"),
+#endif
+#endif
+#if defined(HAVE_PSA_CRYPTO) && defined(PSA_WANT_KEY_TYPE_AES) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_AES) && defined(PSA_WANT_ALG_OFB) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_OFB)
+            ATOM_STR("\xB", "aes_128_ofb"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_ofb"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_ofb"),
+#endif
+#endif
+#if defined(HAVE_PSA_CRYPTO) && defined(PSA_WANT_KEY_TYPE_AES) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_AES) && defined(PSA_WANT_ALG_GCM) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_GCM)
+            ATOM_STR("\xB", "aes_128_gcm"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_gcm"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_gcm"),
+#endif
+#endif
+#if defined(HAVE_PSA_CRYPTO) && defined(PSA_WANT_KEY_TYPE_AES) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_AES) && defined(PSA_WANT_ALG_CCM) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_CCM)
+            ATOM_STR("\xB", "aes_128_ccm"),
+#if defined(CRYPTO_AES_192_AVAILABLE)
+            ATOM_STR("\xB", "aes_192_ccm"),
+#endif
+#if !defined(MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH)
+            ATOM_STR("\xB", "aes_256_ccm"),
+#endif
+#endif
+#if defined(HAVE_PSA_CRYPTO) && defined(PSA_WANT_KEY_TYPE_CHACHA20) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_CHACHA20) && defined(PSA_WANT_ALG_CHACHA20_POLY1305) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_CHACHA20_POLY1305)
+            ATOM_STR("\x11", "chacha20_poly1305"),
+#endif
+            ATOM_STR("\x0", "")
+        };
+        return crypto_supports_list(ctx, ciphers, sizeof(ciphers) / sizeof(ciphers[0]));
+    }
+    // mac/4 is registered only when HAVE_PSA_CRYPTO is set, including on 4.x.
+    if (globalcontext_is_term_equal_to_atom_string(glb, type, ATOM_STR("\x4", "macs"))) {
+        static const AtomString macs[] = {
+#if defined(HAVE_PSA_CRYPTO) && defined(PSA_WANT_ALG_HMAC) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_HMAC)
+            ATOM_STR("\x4", "hmac"),
+#endif
+#if defined(HAVE_PSA_CRYPTO) && defined(PSA_WANT_ALG_CMAC) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_CMAC) && defined(PSA_WANT_KEY_TYPE_AES) && PSA_WANT_IS_ENABLED(PSA_WANT_KEY_TYPE_AES)
+            ATOM_STR("\x4", "cmac"),
+#endif
+            ATOM_STR("\x0", "")
+        };
+        return crypto_supports_list(ctx, macs, sizeof(macs) / sizeof(macs[0]));
+    }
+    // generate_key/2 and compute_key/4 are registered only with HAVE_PSA_CRYPTO.
+    // libsodium answers ed25519 and x25519 inside those NIFs, so x25519 does
+    // not also need a PSA Montgomery curve.
+    if (globalcontext_is_term_equal_to_atom_string(glb, type, ATOM_STR("\x6", "curves"))) {
+        static const AtomString curves[] = {
+#if defined(CRYPTO_ECC_KEY_PAIR_AVAILABLE) && (defined(CRYPTO_PSA_ECDSA_AVAILABLE) || (defined(PSA_WANT_ALG_ECDH) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_ECDH)))
+#if defined(PSA_WANT_ECC_SECP_R1_256) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_SECP_R1_256)
+            ATOM_STR("\x9", "secp256r1"),
+#endif
+#if defined(PSA_WANT_ECC_SECP_R1_384) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_SECP_R1_384)
+            ATOM_STR("\x9", "secp384r1"),
+#endif
+#if defined(PSA_WANT_ECC_SECP_R1_521) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_SECP_R1_521)
+            ATOM_STR("\x9", "secp521r1"),
+#endif
+#if defined(PSA_WANT_ECC_SECP_K1_256) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_SECP_K1_256)
+            ATOM_STR("\x9", "secp256k1"),
+#endif
+#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_256) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_BRAINPOOL_P_R1_256)
+            ATOM_STR("\xF", "brainpoolP256r1"),
+#endif
+#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_384) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_BRAINPOOL_P_R1_384)
+            ATOM_STR("\xF", "brainpoolP384r1"),
+#endif
+#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_512) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_BRAINPOOL_P_R1_512)
+            ATOM_STR("\xF", "brainpoolP512r1"),
+#endif
+#endif
+#if defined(HAVE_PSA_CRYPTO) && ((defined(CRYPTO_ECC_KEY_PAIR_AVAILABLE) && defined(PSA_WANT_ECC_MONTGOMERY_255) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_MONTGOMERY_255) && defined(PSA_WANT_ALG_ECDH) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_ECDH)) || defined(HAVE_LIBSODIUM))
+            ATOM_STR("\x6", "x25519"),
+#endif
+#if defined(CRYPTO_ECC_KEY_PAIR_AVAILABLE) && defined(PSA_WANT_ECC_MONTGOMERY_448) && PSA_WANT_IS_ENABLED(PSA_WANT_ECC_MONTGOMERY_448) && defined(PSA_WANT_ALG_ECDH) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_ECDH)
+            ATOM_STR("\x4", "x448"),
+#endif
+#if defined(HAVE_PSA_CRYPTO) && defined(HAVE_LIBSODIUM)
+            ATOM_STR("\x7", "ed25519"),
+#endif
+            ATOM_STR("\x0", "")
+        };
+        return crypto_supports_list(ctx, curves, sizeof(curves) / sizeof(curves[0]));
+    }
+    // ecdsa needs the raw/DER helpers, not merely CRYPTO_SIGN_AVAILABLE, which
+    // libsodium also sets. eddh can use either PSA Montgomery ECDH or libsodium.
+    if (globalcontext_is_term_equal_to_atom_string(glb, type, ATOM_STR("\xB", "public_keys"))) {
+        static const AtomString public_keys[] = {
+#if defined(CRYPTO_ECC_IMPORT_AVAILABLE) && defined(CRYPTO_PSA_ECDSA_AVAILABLE) && defined(CRYPTO_PSA_WEIERSTRASS_CURVE_AVAILABLE)
+            ATOM_STR("\x5", "ecdsa"),
+#endif
+#if defined(HAVE_PSA_CRYPTO) && ((defined(CRYPTO_ECC_IMPORT_AVAILABLE) && defined(PSA_WANT_ALG_ECDH) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_ECDH) && (defined(CRYPTO_PSA_WEIERSTRASS_CURVE_AVAILABLE) || defined(CRYPTO_PSA_MONTGOMERY_CURVE_AVAILABLE))) || defined(HAVE_LIBSODIUM))
+            ATOM_STR("\x4", "ecdh"),
+#endif
+#if defined(HAVE_PSA_CRYPTO) && ((defined(CRYPTO_ECC_IMPORT_AVAILABLE) && defined(PSA_WANT_ALG_ECDH) && PSA_WANT_IS_ENABLED(PSA_WANT_ALG_ECDH) && defined(CRYPTO_PSA_MONTGOMERY_CURVE_AVAILABLE)) || defined(HAVE_LIBSODIUM))
+            ATOM_STR("\x4", "eddh"),
+#endif
+#if defined(HAVE_PSA_CRYPTO) && defined(HAVE_LIBSODIUM) && defined(CRYPTO_SIGN_AVAILABLE) && defined(CRYPTO_VERIFY_AVAILABLE)
+            ATOM_STR("\x5", "eddsa"),
+#endif
+            ATOM_STR("\x0", "")
+        };
+        return crypto_supports_list(ctx, public_keys, sizeof(public_keys) / sizeof(public_keys[0]));
+    }
+
+    if (globalcontext_is_term_equal_to_atom_string(glb, type, ATOM_STR("\x8", "rsa_opts"))) {
+        return term_nil();
+    }
+
+    RAISE_ERROR(FUNCTION_CLAUSE_ATOM);
+}
+
 term nif_crypto_info_lib(Context *ctx, int argc, term argv[])
 {
     UNUSED(argc);
@@ -3434,6 +3749,10 @@ static const struct Nif crypto_strong_rand_bytes_nif = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_crypto_strong_rand_bytes
 };
+static const struct Nif crypto_supports_nif = {
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_crypto_supports
+};
 static const struct Nif crypto_info_lib = {
     .base.type = NIFFunctionType,
     .nif_ptr = nif_crypto_info_lib
@@ -3447,6 +3766,10 @@ const struct Nif *otp_crypto_nif_get_nif(const char *nifname)
 {
     if (strncmp("crypto:", nifname, 7) == 0) {
         const char *rest = nifname + 7;
+        if (strcmp("supports/1", rest) == 0) {
+            TRACE("Resolved platform nif %s ...\n", nifname);
+            return &crypto_supports_nif;
+        }
         if (strcmp("hash/2", rest) == 0) {
             TRACE("Resolved platform nif %s ...\n", nifname);
             return &crypto_hash_nif;

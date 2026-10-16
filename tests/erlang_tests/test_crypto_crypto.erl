@@ -22,6 +22,7 @@
 -export([
     start/0,
     test_encrypt_aes128_ctr/0,
+    test_encrypt_aes128_ofb/0,
     test_encrypt_aes128_ctr_list/0,
     test_decrypt_aes128_cbc/0,
     test_encrypt_aes128_cbc_bool/0,
@@ -46,6 +47,7 @@
 
 start() ->
     ok = mbedtls_conditional_run(test_encrypt_aes128_ctr, 16#03000000),
+    ok = mbedtls_conditional_run(test_encrypt_aes128_ofb, 16#03000000),
     ok = mbedtls_conditional_run(test_encrypt_aes128_ctr_list, 16#03000000),
     ok = mbedtls_conditional_run(test_decrypt_aes128_cbc, 16#03000000),
     ok = mbedtls_conditional_run(test_encrypt_aes128_cbc_bool, 16#03000000),
@@ -83,6 +85,21 @@ find_openssl_or_mbedtls_ver([{<<"mbedtls">>, Ver, _} | _T], RVer) when Ver >= RV
     true;
 find_openssl_or_mbedtls_ver([_ | T], RVer) ->
     find_openssl_or_mbedtls_ver(T, RVer).
+
+test_encrypt_aes128_ofb() ->
+    true = lists:member(aes_128_ofb, crypto:supports(ciphers)),
+    % NIST SP 800-38A F.4.1, first two blocks.
+    Key = <<16#2b7e151628aed2a6abf7158809cf4f3c:128>>,
+    IV = <<16#000102030405060708090a0b0c0d0e0f:128>>,
+    State = crypto:crypto_init(aes_128_ofb, Key, IV, true),
+    <<16#3b3fd92eb72dad20333449f8e83cfb4a:128>> = crypto:crypto_update(
+        State, <<16#6bc1bee22e409f96e93d7e117393172a:128>>
+    ),
+    <<16#7789508d16918f03f53c52dac54ed825:128>> = crypto:crypto_update(
+        State, <<16#ae2d8a571e03ac9c9eb76fac45af8e51:128>>
+    ),
+    <<>> = crypto:crypto_final(State),
+    ok.
 
 test_encrypt_aes128_ctr() ->
     Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,

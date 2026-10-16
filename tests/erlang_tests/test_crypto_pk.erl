@@ -106,6 +106,8 @@ has_libsodium_or_openssl([_ | T]) ->
     has_libsodium_or_openssl(T).
 
 test_generate_and_compute_key() ->
+    true = lists:member(eddh, crypto:supports(public_keys)),
+    true = lists:member(x25519, crypto:supports(curves)),
     {Pub, Priv} = crypto:generate_key(eddh, x25519),
     true = is_binary(Pub),
     32 = byte_size(Pub),

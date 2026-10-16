@@ -25,6 +25,7 @@ start() ->
     ok = test_hash(),
     ok = test_crypto_one_time(),
     ok = test_available_ciphers(),
+    ok = test_supports(),
     0.
 
 test_hash() ->
@@ -200,6 +201,44 @@ test_available_ciphers() ->
         crypto:crypto_one_time(aes_128_ecb, <<1:128>>, <<2:128>>, <<3:128>>, false),
     <<33, 51, 81, 23, 26, 72, 178, 26, 115, 82, 208, 26, 225, 24, 76, 247>> =
         crypto:crypto_one_time(aes_256_ecb, <<1:256>>, <<2:128>>, <<3:128>>, false),
+    ok.
+
+test_supports() ->
+    % This low-level runner resolves NIFs without loading estdlib modules.
+    Hashes = crypto:supports(hashs),
+    Ciphers = crypto:supports(ciphers),
+    Macs = crypto:supports(macs),
+    Curves = crypto:supports(curves),
+    PublicKeys = crypto:supports(public_keys),
+    true = is_list(crypto:supports(rsa_opts)),
+
+    % Every advertised hash must actually hash. SHA-3 is Mbed TLS 4 only.
+    % OTP 26/27 advertise shake128/shake256 XOFs, which fail in crypto:hash/2
+    % against OpenSSL 3.4+.
+    [
+        begin
+            Digest = crypto:hash(Hash, <<"foobar">>),
+            true = is_binary(Digest),
+            true = byte_size(Digest) > 0
+        end
+     || Hash <- Hashes,
+        Hash =/= shake128,
+        Hash =/= shake256
+    ],
+    true = lists:member(sha224, Hashes),
+    true = lists:member(sha256, Hashes),
+    false = lists:member(not_a_hash, Hashes),
+
+    % One-shot ciphers that this file already exercises must be advertised.
+    true = lists:member(aes_128_cbc, Ciphers),
+    true = lists:member(aes_128_ecb, Ciphers),
+    true = lists:member(aes_256_ctr, Ciphers),
+
+    function_clause = get_error(fun() -> crypto:supports(nope) end),
+    function_clause = get_error(fun() -> crypto:supports(<<"hashs">>) end),
+
+    % A listed MAC or public key is a real atom, not a placeholder.
+    [] = [Item || Item <- Macs ++ Curves ++ PublicKeys, not is_atom(Item)],
     ok.
 
 get_error(F) ->

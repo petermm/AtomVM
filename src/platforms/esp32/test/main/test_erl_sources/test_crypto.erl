@@ -31,6 +31,7 @@ start() ->
     ok = test_hash(),
     ok = test_crypto_one_time(),
     ok = test_available_ciphers(Model),
+    ok = test_supports(),
     ok.
 
 test_hash() ->
@@ -183,6 +184,63 @@ test_crypto_one_time() ->
     true = is_list(Message3),
 
     ok.
+
+test_supports() ->
+    Supports = crypto:supports(),
+    Hashes = value(hashs, Supports),
+    Ciphers = value(ciphers, Supports),
+    Macs = value(macs, Supports),
+    Curves = value(curves, Supports),
+    PublicKeys = value(public_keys, Supports),
+    [] = value(rsa_opts, Supports),
+
+    ok = lists:foreach(
+        fun(Hash) ->
+            Digest = crypto:hash(Hash, <<"foobar">>),
+            true = is_binary(Digest),
+            true = byte_size(Digest) > 0
+        end,
+        Hashes
+    ),
+    true = lists:member(sha224, Hashes),
+    true = lists:member(sha256, Hashes),
+    true = lists:member(aes_128_cbc, Ciphers),
+    true = lists:member(aes_128_ecb, Ciphers),
+
+    % Hardware AES-192 support differs by SoC; software AES can still support it.
+    ok = lists:foreach(
+        fun({Cipher, IV}) ->
+            Available =
+                try crypto:crypto_one_time(Cipher, <<1:192>>, IV, <<3:128>>, true) of
+                    <<_:128>> -> true
+                catch
+                    error:{_, _, _} -> false
+                end,
+            Available = lists:member(Cipher, Ciphers)
+        end,
+        [
+            {aes_192_ecb, <<>>},
+            {aes_192_cbc, <<2:128>>},
+            {aes_192_cfb128, <<2:128>>},
+            {aes_192_ctr, <<2:128>>}
+        ]
+    ),
+
+    Hashes = crypto:supports(hashs),
+    Ciphers = crypto:supports(ciphers),
+    Macs = crypto:supports(macs),
+    Curves = crypto:supports(curves),
+    PublicKeys = crypto:supports(public_keys),
+    [] = crypto:supports(rsa_opts),
+    function_clause = get_error(fun() -> crypto:supports(nope) end),
+    function_clause = get_error(fun() -> crypto:supports(<<"hashs">>) end),
+    true = lists:all(fun erlang:is_atom/1, Macs ++ Curves ++ PublicKeys),
+    ok.
+
+value(Key, [{Key, Value} | _]) ->
+    Value;
+value(Key, [_ | Rest]) ->
+    value(Key, Rest).
 
 test_available_ciphers(esp32) ->
     io:format("test_available_ciphers ALL ciphers~n"),

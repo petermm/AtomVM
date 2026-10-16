@@ -26,6 +26,7 @@ set(ERLANG_MODULES
     test_apply
     test_binary
     test_calendar
+    test_crypto_supports
     test_epmd
     test_gen_event
     test_gen_server
@@ -134,4 +135,3 @@ add_custom_target(
     test_serial_dist_socat_peer ALL
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/test_serial_dist_socat_peer.avm
 )
-
