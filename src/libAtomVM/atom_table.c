@@ -299,14 +299,21 @@ atom_index_t atom_table_get_index_from_cstring(struct AtomTable *table, const ch
     return result;
 }
 
+// Doubling while small, then in steps: on a heap without PSRAM, a module
+// loaded late into a table of 2048 entries would need one block of 4096
+// entries (32 KB with compact indices on a 32-bit chip, 48 KB without) to
+// double it, more than a fragmented heap may have, and the load fails. A step
+// of 256 entries asks for the new size only.
+#define ATOM_TABLE_ENTRIES_STEP 256
+
 static bool ensure_entries_capacity(struct AtomTable *table, size_t needed)
 {
     if (needed <= table->entries_capacity) {
         return true;
     }
-    size_t new_cap = table->entries_capacity * 2;
+    size_t new_cap = table->entries_capacity;
     while (new_cap < needed) {
-        new_cap *= 2;
+        new_cap = new_cap < ATOM_TABLE_ENTRIES_STEP ? new_cap * 2 : new_cap + ATOM_TABLE_ENTRIES_STEP;
     }
     if (new_cap > ATOM_TABLE_MAX_ATOMS) {
         new_cap = ATOM_TABLE_MAX_ATOMS;
