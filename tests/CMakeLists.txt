@@ -109,6 +109,11 @@ target_link_libraries(test-jit_stream_flash PRIVATE libAtomVM libAtomVM${PLATFOR
 target_link_libraries(test-mailbox PRIVATE libAtomVM libAtomVM${PLATFORM_LIB_SUFFIX})
 target_link_libraries(test-structs PRIVATE libAtomVM libAtomVM${PLATFORM_LIB_SUFFIX})
 
+if (NOT AVM_DISABLE_TASK_DRIVER)
+    find_package(Threads REQUIRED)
+    target_link_libraries(test-mailbox PRIVATE Threads::Threads)
+endif()
+
 # Except for XCode, also compile beams
 if (NOT "${CMAKE_GENERATOR}" MATCHES "Xcode")
     add_dependencies(test-erlang erlang_test_modules)

@@ -24,6 +24,12 @@
 #include "context.h"
 #include "globalcontext.h"
 #include "mailbox.h"
+#include "sys.h"
+
+#ifdef AVM_TASK_DRIVER_ENABLED
+#include <pthread.h>
+#include <time.h>
+#endif
 
 void test_mailbox_send(void)
 {
@@ -128,6 +134,60 @@ void test_mailbox_next(void)
     globalcontext_destroy(glb);
 }
 
+#ifdef AVM_TASK_DRIVER_ENABLED
+static void *send_task_driver_message(void *arg)
+{
+    Context *ctx = arg;
+    const struct timespec delay = { .tv_sec = 0, .tv_nsec = 50000000 };
+    nanosleep(&delay, NULL);
+
+    // Force deferred delivery in SMP builds as well.
+    SMP_SPINLOCK_LOCK(&ctx->global->processes_spinlock);
+    globalcontext_send_message_from_task(ctx->global, ctx->process_id, NormalMessage, term_from_int(42));
+    SMP_SPINLOCK_UNLOCK(&ctx->global->processes_spinlock);
+
+    return NULL;
+}
+
+void test_task_driver_wakeup(void)
+{
+    GlobalContext *glb = globalcontext_new();
+    Context *ctx = context_new(glb);
+
+    // Exercise both the initial polling set and its cached reuse.
+    for (int i = 0; i < 2; i++) {
+        pthread_t task;
+        int result = pthread_create(&task, NULL, send_task_driver_message, ctx);
+        assert(result == 0);
+
+        uint64_t start = sys_monotonic_time_u64();
+        sys_poll_events(glb, 5000);
+        uint64_t elapsed = sys_monotonic_time_u64() - start;
+        result = pthread_join(task, NULL);
+        assert(result == 0);
+        UNUSED(result);
+        assert(elapsed < sys_monotonic_time_ms_to_u64(2500));
+
+        globalcontext_process_task_driver_queues(glb);
+        assert(mailbox_process_outer_list(&ctx->mailbox) == NULL);
+        term message;
+        assert(mailbox_peek(ctx, &message));
+        assert(term_to_int(message) == 42);
+        mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+
+        // Drain any scheduler wakeup from delivering the queued message.
+        sys_poll_events(glb, 1);
+        start = sys_monotonic_time_u64();
+        sys_poll_events(glb, 50);
+        elapsed = sys_monotonic_time_u64() - start;
+        assert(elapsed >= sys_monotonic_time_ms_to_u64(40));
+    }
+
+    context_destroy(ctx);
+    globalcontext_destroy(glb);
+}
+#endif
+
 int main(int argc, char **argv)
 {
     UNUSED(argc);
@@ -135,6 +195,9 @@ int main(int argc, char **argv)
 
     test_mailbox_send();
     test_mailbox_next();
+#ifdef AVM_TASK_DRIVER_ENABLED
+    test_task_driver_wakeup();
+#endif
 
     return EXIT_SUCCESS;
 }
