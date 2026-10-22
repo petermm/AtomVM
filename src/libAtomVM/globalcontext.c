@@ -494,18 +494,28 @@ static inline void globalcontext_process_message_queue(GlobalContext *glb)
     if (current) {
         while (!ATOMIC_COMPARE_EXCHANGE_WEAK_PTR(&glb->message_queue, &current, NULL)) {
         };
+        MailboxMessage *undelivered = NULL;
         (void) synclist_rdlock(&glb->processes_table);
         while (current) {
             Context *context = globalcontext_get_process_nolock(glb, current->process_id);
             if (context) {
                 mailbox_enqueue_message(context, current->message);
                 scheduler_signal_message(context);
+            } else {
+                current->message->next = undelivered;
+                undelivered = current->message;
             }
             struct MessageQueueItem *old = current;
             current = old->next;
             free(old);
         }
         synclist_unlock(&glb->processes_table);
+        // Resource destructors may look up processes; dispose after unlocking.
+        while (undelivered) {
+            MailboxMessage *next = undelivered->next;
+            mailbox_message_dispose_unsent(CONTAINER_OF(undelivered, Message, base), glb, false);
+            undelivered = next;
+        }
     }
 }
 
