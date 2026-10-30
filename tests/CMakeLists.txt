@@ -21,6 +21,10 @@
 cmake_minimum_required (VERSION 3.13)
 project (tests)
 
+# The C tests check their results with assert(), which the Release and
+# RelWithDebInfo build types would remove by defining NDEBUG.
+add_compile_options(-UNDEBUG)
+
 add_executable(test-erlang test.c)
 add_executable(test-bitstring test-bitstring.c)
 add_executable(test-enif test-enif.c)

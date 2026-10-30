@@ -364,9 +364,8 @@ static inline uint32_t module_get_fun_freeze(const Module *this_module, int fun_
 static inline void module_get_fun_arity_old_index_uniq(const Module *this_module, int fun_index, uint32_t *arity, uint32_t *index, uint32_t *uniq)
 {
     const uint8_t *table_data = (const uint8_t *) this_module->fun_table;
-    int funs_count = READ_32_UNALIGNED(table_data + 8);
 
-    assert(fun_index < funs_count);
+    assert(fun_index < (int) READ_32_UNALIGNED(table_data + 8));
 
     // fun atom index
     *arity = READ_32_UNALIGNED(table_data + fun_index * 24 + 4 + 12);

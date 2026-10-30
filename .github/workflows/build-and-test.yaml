@@ -175,6 +175,11 @@ jobs:
           cxx: "c++"
           cmake_opts_other: "-DAVM_USE_32BIT_FLOAT=ON -DAVM_WARNINGS_ARE_ERRORS=ON"
 
+        # Additional Release build with warnings as errors
+        - cc: "cc"
+          cxx: "c++"
+          cmake_opts_other: "-DCMAKE_BUILD_TYPE=Release -DAVM_WARNINGS_ARE_ERRORS=ON"
+
         # Additional run with comma-decimal locale (de_DE)
         - cc: "cc"
           cxx: "c++"
