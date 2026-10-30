@@ -100,6 +100,15 @@
         16#00, 16#00, 16#06, 16#00, 16#00, 16#00, 16#00, 16#41, 16#51, 16#61, 16#81, 16#91, 16#B1>>
 ).
 
+% Code chunk with a put_map_assoc instruction whose value operand is a typed
+% register. Current compilers do not emit typed registers in this position,
+% but skip_compact_term/1 must handle them wherever it can encounter a
+% compact term.
+-define(CODE_CHUNK_5,
+    <<0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 185, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 154, 5, 3, 19, 0,
+        23, 32, 35, 87, 51, 0, 3>>
+).
+
 -ifdef(JIT_DWARF).
 compile_stream_setup(CodeChunk) ->
     compile_stream_setup_for_backend(jit_x86_64, CodeChunk).
@@ -337,6 +346,12 @@ verify_is_function_typed_optimization_x86_64_test() ->
         )
     ),
     ok.
+
+put_map_assoc_skips_typed_register_test() ->
+    CompiledCode = compile_stream_for_backend(
+        jit_x86_64, ?CODE_CHUNK_5, ?ATU8_CHUNK_1, ?TYPE_CHUNK_1
+    ),
+    ?assert(byte_size(CompiledCode) > 0).
 
 tail_call_cache_armv6m_test() ->
     CompiledCode = compile_stream_for_backend(

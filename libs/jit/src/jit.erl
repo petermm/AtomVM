@@ -4724,7 +4724,7 @@ skip_compact_term(<<?COMPACT_EXTENDED_LITERAL, Rest0/binary>>) ->
     Rest1;
 skip_compact_term(<<?COMPACT_EXTENDED_TYPED_REGISTER, Rest0/binary>>) ->
     Rest1 = skip_compact_term(Rest0),
-    Rest2 = decode_literal(Rest1),
+    {_TypeIndex, Rest2} = decode_literal(Rest1),
     Rest2;
 skip_compact_term(<<_ValueH:5, ?COMPACT_LABEL:3, _Rest/binary>> = Binary) ->
     {_Value, Rest} = decode_label(Binary),
