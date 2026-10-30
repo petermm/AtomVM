@@ -46,18 +46,21 @@
 
 %% TODO remove deprecated hspi and vspi
 -type peripheral() :: hspi | vspi | string() | binary().
+-type pin() :: none | non_neg_integer().
+%% A pin number, or `none' if the pin is not used. `-1' is accepted as a
+%% deprecated alias for `none'.
 -type bus_config() :: [
-    {poci, -1 | non_neg_integer()}
-    | {pico, -1 | non_neg_integer()}
-    | {miso, -1 | non_neg_integer()}
-    | {mosi, -1 | non_neg_integer()}
-    | {sclk, -1 | non_neg_integer()}
+    {poci, pin()}
+    | {pico, pin()}
+    | {miso, pin()}
+    | {mosi, pin()}
+    | {sclk, non_neg_integer()}
     | {peripheral, peripheral()}
 ].
 -type device_config() :: [
     {clock_speed_hz, non_neg_integer()}
     | {mode, 0..3}
-    | {cs, -1 | non_neg_integer()}
+    | {cs, pin()}
     | {address_len_bits, 0..64}
     | {command_len_bits, 0..16}
 ].
@@ -102,9 +105,9 @@
 %%
 %% <table>
 %%   <tr> <th>Key</th> <th>Type</th> <th>Default</th> <th>Description</th> </tr>
-%%   <tr> <td>`miso'</td> <td>`-1 | non_neg_integer()'</td> <td>-</td> <td>MISO pin number, or -1 if unused</td></tr>
-%%   <tr> <td>`mosi'</td> <td>`-1 | non_neg_integer()'</td> <td>-</td> <td>MOSI pin number, or -1 if unused</td></tr>
-%%   <tr> <td>`sclk'</td> <td>`-1 | non_neg_integer()'</td> <td>-</td> <td>SCLK pin number, or -1 if unused</td></tr>
+%%   <tr> <td>`miso'</td> <td>`none | non_neg_integer()'</td> <td>-</td> <td>MISO pin number, or `none' if unused</td></tr>
+%%   <tr> <td>`mosi'</td> <td>`none | non_neg_integer()'</td> <td>-</td> <td>MOSI pin number, or `none' if unused</td></tr>
+%%   <tr> <td>`sclk'</td> <td>`non_neg_integer()'</td> <td>-</td> <td>SCLK pin number (required)</td></tr>
 %%   <tr> <td>`peripheral'</td> <td>`"spi2" | "spi3"'</td> <td>`"spi2"'</td> <td>SPI Peripheral (ESP32 only)</td></tr>
 %% </table>
 %%
@@ -114,9 +117,12 @@
 %%   <tr> <th>Key</th> <th>Type</th> <th>Default</th> <th>Description</th> </tr>
 %%   <tr> <td>`clock_speed_hz'</td> <td>`non_neg_integer()'</td> <td>`1000000'</td> <td>Clock speed for the SPI device (in hz)</td></tr>
 %%   <tr> <td>`mode'</td> <td>`0..3'</td> <td>`0'</td> <td>SPI device mode</td></tr>
-%%   <tr> <td>`cs'</td> <td>`-1 | non_neg_integer()'</td> <td>-</td> <td>SPI Chip Select pin number, or -1 if unused</td></tr>
+%%   <tr> <td>`cs'</td> <td>`none | non_neg_integer()'</td> <td>-</td> <td>SPI Chip Select pin number, or `none' if unused</td></tr>
 %%   <tr> <td>`address_len_bits'</td> <td>`non_neg_integer()'</td> <td>8</td> <td>Number of bits in the device address</td></tr>
 %% </table>
+%%
+%% Set an unused `miso', `mosi' or `cs' pin to `none'. `-1' is deprecated,
+%% but it is still accepted.
 %%
 %% Example:
 %% <pre>
@@ -315,8 +321,8 @@ validate_bus_config(MaybeOldBusConfig) when
         peripheral => validate_peripheral(get_value(peripheral, BusConfig, <<"spi2">>)),
         sclk => validate_integer_entry(sclk, BusConfig)
     },
-    ValidatedConfig1 = maybe_validate_optional_integer(miso, ValidatedConfig0, BusConfig),
-    ValidatedConfig2 = maybe_validate_optional_integer(mosi, ValidatedConfig1, BusConfig),
+    ValidatedConfig1 = maybe_validate_optional_pin(miso, ValidatedConfig0, BusConfig),
+    ValidatedConfig2 = maybe_validate_optional_pin(mosi, ValidatedConfig1, BusConfig),
     ValidatedConfig2;
 validate_bus_config(undefined) ->
     throw({badarg, missing_bus_config});
@@ -324,10 +330,10 @@ validate_bus_config(BusConfig) ->
     throw({badarg, {not_a_map_or_list, BusConfig}}).
 
 %% @private
-maybe_validate_optional_integer(Key, ValidatedConfig, Config) ->
+maybe_validate_optional_pin(Key, ValidatedConfig, Config) ->
     case get_value(Key, Config, undefined) of
         undefined -> ValidatedConfig;
-        _ -> ValidatedConfig#{Key => validate_integer_entry(Key, Config)}
+        _ -> ValidatedConfig#{Key => validate_pin_entry(Key, Config)}
     end.
 
 %% @private
@@ -385,6 +391,22 @@ validate_integer_entry(Key, Map) ->
 %% @private
 validate_integer_entry(Key, Map, DefaultValue) when is_map(Map) orelse is_list(Map) ->
     validate_is_integer(Key, get_value(Key, Map, DefaultValue)).
+
+%% @private
+validate_pin_entry(Key, Map) ->
+    validate_pin_entry(Key, Map, undefined).
+
+%% @private
+validate_pin_entry(Key, Map, DefaultValue) when is_map(Map) orelse is_list(Map) ->
+    case get_value(Key, Map, DefaultValue) of
+        none ->
+            -1;
+        -1 ->
+            io:format("SPI: found deprecated -1 for ~p, use none instead!!!~n", [Key]),
+            -1;
+        Value ->
+            validate_is_integer(Key, Value)
+    end.
 
 %% @private
 validate_is_integer(_Key, Int) when is_integer(Int) ->
@@ -446,7 +468,7 @@ validate_device_config_entries(MaybeOldEntries) when
     #{
         clock_speed_hz => validate_integer_entry(clock_speed_hz, Entries),
         mode => validate_mode(get_value(mode, Entries, undefined)),
-        cs => validate_integer_entry(cs, Entries, undefined),
+        cs => validate_pin_entry(cs, Entries, undefined),
         address_len_bits => validate_address_len_bits(
             get_value(address_len_bits, Entries, undefined)
         ),

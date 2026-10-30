@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `atomvm:add_avm_pack_binary/2`) is rejected when loaded
 - STM32 builds now enable `AVM_MINIMAL_OPCODES` by default, so modules compiled with the
   `no_bs_create_bin`, `no_bs_match` or `no_ssa_opt_bs_ensure` compiler options cannot be loaded
+- Changed the ESP32 SPI configuration to use `none` instead of `-1` for unused `miso`, `mosi` and
+  `cs` pins; `-1` is deprecated and still accepted, and will be removed in a future release.
+  `sclk` remains required and does not accept `none`.
 
 ### Fixed
 - Fixed maps decoded by `binary_to_term/1,2` and received over distribution keeping the
@@ -46,7 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed the ESP32 UART driver blocking the scheduler, until the task watchdog reset the chip,
   when a read had already taken the bytes of a pending data event, or when `uart:read/2` counted
   bytes that the other scheduler then took
-- Fixed ESP32 SPI pin typespecs to allow `-1` for unused pins.
 - Fixed ESP32 double free crash when closing SPI ports
 - Fixed the VM crashing (`LoadProhibited` on ESP32) when `atomvm:read_priv/2` or a module load
   looked up a name that is not in a truncated or corrupt AVM pack, such as an image larger than

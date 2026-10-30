@@ -51,6 +51,9 @@ were using the `0x210000` offset.
   instead of being routed through the process group leader as an alias for `standard_io`. Code or
   tests that captured `standard_error` output by swapping the group leader must instead redirect
   or intercept the underlying stderr stream, or pass an explicit pid/device.
+- ESP32 SPI: use the `none` atom instead of `-1` for an unused `miso`, `mosi` or `cs` pin.
+  `-1` is still accepted in 0.7, but it is deprecated and will be removed in a future release.
+  `sclk` remains required and does not accept `none`.
 
 ## v0.6.4 -> v0.6.5
 

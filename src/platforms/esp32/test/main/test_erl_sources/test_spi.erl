@@ -22,16 +22,18 @@
 -export([start/0]).
 
 start() ->
-    ok = open_write_close(),
+    ok = open_write_close(#{miso => none}, none),
     % Reopening the same peripheral also checks that close released the bus.
-    open_write_close().
+    ok = open_write_close(#{miso => -1}, -1),
+    % Leaving miso out exercises the driver default for an absent pin.
+    open_write_close(#{}, none).
 
-open_write_close() ->
+open_write_close(BusConfig, Cs) ->
     SPI = spi:open(#{
-        bus_config => #{mosi => 5, sclk => 4, peripheral => "spi2"},
+        bus_config => BusConfig#{mosi => 5, sclk => 4, peripheral => "spi2"},
         device_config => #{
             test_device => #{
-                clock_speed_hz => 2500000, mode => 0, cs => -1, address_len_bits => 0
+                clock_speed_hz => 2500000, mode => 0, cs => Cs, address_len_bits => 0
             }
         }
     }),

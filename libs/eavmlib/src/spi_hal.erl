@@ -95,7 +95,8 @@
 %% 0)</li>
 %% </ul>
 %%
-%% On ESP32, pin numbers also accept -1 for unused pins.
+%% On ESP32, set an unused `miso', `mosi' or `cs' pin to `none'. `-1' is
+%% deprecated, but it is still accepted.
 %%
 %% <h3>Example</h3>
 %%
