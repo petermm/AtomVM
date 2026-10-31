@@ -164,11 +164,23 @@ atoms. The following CMake options can be selected independently:
   an interpreter label table or scanning bytecode at load time. This is the
   default. Missing or incompatible tables fall back to ordinary scanning.
   Set it to `OFF` to always scan retained bytecode.
+* `AVM_GENERATE_LABEL_TABLES=ON` requests `--avm-labels` when building archives.
+  Generation defaults to `OFF` and is independent of runtime table acceptance.
+  Until a supporting upstream PackBEAM release is selected, it requires
+  `PACKBEAM_PATH` pointing to a checkout supporting `--avm-labels`. Standard
+  generation uses 32-bit little-endian offsets, not automatic width selection.
 
 For example, configure the optional compact/flash profile with
 `-DAVM_COMPACT_ATOM_INDICES=ON -DAVM_DEFAULT_ATOMS_IN_RAM=OFF`.
 On ESP32, the runtime options also appear under **AtomVM configuration** in
-`menuconfig`; explicit CMake values take precedence.
+`menuconfig`; explicit CMake values take precedence. Generate boot/application
+archives in the host build, not in the ESP-IDF firmware build.
+
+Generating `avmL` does not change the existing `AVM_RELEASE` line-stripping
+policy. Retain line information when source locations are needed for diagnostics.
+The producer rejects unsupported bytecode and more than 65,535 label slots,
+even when generating 32-bit offsets. Disabling runtime table acceptance does not
+avoid producer errors when generation is requested.
 
 Use the `install` target to install the `atomvm` command and associated binary files.  On most UNIX systems, these artifacts will be installed in the `/usr/local` directory tree.
 

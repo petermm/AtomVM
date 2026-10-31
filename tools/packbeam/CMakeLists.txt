@@ -23,10 +23,19 @@ project (PackBEAM)
 
 set(PACKBEAM_PATH "" CACHE PATH "Path to PackBEAM source tree. If unset, hex package will be used")
 
+if(AVM_GENERATE_LABEL_TABLES AND PACKBEAM_PATH STREQUAL "")
+    message(FATAL_ERROR "AVM_GENERATE_LABEL_TABLES requires PACKBEAM_PATH pointing to a PackBEAM checkout with --avm-labels support until an upstream release is available")
+endif()
+
+# Rebar names checkout overrides after the application, not the package alias.
+file(REMOVE ${CMAKE_CURRENT_BINARY_DIR}/_checkouts/packbeam)
 if(NOT PACKBEAM_PATH STREQUAL "")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/_checkouts)
-    file(REMOVE ${CMAKE_CURRENT_BINARY_DIR}/_checkouts/packbeam)
-    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${PACKBEAM_PATH} ${CMAKE_CURRENT_BINARY_DIR}/_checkouts/packbeam)
+    file(REMOVE ${CMAKE_CURRENT_BINARY_DIR}/_checkouts/atomvm_packbeam)
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${PACKBEAM_PATH} ${CMAKE_CURRENT_BINARY_DIR}/_checkouts/atomvm_packbeam)
+    file(GLOB PACKBEAM_SOURCES CONFIGURE_DEPENDS ${PACKBEAM_PATH}/src/*.erl)
+else()
+    file(REMOVE ${CMAKE_CURRENT_BINARY_DIR}/_checkouts/atomvm_packbeam)
 endif()
 
 find_program(REBAR3 rebar3)
@@ -34,9 +43,11 @@ if(NOT REBAR3)
     message(FATAL_ERROR "rebar3 is required but was not found")
 endif()
 
+file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/packbeam-source.txt CONTENT "${PACKBEAM_PATH}\n")
+
 add_custom_command(
     OUTPUT packbeam
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/rebar.config
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/rebar.config ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt ${CMAKE_CURRENT_BINARY_DIR}/packbeam-source.txt ${PACKBEAM_SOURCES}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rebar.config ${CMAKE_CURRENT_BINARY_DIR}/rebar.config
     COMMAND ${REBAR3} escriptize
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/_build/default/bin/packbeam ${CMAKE_CURRENT_BINARY_DIR}/packbeam

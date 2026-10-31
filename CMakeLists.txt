@@ -48,6 +48,12 @@ option(AVM_COMPACT_ATOM_INDICES "Use 16-bit atom indices (at most 65535 atoms)" 
 option(AVM_DEFAULT_ATOMS_IN_RAM "Index default atoms in RAM instead of using the flash registry" ON)
 option(AVM_COMPACT_LABELS "Use 16-bit code offsets when the module fits" ON)
 option(AVM_USE_LABEL_TABLES "Use validated avmL chunks instead of scanning bytecode" ON)
+option(AVM_GENERATE_LABEL_TABLES "Generate avmL chunks when packing archives" OFF)
+
+set(AVM_PACKBEAM_LABEL_ARGS "")
+if(AVM_GENERATE_LABEL_TABLES)
+    set(AVM_PACKBEAM_LABEL_ARGS --avm-labels)
+endif()
 
 # JIT & execution of precompiled code
 if(NOT Erlang_VERSION VERSION_GREATER_EQUAL "28")
