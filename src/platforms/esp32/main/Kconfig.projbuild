@@ -38,6 +38,13 @@ menu "AtomVM configuration"
             including default atoms. Leave disabled for 4-byte indices, subject
             to available RAM and atom-term encoding limits.
 
+    config AVM_COMPACT_LABELS
+        bool "Use compact bytecode label offsets"
+        default y
+        help
+            Store 16-bit offsets for small modules, with 32-bit fallback for
+            larger Code chunks. Does not change native-code label storage.
+
     config REBOOT_ON_NOT_OK
         bool  "Reboot on not ok return value from start/0"
         default n
