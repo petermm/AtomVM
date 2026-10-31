@@ -93,12 +93,6 @@ typedef struct
 
 struct ExportedFunction;
 
-struct ModuleFilename
-{
-    uint8_t *data;
-    size_t len;
-};
-
 struct Module
 {
     int module_index;
@@ -140,6 +134,7 @@ struct Module
     unsigned int free_literals_data : 1;
     unsigned int literals_is_u16 : 1;
     unsigned int labels_is_u16 : 1;
+    unsigned int labels_in_binary : 1;
 
 #ifndef AVM_NO_SMP
     Mutex *mutex;
