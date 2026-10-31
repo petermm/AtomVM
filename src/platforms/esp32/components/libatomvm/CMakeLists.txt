@@ -49,6 +49,16 @@ option(AVM_PEDANTIC_WARNINGS "Pedantic compiler warnings" OFF)
 include(SystemArchitecture)
 avm_get_system_architecture_string(AVM_SYSTEM_ARCHITECTURE_STRING PLATFORM_OS esp_idf)
 
+foreach(_option AVM_COMPACT_ATOM_INDICES)
+    if(NOT DEFINED ${_option} AND "CONFIG_${_option}" IN_LIST CONFIGS_LIST)
+        if(CONFIG_${_option})
+            set(${_option} ON)
+        else()
+            set(${_option} OFF)
+        endif()
+    endif()
+endforeach()
+
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../libAtomVM" "libAtomVM")
 
 # Add directory with platform_atomic.h if we mean to use it
