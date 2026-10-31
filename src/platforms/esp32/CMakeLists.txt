@@ -101,6 +101,15 @@ else()
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults.in ${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults @ONLY)
 endif()
 
+# Declare options before project(), which configures the components and reads
+# these values while setting their compile definitions.
+option(AVM_DISABLE_SMP "Disable SMP." OFF)
+option(AVM_USE_32BIT_FLOAT "Use 32 bit floats." OFF)
+option(AVM_VERBOSE_ABORT "Print module and line number on VM abort" OFF)
+option(AVM_CREATE_STACKTRACES "Create stacktraces" ON)
+option(AVM_PRINT_PROCESS_CRASH_DUMPS "Print crash reports when processes die with non-standard reasons" ON)
+option(AVM_USE_LIBSODIUM "Enable optional libsodium backend for Ed25519 curve" OFF)
+
 project(atomvm-esp32)
 
 # JIT configuration is handled in components/libatomvm/CMakeLists.txt after
@@ -115,14 +124,6 @@ if (-std=gnu99 IN_LIST c_compile_options )
     list(APPEND c_compile_options -std=gnu11)
     idf_build_set_property(C_COMPILE_OPTIONS ${c_compile_options})
 endif()
-
-# Options that make sense for this platform
-option(AVM_DISABLE_SMP "Disable SMP." OFF)
-option(AVM_USE_32BIT_FLOAT "Use 32 bit floats." OFF)
-option(AVM_VERBOSE_ABORT "Print module and line number on VM abort" OFF)
-option(AVM_CREATE_STACKTRACES "Create stacktraces" ON)
-option(AVM_PRINT_PROCESS_CRASH_DUMPS "Print crash reports when processes die with non-standard reasons" ON)
-option(AVM_USE_LIBSODIUM "Enable optional libsodium backend for Ed25519 curve" OFF)
 
 add_subdirectory(tools)
 
