@@ -37,6 +37,10 @@ factory-assigned MAC address of the device).
 
 The following options are only supported on ESP32 platform:
 
+* `{bssid, binary()}` The 6-byte BSSID (MAC address) of the access point to connect to, in the same
+format returned by `network:wifi_scan/0,1`. Use it to choose one access point when several share
+the same `ssid`; the driver then stops scanning as soon as it finds that access point. `ssid` is
+still required.
 * `{beacon_timeout, fun(() -> term())}` A callback function which will be called when the device
 does not receive a beacon frame from the connected access point during the "inactive time" (6
 second default, currently not configurable).
@@ -59,7 +63,8 @@ provided, this will be used by the
 connection to the access point. If `ssid` and `psk` are omitted from the configuration they must be
 supplied to [`sta_connect/1`](./apidocs/erlang/eavmlib/network.md#sta_connect1) to initiate a
 connection to an access point. Any new configuration values passed to `sta_connect/1` will replace
-any previous values, but leave the rest unchanged. Callback configuration as well as `mdns` and
+any previous values, but leave the rest unchanged. Passing an `ssid` without a `bssid` clears a
+previously configured `bssid`. Callback configuration as well as `mdns` and
 `sntp` configurations may also be updated in the configuration passed to `sta_connect/1`.
 
 When using managed mode applications should include a `disconnected` callback to also inhibit the

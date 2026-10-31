@@ -30,6 +30,10 @@ test() ->
     ok = test_sta_rssi_ignores_other_refs(),
     ok = test_sta_rssi_error(),
     ok = test_sta_rssi_timeout(),
+    ok = test_sta_connect_bssid(),
+    ok = test_sta_connect_bssid_requires_ssid(),
+    ok = test_sta_connect_rejects_invalid_bssid(),
+    ok = test_start_rejects_invalid_bssid(),
     ok.
 
 test_sta_rssi_network_down() ->
@@ -83,4 +87,110 @@ with_port(Answer) ->
     after
         unregister(network_port),
         Port ! stop
+    end.
+
+%% network:sta_connect/1 forwards a bssid to the driver, and switches back to
+%% connecting by ssid when a later request names an ssid without a bssid.
+test_sta_connect_bssid() ->
+    BSSID0 = <<0, 1, 2, 3, 4, 5>>,
+    BSSID1 = <<6, 7, 8, 9, 10, 11>>,
+    with_network([{sta, [{ssid, "old"}, {bssid, BSSID0}]}], fun() ->
+        ok = network:sta_connect([{ssid, "new"}, {bssid, BSSID1}]),
+        {connect, Config1} = next_request(),
+        Sta1 = proplists:get_value(sta, Config1),
+        "new" = proplists:get_value(ssid, Sta1),
+        BSSID1 = proplists:get_value(bssid, Sta1),
+
+        ok = network:sta_connect([{ssid, "new"}]),
+        {connect, Config2} = next_request(),
+        Sta2 = proplists:get_value(sta, Config2),
+        "new" = proplists:get_value(ssid, Sta2),
+        false = proplists:is_defined(bssid, Sta2),
+
+        ok = network:sta_connect([{sta, [{ssid, "other"}, {bssid, BSSID0}]}]),
+        {connect, Config3} = next_request(),
+        Sta3 = proplists:get_value(sta, Config3),
+        "other" = proplists:get_value(ssid, Sta3),
+        BSSID0 = proplists:get_value(bssid, Sta3),
+        ok
+    end).
+
+%% The bssid selects an access point of an ssid, so it cannot replace the ssid.
+test_sta_connect_bssid_requires_ssid() ->
+    with_network([{sta, [managed]}], fun() ->
+        {error, no_ssid} = network:sta_connect([{bssid, <<1, 2, 3, 4, 5, 6>>}]),
+        ok
+    end).
+
+%% sta_connect/1 rejects a malformed bssid before changing the stored config.
+test_sta_connect_rejects_invalid_bssid() ->
+    with_network([{sta, [managed]}], fun() ->
+        {error, badarg} = network:sta_connect([{ssid, "x"}, {bssid, <<1, 2, 3>>}]),
+        {error, badarg} = network:sta_connect([{ssid, "x"}, {bssid, not_a_binary}]),
+        receive
+            {port_request, Request} -> error({unexpected_port_request, Request})
+        after 100 -> ok
+        end
+    end).
+
+%% start/1 has no previous configuration to fall back to, so it rejects a
+%% malformed bssid and a bssid without an ssid before opening the port.
+test_start_rejects_invalid_bssid() ->
+    with_fake_port(fun() ->
+        {error, badarg} = network:start([{sta, [{ssid, "x"}, {bssid, <<1, 2, 3>>}]}]),
+        {error, badarg} = network:start([{sta, [{ssid, "x"}, {bssid, not_a_binary}]}]),
+        {error, no_ssid} = network:start([{sta, [{bssid, <<1, 2, 3, 4, 5, 6>>}]}]),
+        undefined = whereis(network),
+        ok
+    end).
+
+with_network(Config, Fun) ->
+    with_fake_port(fun() ->
+        {ok, _Pid} = network:start(Config),
+        {start, _} = next_request(),
+        Fun()
+    end).
+
+with_fake_port(Fun) ->
+    Self = self(),
+    Port = spawn(fun() -> fake_port_loop(Self) end),
+    true = register(network_port, Port),
+    try
+        Fun()
+    after
+        stop_network(),
+        unregister(network_port),
+        Port ! stop
+    end.
+
+stop_network() ->
+    case whereis(network) of
+        undefined ->
+            ok;
+        Pid ->
+            Monitor = monitor(process, Pid),
+            exit(Pid, kill),
+            receive
+                {'DOWN', Monitor, process, Pid, _} -> ok
+            end
+    end.
+
+fake_port_loop(Test) ->
+    receive
+        {From, Ref, {start, Config}} ->
+            Test ! {port_request, {start, Config}},
+            From ! {Ref, ok},
+            fake_port_loop(Test);
+        {From, Ref, {connect, Config}} ->
+            Test ! {port_request, {connect, Config}},
+            From ! {Ref, ok},
+            fake_port_loop(Test);
+        stop ->
+            ok
+    end.
+
+next_request() ->
+    receive
+        {port_request, Request} -> Request
+    after 5000 -> error(port_request_timeout)
     end.

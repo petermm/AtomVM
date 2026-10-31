@@ -27,10 +27,15 @@ start() ->
         ok ->
             try
                 ok = test_managed_start(),
+                ok = test_bssid_requires_ssid(),
+                ok = test_invalid_bssid_rejected(),
                 ok = test_managed_connect(),
                 ok = test_sta_status_lifecycle(),
                 ok = test_disconnect_and_reconnect(),
                 ok = test_connect_new_ap(),
+                BSSID = test_connect_by_bssid(),
+                ok = test_start_with_bssid(BSSID),
+                ok = test_bogus_bssid_does_not_connect(),
                 ok
             after
                 ok = network:stop()
@@ -62,6 +67,23 @@ test_managed_start() ->
         Error ->
             Error
     end.
+
+%% ESP-IDF connects to an SSID, so a bssid alone is not enough.
+test_bssid_requires_ssid() ->
+    {error, no_ssid} = network:sta_connect([{bssid, <<0, 1, 2, 3, 4, 5>>}]),
+    io:format("test_bssid_requires_ssid OK.~n"),
+    ok.
+
+%% A bssid must be a 6-byte binary; network:sta_connect/1 refuses anything else.
+test_invalid_bssid_rejected() ->
+    {error, badarg} = network:sta_connect([
+        {ssid, "Wokwi-GUEST"}, {bssid, <<1, 2, 3, 4, 5>>}, {psk, ""}
+    ]),
+    {error, badarg} = network:sta_connect([
+        {ssid, "Wokwi-GUEST"}, {bssid, not_a_binary}, {psk, ""}
+    ]),
+    io:format("test_invalid_bssid_rejected OK.~n"),
+    ok.
 
 %% Test connecting to an AP using sta_connect/1
 test_managed_connect() ->
@@ -123,6 +145,77 @@ test_connect_new_ap() ->
     connected = network:sta_status(),
     io:format("test_connect_new_ap OK.~n"),
     ok.
+
+%% Test connecting to one access point among those sharing an ssid.
+test_connect_by_bssid() ->
+    ok = network:sta_disconnect(),
+    ok = wait_for_disconnect(5000),
+    case network:wifi_scan([{results, 10}]) of
+        {ok, {_Num, Networks}} ->
+            case
+                [BSSID || #{ssid := SSID, bssid := BSSID} <- Networks, SSID =:= <<"Wokwi-GUEST">>]
+            of
+                [BSSID | _] ->
+                    io:format("Connecting to Wokwi-GUEST with BSSID ~p~n", [BSSID]),
+                    ok = network:sta_connect([
+                        {ssid, "Wokwi-GUEST"}, {bssid, BSSID}, {psk, ""}
+                    ]),
+                    ok = wait_for_ip(30000),
+                    connected = network:sta_status(),
+                    io:format("test_connect_by_bssid OK.~n"),
+                    BSSID;
+                [] ->
+                    error({no_bssid_for_network, <<"Wokwi-GUEST">>})
+            end;
+        Error ->
+            error({scan_failed, Error})
+    end.
+
+%% The STA configuration passed to network:start/1 must honor a bssid too.
+test_start_with_bssid(BSSID) ->
+    ok = network:stop(),
+    flush_network_messages(),
+    Self = self(),
+    {ok, _Pid} = network:start([
+        {sta, [
+            {ssid, "Wokwi-GUEST"},
+            {bssid, BSSID},
+            {psk, ""},
+            {got_ip, fun(IpInfo) -> Self ! {got_ip, IpInfo} end}
+        ]}
+    ]),
+    ok = wait_for_ip(30000),
+    connected = network:sta_status(),
+    io:format("test_start_with_bssid OK.~n"),
+    ok.
+
+%% A valid but nonexistent bssid must not fall back to another AP with the
+%% same ssid; without bssid_set this would connect and get an address.
+test_bogus_bssid_does_not_connect() ->
+    ok = network:stop(),
+    flush_network_messages(),
+    Self = self(),
+    {ok, _Pid} = network:start([
+        {sta, [managed, {got_ip, fun(IpInfo) -> Self ! {got_ip, IpInfo} end}]}
+    ]),
+    Result = network:sta_connect([
+        {ssid, "Wokwi-GUEST"}, {bssid, <<0, 0, 0, 0, 0, 1>>}, {psk, ""}
+    ]),
+    case Result of
+        ok -> {error, timeout} = wait_for_ip(5000);
+        {error, _Reason} -> ok
+    end,
+    ok = network:stop(),
+    io:format("test_bogus_bssid_does_not_connect OK.~n"),
+    ok.
+
+flush_network_messages() ->
+    receive
+        sta_connected -> flush_network_messages();
+        sta_disconnected -> flush_network_messages();
+        {got_ip, _IpInfo} -> flush_network_messages()
+    after 0 -> ok
+    end.
 
 sntp_synchronized({TVSec, TVUsec}) ->
     io:format("Synchronized time with SNTP server. TVSec=~p TVUsec=~p~n", [TVSec, TVUsec]).

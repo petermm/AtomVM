@@ -63,6 +63,12 @@
 %% SSIDs can be strings or binary strings up to 32 characters long.
 
 -type ssid_config() :: {ssid, ssid()}.
+-type bssid_config() :: {bssid, bssid()}.
+%% A `bssid' pins the connection to a single access point of the given `ssid', which is needed when
+%% several access points share the same `ssid'. The ESP32 driver then stops scanning as soon as it
+%% finds that access point. The `bssid' is a 6-byte binary, in the same format returned by
+%% `wifi_scan/0,1'; the `ssid' is still required, and this option is only supported on the ESP32.
+%% Passing an `ssid' to `sta_connect/1' without a `bssid' clears a previously configured `bssid'.
 -type psk_config() :: {psk, string() | binary()}.
 -type app_managed_config() :: managed | {managed, boolean()}.
 %% Setting `{managed, true}' or including the atom `managed' in the `sta_config()' will signal to
@@ -105,6 +111,7 @@
 -type sta_config_property() ::
     app_managed_config()
     | ssid_config()
+    | bssid_config()
     | psk_config()
     | dhcp_hostname_config()
     | sta_scan_config()
@@ -474,11 +481,17 @@ wait_for_ap(ApConfig, Timeout) ->
 %%-----------------------------------------------------------------------------
 -spec start(Config :: network_config()) -> {ok, pid()} | {error, Reason :: term()}.
 start(Config) ->
-    gen_server:start({local, ?MODULE}, ?MODULE, Config, []).
+    case validate_start_bssid(Config) of
+        ok -> gen_server:start({local, ?MODULE}, ?MODULE, Config, []);
+        {error, _Reason} = Error -> Error
+    end.
 
 -spec start_link(Config :: network_config()) -> {ok, pid()} | {error, Reason :: term()}.
 start_link(Config) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Config, []).
+    case validate_start_bssid(Config) of
+        ok -> gen_server:start_link({local, ?MODULE}, ?MODULE, Config, []);
+        {error, _Reason} = Error -> Error
+    end.
 
 %%-----------------------------------------------------------------------------
 %% @returns `ok', if the network disconnects from the access point, or
@@ -1213,14 +1226,55 @@ open_port() ->
     Port.
 
 %% @private
+%% A bssid identifies one access point of an ssid, so start/1 needs both and
+%% cannot defer validation to a later sta_connect/1.
+validate_start_bssid(Config) ->
+    case validate_bssid(Config) of
+        ok ->
+            StaOpts = sta_opts(Config),
+            case {proplists:get_value(ssid, StaOpts), proplists:get_value(bssid, StaOpts)} of
+                {undefined, BSSID} when BSSID =/= undefined -> {error, no_ssid};
+                _ -> ok
+            end;
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+%% @private
+validate_bssid(Config) ->
+    StaOpts = sta_opts(Config),
+    case proplists:get_value(bssid, StaOpts) of
+        undefined -> ok;
+        BSSID when is_binary(BSSID), byte_size(BSSID) =:= 6 -> ok;
+        _ -> {error, badarg}
+    end.
+
+%% @private
+sta_opts(Config) ->
+    case proplists:get_value(sta, Config) of
+        undefined -> Config;
+        Sta -> Sta
+    end.
+
+%% @private
 -spec update_config(
     OldConfig :: network_config() | [sta_config_property()], NewConfig :: network_config()
 ) -> UpdatedConfig :: network_config() | {error, Reason :: term()}.
 update_config(OldConfig, NewConfig) ->
     try
+        case validate_bssid(NewConfig) of
+            ok -> ok;
+            {error, BadBSSID} -> error(BadBSSID)
+        end,
         OldSTA = proplists:get_value(sta, OldConfig, []),
+        StaConfig = proplists:get_value(sta, NewConfig),
+        RequestedSTA =
+            case StaConfig of
+                undefined -> NewConfig;
+                _ -> StaConfig
+            end,
         NewSTA =
-            case proplists:get_value(sta, NewConfig) of
+            case StaConfig of
                 undefined ->
                     SSID =
                         case proplists:get_value(ssid, NewConfig) of
@@ -1234,16 +1288,21 @@ update_config(OldConfig, NewConfig) ->
                             Ssid ->
                                 Ssid
                         end,
+                    TargetOpts =
+                        case proplists:get_value(bssid, NewConfig) of
+                            undefined -> [{ssid, SSID}];
+                            BSSID -> [{ssid, SSID}, {bssid, BSSID}]
+                        end,
                     case proplists:get_value(psk, NewConfig) of
                         undefined ->
-                            update_opts(OldSTA, [{ssid, SSID}]);
+                            update_opts(OldSTA, TargetOpts);
                         PSK ->
-                            update_opts(OldSTA, [{ssid, SSID}, {psk, PSK}])
+                            update_opts(OldSTA, TargetOpts ++ [{psk, PSK}])
                     end;
                 NewSta ->
                     NewSta
             end,
-        STA = {sta, update_opts(OldSTA, NewSTA)},
+        STA = {sta, update_sta_bssid(RequestedSTA, update_opts(OldSTA, NewSTA))},
         AP =
             case proplists:get_value(ap, OldConfig) of
                 undefined -> [];
@@ -1286,6 +1345,15 @@ update_opts(OldOpts, NewOpts) ->
     New = proplists:to_map(NewOpts),
     NewMap = maps:merge(Old, New),
     proplists:from_map(NewMap).
+
+%% @private
+%% A bssid selects one access point of an ssid, so a request that selects the
+%% network by ssid alone drops the bssid configured before.
+update_sta_bssid(RequestedSTA, UpdatedSTA) ->
+    case {proplists:get_value(ssid, RequestedSTA), proplists:get_value(bssid, RequestedSTA)} of
+        {SSID, undefined} when SSID =/= undefined -> proplists:delete(bssid, UpdatedSTA);
+        _ -> UpdatedSTA
+    end.
 
 %% @private
 wait_for_eth_ip(Timeout, Pid, Monitor) ->

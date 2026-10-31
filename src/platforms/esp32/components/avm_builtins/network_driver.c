@@ -94,6 +94,7 @@ static const char *const ap_sta_connected_atom = ATOM_STR("\x10", "ap_sta_connec
 static const char *const ap_sta_disconnected_atom = ATOM_STR("\x13", "ap_sta_disconnected");
 static const char *const ap_sta_ip_assigned_atom = ATOM_STR("\x12", "ap_sta_ip_assigned");
 static const char *const ap_started_atom = ATOM_STR("\xA", "ap_started");
+static const char *const bssid_atom = ATOM_STR("\x5", "bssid");
 static const char *const dhcp_hostname_atom = ATOM_STR("\xD", "dhcp_hostname");
 static const char *const host_atom = ATOM_STR("\x4", "host");
 static const char *const managed_atom = ATOM_STR("\x7", "managed");
@@ -315,8 +316,7 @@ static bool ensure_scan_atoms_exist(GlobalContext *global)
     if (UNLIKELY(!ensure_atom(global, authmode))) {
         return false;
     }
-    static const char *const bssid = ATOM_STR("\x5", "bssid");
-    if (UNLIKELY(!ensure_atom(global, bssid))) {
+    if (UNLIKELY(!ensure_atom(global, bssid_atom))) {
         return false;
     }
     static const char *const channel = ATOM_STR("\x7", "channel");
@@ -417,7 +417,7 @@ static bool ensure_scan_atoms_exist(GlobalContext *global)
 static term wifi_ap_records_to_list_maybe_gc(GlobalContext *global, wifi_ap_record_t *ap_records, uint16_t num_results, Heap *heap)
 {
     term authmode_atom_term = globalcontext_existing_term_from_atom_string(global, ATOM_STR("\x8", "authmode"));
-    term bssid_atom_term = globalcontext_existing_term_from_atom_string(global, ATOM_STR("\x5", "bssid"));
+    term bssid_atom_term = globalcontext_existing_term_from_atom_string(global, bssid_atom);
     term channel_atom_term = globalcontext_existing_term_from_atom_string(global, ATOM_STR("\x7", "channel"));
     term hidden_atom_term = globalcontext_existing_term_from_atom_string(global, ATOM_STR("\x6", "hidden"));
     term rssi_atom_term = globalcontext_existing_term_from_atom_string(global, rssi_atom);
@@ -1026,6 +1026,7 @@ static wifi_config_t *get_sta_wifi_config(term sta_config, GlobalContext *global
     }
     term ssid_term = interop_kv_get_value(sta_config, ssid_atom, global);
     term pass_term = interop_kv_get_value(sta_config, psk_atom, global);
+    term bssid_term = interop_kv_get_value(sta_config, bssid_atom, global);
     term managed_term = interop_kv_get_value_default(sta_config, managed_atom, FALSE_ATOM, global);
 
     bool roaming = false;
@@ -1037,7 +1038,9 @@ static wifi_config_t *get_sta_wifi_config(term sta_config, GlobalContext *global
     // Check parameters
     //
     if (term_is_invalid_term(ssid_term)) {
-        if (roaming != true) {
+        if (!term_is_invalid_term(bssid_term)) {
+            ESP_LOGE(TAG, "get_sta_wifi_config: BSSID requires SSID");
+        } else if (roaming != true) {
             ESP_LOGE(TAG, "get_sta_wifi_config: Missing SSID");
         }
         return NULL;
@@ -1046,6 +1049,13 @@ static wifi_config_t *get_sta_wifi_config(term sta_config, GlobalContext *global
     char *ssid = interop_term_to_string(ssid_term, &ok);
     if (!ok || IS_NULL_PTR(ssid)) {
         ESP_LOGE(TAG, "get_sta_wifi_config: Invalid SSID");
+        return NULL;
+    }
+
+    bool have_bssid = !term_is_invalid_term(bssid_term);
+    if (have_bssid && UNLIKELY(!term_is_binary(bssid_term) || term_binary_size(bssid_term) != BSSID_SIZE)) {
+        ESP_LOGE(TAG, "get_sta_wifi_config: BSSID must be a %d byte binary", BSSID_SIZE);
+        free(ssid);
         return NULL;
     }
 
@@ -1092,11 +1102,22 @@ static wifi_config_t *get_sta_wifi_config(term sta_config, GlobalContext *global
         free(psk);
     }
     free(ssid);
+    if (have_bssid) {
+        wifi_config->sta.bssid_set = true;
+        memcpy(wifi_config->sta.bssid, term_binary_data(bssid_term), BSSID_SIZE);
+    }
 
     //
     // done
     //
-    ESP_LOGI(TAG, "STA ssid: %s", wifi_config->sta.ssid);
+    if (have_bssid) {
+        ESP_LOGI(TAG, "STA ssid: %s bssid: %02x:%02x:%02x:%02x:%02x:%02x",
+            wifi_config->sta.ssid,
+            wifi_config->sta.bssid[0], wifi_config->sta.bssid[1], wifi_config->sta.bssid[2],
+            wifi_config->sta.bssid[3], wifi_config->sta.bssid[4], wifi_config->sta.bssid[5]);
+    } else {
+        ESP_LOGI(TAG, "STA ssid: %s", wifi_config->sta.ssid);
+    }
     return wifi_config;
 }
 
