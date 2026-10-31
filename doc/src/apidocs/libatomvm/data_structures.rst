@@ -91,8 +91,6 @@ Data Structures
    .. c:var:: term value
 
 .. end of opcodesswitch.h structs
-.. doxygenstruct:: LineRefOffset
-   :allow-dot-graphs:
 .. doxygenstruct:: ListHead
    :allow-dot-graphs:
 .. doxygenstruct:: Mailbox
