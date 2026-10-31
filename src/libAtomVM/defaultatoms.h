@@ -23,6 +23,11 @@
 
 #include "globalcontext.h"
 
+/** Default atoms use RAM indices unless explicitly configured to use flash (0). */
+#ifndef AVM_DEFAULT_ATOMS_IN_RAM
+#define AVM_DEFAULT_ATOMS_IN_RAM 1
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -75,6 +80,23 @@ static inline bool atom_is_boolean(term t)
 void defaultatoms_init(GlobalContext *glb);
 
 void platform_defaultatoms_init(GlobalContext *glb);
+
+/** Return immutable atom bytes, or NULL for an index outside the default registry.
+ * On success, writes the byte length to out_len. The bytes have static lifetime.
+ */
+const uint8_t *defaultatoms_get_atom_string(atom_index_t index, size_t *out_len);
+
+/** Look up default atom bytes; writes out_index only on success. */
+bool defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index);
+
+/** Platform counterpart of defaultatoms_get_atom_string, with the same contract. */
+const uint8_t *platform_defaultatoms_get_atom_string(atom_index_t index, size_t *out_len);
+
+/** Platform counterpart of defaultatoms_lookup, with the same contract. */
+bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index);
+
+/** Return the total number of generic and platform default atoms. */
+atom_index_t platform_defaultatoms_count(void);
 
 #ifdef __cplusplus
 }

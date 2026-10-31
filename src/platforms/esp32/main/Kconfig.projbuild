@@ -20,6 +20,15 @@
 #
 menu "AtomVM configuration"
 
+    config AVM_DEFAULT_ATOMS_IN_RAM
+        bool "Index default atoms in RAM"
+        default y
+        help
+            Keep default atom indices in the dynamic RAM table, referencing the
+            immutable strings in flash. Disable to use a sorted flash registry
+            instead, saving RAM at the cost of flash reads during lookup.
+            An explicit AVM_DEFAULT_ATOMS_IN_RAM CMake option takes precedence.
+
     config AVM_COMPACT_ATOM_INDICES
         bool "Use 16-bit atom indices to reduce RAM usage"
         default n
