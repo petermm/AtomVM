@@ -60,6 +60,11 @@ set(
 
 add_library(libAtomVM${PLATFORM_LIB_SUFFIX} ${SOURCE_FILES} ${HEADER_FILES})
 target_compile_features(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC c_std_11)
+
+include(GenDefaultAtoms)
+generate_defaultatoms(libAtomVM${PLATFORM_LIB_SUFFIX} "${CMAKE_CURRENT_SOURCE_DIR}/platform_defaultatoms.def"
+    "${CMAKE_CURRENT_BINARY_DIR}/platform_defaultatoms_tables.h" platform)
+
 if(CMAKE_COMPILER_IS_GNUCC)
     target_compile_options(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC -Wall -pedantic -Wextra -ggdb)
 endif()

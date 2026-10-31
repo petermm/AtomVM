@@ -19,32 +19,81 @@
  */
 
 #include "platform_defaultatoms.h"
+#include "utils.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-void platform_defaultatoms_init(GlobalContext *glb)
-{
 // About X macro: https://en.wikipedia.org/wiki/X_macro
 #define X(name, lenstr, str) \
     lenstr str,
 
-    static const char *const atoms[] = {
+static const char *const platform_atoms[] = {
 #include "platform_defaultatoms.def"
 
-        // dummy value
-        NULL
-    };
+    // dummy value
+    NULL
+};
 #undef X
 
+#include "platform_defaultatoms_tables.h"
+
+_Static_assert(PLATFORM_DEFAULTATOMS_COUNT == ATOM_FIRST_AVAIL_INDEX - PLATFORM_ATOMS_BASE_INDEX,
+    "platform defaultatoms count mismatch");
+
+const uint8_t *platform_defaultatoms_get_atom_string(atom_index_t index, size_t *out_len)
+{
+    if (index >= PLATFORM_ATOMS_BASE_INDEX && index < ATOM_FIRST_AVAIL_INDEX) {
+        const char *entry = platform_atoms[index - PLATFORM_ATOMS_BASE_INDEX];
+        *out_len = (uint8_t) entry[0];
+        return (const uint8_t *) (entry + 1);
+    }
+
+    return NULL;
+}
+
+bool platform_defaultatoms_lookup(const uint8_t *atom_data, size_t atom_len, atom_index_t *out_index)
+{
+    if (atom_len >= PLATFORM_DEFAULTATOMS_MIN_LEN && atom_len <= PLATFORM_DEFAULTATOMS_MAX_LEN) {
+        size_t low = platform_len_offsets[atom_len];
+        size_t high = platform_len_offsets[atom_len + 1];
+        while (low < high) {
+            size_t mid = low + (high - low) / 2;
+            size_t index = platform_atoms_by_len[mid];
+            int cmp = memcmp(atom_data, platform_atoms[index] + 1, atom_len);
+            if (cmp == 0) {
+                *out_index = (atom_index_t) (index + PLATFORM_ATOMS_BASE_INDEX);
+                return true;
+            } else if (cmp < 0) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+    }
+
+    return false;
+}
+
+atom_index_t platform_defaultatoms_count(void)
+{
+    return ATOM_FIRST_AVAIL_INDEX;
+}
+
+void platform_defaultatoms_init(GlobalContext *glb)
+{
+#if AVM_DEFAULT_ATOMS_IN_RAM
     for (size_t i = 0; i < ATOM_FIRST_AVAIL_INDEX - PLATFORM_ATOMS_BASE_INDEX; i++) {
-        if (UNLIKELY((size_t) atoms[i][0] != strlen(atoms[i] + 1))) {
+        if (UNLIKELY((size_t) (uint8_t) platform_atoms[i][0] != strlen(platform_atoms[i] + 1))) {
             AVM_ABORT();
         }
 
-        term atom_term = globalcontext_make_atom(glb, atoms[i]);
+        term atom_term = globalcontext_make_atom(glb, platform_atoms[i]);
         if (UNLIKELY(term_to_atom_index(atom_term) != i + PLATFORM_ATOMS_BASE_INDEX)) {
             AVM_ABORT();
         }
     }
+#else
+    UNUSED(glb);
+#endif
 }

@@ -45,6 +45,7 @@ option(AVM_USE_LIBSODIUM "Enable optional libsodium backend for Ed25519 curve" O
 option(AVM_STATIC_LIBSODIUM "Static link libsodium." OFF)
 option(AVM_MINIMAL_OPCODES "Reduce VM size by excluding opcodes for optional compiler flags (no_bs_match, no_ssa_opt_bs_ensure)" OFF)
 option(AVM_COMPACT_ATOM_INDICES "Use 16-bit atom indices (at most 65535 atoms)" OFF)
+option(AVM_DEFAULT_ATOMS_IN_RAM "Index default atoms in RAM instead of using the flash registry" ON)
 
 # JIT & execution of precompiled code
 if(NOT Erlang_VERSION VERSION_GREATER_EQUAL "28")

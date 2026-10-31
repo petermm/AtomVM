@@ -147,14 +147,20 @@ The AtomVM core Erlang library can be found in the generated `libs/atomvmlib.avm
 
 #### Module and atom memory options
 
-The compatibility default retains 32-bit atom indices.
+The compatibility defaults retain 32-bit atom indices and RAM indexing of default
+atoms. The following CMake options can be selected independently:
 
 * `AVM_COMPACT_ATOM_INDICES=ON` uses 16-bit atom IDs, hash indices and module atom
   mappings. It limits the entire VM to 65,535 atoms, including default atoms.
   The default is `OFF`; wide indices remain subject to available RAM and the
   platform's atom-term encoding limit.
+* `AVM_DEFAULT_ATOMS_IN_RAM=OFF` uses an immutable, generated default-atom registry
+  instead of adding these entries to the dynamic table. The default is `ON`.
+  Neither mode copies the immutable default-atom strings into RAM.
 
-On ESP32, the option also appears under **AtomVM configuration** in
+For example, configure the optional compact/flash profile with
+`-DAVM_COMPACT_ATOM_INDICES=ON -DAVM_DEFAULT_ATOMS_IN_RAM=OFF`.
+On ESP32, the runtime options also appear under **AtomVM configuration** in
 `menuconfig`; explicit CMake values take precedence.
 
 Use the `install` target to install the `atomvm` command and associated binary files.  On most UNIX systems, these artifacts will be installed in the `/usr/local` directory tree.
