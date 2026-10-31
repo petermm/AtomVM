@@ -45,7 +45,11 @@ extern "C" {
 #define ATOM_STR(LENSTR, STR) (LENSTR STR)
 
 typedef const void *AtomString;
+#ifdef AVM_COMPACT_ATOM_INDICES
+typedef uint16_t atom_index_t;
+#else
 typedef uint32_t atom_index_t;
+#endif
 
 /**
  * @brief Gets a C string from an AtomString
