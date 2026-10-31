@@ -554,7 +554,12 @@ static void test_atom_table_index_width(void)
         assert(atom_table_ensure_atom(table, (const uint8_t *) name, len, AtomTableCopyAtom, &index) == AtomTableEnsureAtomOk);
         assert(index == i);
     }
-    const uint8_t batch[] = "\x0c" "width_bulk_a" "\x0c" "width_bulk_b" "\x0c" "width_bulk_c";
+    const uint8_t batch[] = "\x0c"
+                            "width_bulk_a"
+                            "\x0c"
+                            "width_bulk_b"
+                            "\x0c"
+                            "width_bulk_c";
     atom_index_t translate[3];
 #ifdef AVM_COMPACT_ATOM_INDICES
     assert(atom_table_ensure_atoms(table, batch, 3, translate, EnsureAtomsNoOpts) == AtomTableEnsureAtomAllocFail);
