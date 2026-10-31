@@ -39,7 +39,7 @@ macro(pack_gleam_archive avm_name)
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/gleam.toml ${CMAKE_CURRENT_SOURCE_DIR}/manifest.toml ${CMAKE_CURRENT_BINARY_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src
         COMMAND gleam export erlang-shipment
-        COMMAND ${CMAKE_BINARY_DIR}/tools/packbeam/packbeam create --lib ${INCLUDE_LINES} ${avm_name}.avm ${BEAMS}
+        COMMAND ${CMAKE_BINARY_DIR}/tools/packbeam/packbeam create ${AVM_PACKBEAM_LABEL_ARGS} --lib ${INCLUDE_LINES} ${avm_name}.avm ${BEAMS}
         COMMENT "Packing gleam archive ${avm_name}.avm"
         VERBATIM
     )
@@ -79,7 +79,7 @@ macro(pack_gleam_runnable avm_name main)
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/gleam.toml ${CMAKE_CURRENT_SOURCE_DIR}/manifest.toml ${CMAKE_CURRENT_BINARY_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src
         COMMAND gleam export erlang-shipment
-        COMMAND ${CMAKE_BINARY_DIR}/tools/packbeam/packbeam create ${PACKBEAM_PRUNE_ARGS} -s ${main} ${INCLUDE_LINES} ${avm_name}.avm ${BEAMS} ${ARCHIVES}
+        COMMAND ${CMAKE_BINARY_DIR}/tools/packbeam/packbeam create ${AVM_PACKBEAM_LABEL_ARGS} ${PACKBEAM_PRUNE_ARGS} -s ${main} ${INCLUDE_LINES} ${avm_name}.avm ${BEAMS} ${ARCHIVES}
         COMMENT "Packing gleam runnable ${avm_name}.avm"
     )
 
