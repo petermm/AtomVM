@@ -98,7 +98,7 @@ static bool module_are_literals_compressed(const uint8_t *litT);
 #ifdef WITH_ZLIB
 static void *module_uncompress_literals(const uint8_t *litT, int size);
 #endif
-static struct LiteralEntry *module_build_literals_table(const void *literalsBuf);
+static void *module_build_literals_table(const void *literalsBuf, bool *is_u16);
 #ifndef AVM_NO_EMU
 static void module_add_label(Module *mod, int index, const uint8_t *ptr);
 #endif
@@ -1246,17 +1246,26 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
 #endif
         }
 
-        mod->literals_table = module_build_literals_table(mod->literals_data);
+        bool is_u16;
+        mod->literals_table = module_build_literals_table(mod->literals_data, &is_u16);
+        mod->literals_is_u16 = is_u16;
 
     } else if (offsets[LITU]) {
         mod->literals_data = beam_file + offsets[LITU] + IFF_SECTION_HEADER_SIZE;
-        mod->literals_table = module_build_literals_table(mod->literals_data);
+        bool is_u16;
+        mod->literals_table = module_build_literals_table(mod->literals_data, &is_u16);
+        mod->literals_is_u16 = is_u16;
         mod->free_literals_data = 0;
 
     } else {
         mod->literals_data = NULL;
         mod->literals_table = NULL;
         mod->free_literals_data = 0;
+    }
+
+    if (mod->literals_data && READ_32_UNALIGNED(mod->literals_data) != 0 && !mod->literals_table) {
+        module_destroy(mod);
+        return NULL;
     }
 
     if (offsets[TYPE]) {
@@ -1380,23 +1389,39 @@ static void *module_uncompress_literals(const uint8_t *litT, int size)
 }
 #endif
 
-static struct LiteralEntry *module_build_literals_table(const void *literalsBuf)
+static void *module_build_literals_table(const void *literalsBuf, bool *is_u16)
 {
     uint32_t terms_count = READ_32_UNALIGNED(literalsBuf);
+    *is_u16 = true;
+    if (terms_count == 0) {
+        return NULL;
+    }
 
-    const uint8_t *pos = (const uint8_t *) literalsBuf + sizeof(uint32_t);
+    const uint8_t *base = literalsBuf;
+    const uint8_t *pos = base + sizeof(uint32_t);
+    for (uint32_t i = 0; i < terms_count; i++) {
+        uint32_t term_size = READ_32_UNALIGNED(pos);
+        pos += (size_t) term_size + sizeof(uint32_t);
+    }
+    *is_u16 = (size_t) (pos - base) <= UINT16_MAX;
 
-    struct LiteralEntry *literals_table = calloc(terms_count, sizeof(struct LiteralEntry));
+    size_t entry_size = *is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
+    void *literals_table = malloc((size_t) terms_count * entry_size);
     if (IS_NULL_PTR(literals_table)) {
         fprintf(stderr, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
         return NULL;
     }
-    for (uint32_t i = 0; i < terms_count; i++) {
-        uint32_t term_size = READ_32_UNALIGNED(pos);
-        literals_table[i].size = term_size;
-        literals_table[i].data = pos + sizeof(uint32_t);
 
-        pos += term_size + sizeof(uint32_t);
+    pos = base + sizeof(uint32_t);
+    for (uint32_t i = 0; i < terms_count; i++) {
+        size_t offset = pos - base;
+        if (*is_u16) {
+            ((uint16_t *) literals_table)[i] = (uint16_t) offset;
+        } else {
+            ((uint32_t *) literals_table)[i] = (uint32_t) offset;
+        }
+        uint32_t term_size = READ_32_UNALIGNED(pos);
+        pos += (size_t) term_size + sizeof(uint32_t);
     }
 
     return literals_table;
@@ -1404,7 +1429,12 @@ static struct LiteralEntry *module_build_literals_table(const void *literalsBuf)
 
 term module_load_literal(Module *mod, int index, Context *ctx)
 {
-    term t = external_term_from_const_literal(mod->literals_table[index].data, mod->literals_table[index].size, ctx);
+    size_t offset = mod->literals_is_u16
+        ? ((const uint16_t *) mod->literals_table)[index]
+        : ((const uint32_t *) mod->literals_table)[index];
+    const uint8_t *entry = (const uint8_t *) mod->literals_data + offset;
+    uint32_t size = READ_32_UNALIGNED(entry);
+    term t = external_term_from_const_literal(entry + sizeof(uint32_t), size, ctx);
     if (UNLIKELY(term_is_invalid_term(t))) {
         fprintf(stderr, "Either OOM or invalid term while reading literals_table[%i] from module\n", index);
     }
