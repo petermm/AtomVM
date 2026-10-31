@@ -20,6 +20,15 @@
 #
 menu "AtomVM configuration"
 
+    config AVM_COMPACT_ATOM_INDICES
+        bool "Use 16-bit atom indices to reduce RAM usage"
+        default n
+        help
+            Use 2-byte global atom IDs, hash bucket and collision indices, and
+            module atom translation slots. Limits the VM to 65535 atoms in total,
+            including default atoms. Leave disabled for 4-byte indices, subject
+            to available RAM and atom-term encoding limits.
+
     config REBOOT_ON_NOT_OK
         bool  "Reboot on not ok return value from start/0"
         default n
