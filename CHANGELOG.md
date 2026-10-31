@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across `network:start/1` and `network:stop/0`
 
 ### Changed
+- Stored dynamic atoms in flat indexed entries with stepped growth and pooled
+  storage for copied atom strings
 - With BSD sockets (generic_unix, ESP32), `socket:connect/2` returns the reason a connect failed,
   as OTP does (`{error, econnrefused}`, `{error, etimedout}`, `{error, ehostunreach}`...), instead
   of `{error, closed}`. On ESP32, Wi-Fi down gives `{error, ehostunreach}`, and a refused port gives
