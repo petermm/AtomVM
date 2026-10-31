@@ -95,8 +95,6 @@ Data Structures
    :allow-dot-graphs:
 .. doxygenstruct:: ListHead
    :allow-dot-graphs:
-.. doxygenstruct:: LiteralEntry
-   :allow-dot-graphs:
 .. doxygenstruct:: Mailbox
    :allow-dot-graphs:
 .. doxygenstruct:: Message
