@@ -1089,10 +1089,28 @@ term module_get_exported_functions(Module *this_module, Heap *heap)
     return result_list;
 }
 
+// Share the width decoder rather than inlining it at every interpreter jump.
+const uint8_t *module_get_label_address(const Module *mod, int label)
+{
+#ifndef AVM_NO_COMPACT_LABELS
+    if (mod->labels_is_u16) {
+        return mod->code->code + ((const uint16_t *) mod->labels)[label];
+    }
+#endif
+    return mod->code->code + ((const uint32_t *) mod->labels)[label];
+}
+
 #ifndef AVM_NO_EMU
 static void module_add_label(Module *mod, int index, const uint8_t *ptr)
 {
-    mod->labels[index] = ptr;
+    size_t offset = ptr - mod->code->code;
+#ifndef AVM_NO_COMPACT_LABELS
+    if (mod->labels_is_u16) {
+        ((uint16_t *) mod->labels)[index] = (uint16_t) offset;
+        return;
+    }
+#endif
+    ((uint32_t *) mod->labels)[index] = (uint32_t) offset;
 }
 #endif
 
@@ -1217,7 +1235,11 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
 #endif
 #ifndef AVM_NO_EMU
         uint32_t num_labels = ENDIAN_SWAP_32(mod->code->labels);
-        mod->labels = calloc(num_labels, sizeof(void *));
+#ifndef AVM_NO_COMPACT_LABELS
+        mod->labels_is_u16 = ENDIAN_SWAP_32(mod->code->size) <= UINT16_MAX;
+#endif
+        size_t label_size = mod->labels_is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
+        mod->labels = calloc(num_labels, label_size);
         if (IS_NULL_PTR(mod->labels)) {
             fprintf(stderr, "Error: Null module labels: %s:%i.\n", __FILE__, __LINE__);
             module_destroy(mod);
@@ -2304,12 +2326,11 @@ COLD_FUNC void module_cp_to_label_offset(term cp, Module **cp_mod, int *label, s
     } else {
 #endif
 #ifndef AVM_NO_EMU
-        uint8_t *code = &mod->code->code[0];
         int labels_count = ENDIAN_SWAP_32(mod->code->labels);
 
         int i = 1;
-        const uint8_t *l = mod->labels[1];
-        while (mod_offset > (size_t) (l - code)) {
+        uint32_t label_offset = module_label_code_offset(mod, 1);
+        while (mod_offset > label_offset) {
             i++;
             if (i >= labels_count) {
                 // last label + 1 is reserved for end of module.
@@ -2321,14 +2342,14 @@ COLD_FUNC void module_cp_to_label_offset(term cp, Module **cp_mod, int *label, s
                 }
                 return;
             }
-            l = mod->labels[i];
+            label_offset = module_label_code_offset(mod, i);
         }
 
         if (label) {
             *label = i - 1;
         }
         if (l_off) {
-            *l_off = mod_offset - (mod->labels[i - 1] - code);
+            *l_off = mod_offset - module_label_code_offset(mod, i - 1);
         }
 #endif
 #ifndef AVM_NO_JIT
@@ -2366,8 +2387,12 @@ uint32_t module_label_code_offset(Module *mod, int label)
 #endif
     } else {
 #endif
-        uint8_t *code = &mod->code->code[0];
-        return mod->labels[label] - code;
+#ifndef AVM_NO_COMPACT_LABELS
+        if (mod->labels_is_u16) {
+            return ((const uint16_t *) mod->labels)[label];
+        }
+#endif
+        return ((const uint32_t *) mod->labels)[label];
 #ifndef AVM_NO_JIT
     }
 #endif

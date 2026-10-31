@@ -837,6 +837,87 @@ static void test_wide_atom_module(void)
 #endif
 
 #ifndef AVM_NO_EMU
+static size_t append_module_test_chunk(uint8_t *beam, size_t pos, const char *name,
+    const void *payload, size_t size)
+{
+    memcpy(beam + pos, name, 4);
+    WRITE_32_UNALIGNED(beam + pos + 4, (uint32_t) size);
+    memcpy(beam + pos + 8, payload, size);
+    return pos + 8 + ((size + 3) & ~(size_t) 3);
+}
+
+static uint8_t *make_label_test_module(size_t padding, size_t *size, uint32_t *entry)
+{
+    static const uint8_t atoms[] = {
+        0, 0, 0, 2, 14, 'l', 'a', 'b', 'e', 'l', '_', 'm', 'e', 't', 'a', 'd', 'a', 't', 'a',
+        5, 's', 't', 'a', 'r', 't'
+    };
+    static const uint8_t empty[] = { 0, 0, 0, 0 };
+    static const uint8_t exports[] = { 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2 };
+    size_t code_size = 20 + 14 + padding * 3;
+    uint8_t *code = calloc(1, code_size);
+    assert(code);
+    WRITE_32_UNALIGNED(code, 16);
+    WRITE_32_UNALIGNED(code + 8, 64);
+    WRITE_32_UNALIGNED(code + 12, 3);
+    WRITE_32_UNALIGNED(code + 16, 1);
+    static const uint8_t prefix[] = { 1, 0x10, 2, 0x12, 0x22, 0 };
+    memcpy(code + 20, prefix, sizeof(prefix));
+    size_t pos = 20 + sizeof(prefix);
+    for (size_t i = 0; i < padding; i++) {
+        code[pos++] = 64; // move 0,x0, before the exported entry label
+        code[pos++] = 1;
+        code[pos++] = 3;
+    }
+    static const uint8_t suffix[] = { 1, 0x20, 64, 9, 42, 3, 19, 3 };
+    memcpy(code + pos, suffix, sizeof(suffix));
+    *entry = (uint32_t) (pos - 20 + 2);
+    uint8_t *beam = calloc(1, code_size + 256);
+    assert(beam);
+    memcpy(beam, "FOR1", 4);
+    memcpy(beam + 8, "BEAM", 4);
+    pos = append_module_test_chunk(beam, 12, "AtU8", atoms, sizeof(atoms));
+    pos = append_module_test_chunk(beam, pos, "Code", code, code_size);
+    pos = append_module_test_chunk(beam, pos, "ImpT", empty, sizeof(empty));
+    pos = append_module_test_chunk(beam, pos, "ExpT", exports, sizeof(exports));
+    pos = append_module_test_chunk(beam, pos, "LocT", empty, sizeof(empty));
+    WRITE_32_UNALIGNED(beam + 4, (uint32_t) pos - 8);
+    *size = pos;
+    free(code);
+    return beam;
+}
+
+static void check_label_test_module(uint8_t *beam, size_t size, uint32_t entry)
+{
+    GlobalContext *global = globalcontext_new();
+    assert(global);
+    Module *mod = module_new_from_iff_binary(global, beam, size);
+    assert(mod);
+    assert(module_get_label_address(mod, 2) == mod->code->code + entry);
+    assert(module_label_code_offset(mod, 2) == entry);
+    globalcontext_insert_module(global, mod);
+    Context *ctx = context_new(global);
+    assert(ctx);
+    ctx->leader = 1;
+    context_execute_loop(ctx, mod, "start", 0);
+    assert(term_is_integer(ctx->x[0]) && term_to_int(ctx->x[0]) == 42);
+    context_destroy(ctx);
+    globalcontext_destroy(global);
+}
+
+static void test_relative_module_labels(void)
+{
+    size_t size;
+    uint32_t entry;
+    uint8_t *beam = make_label_test_module(0, &size, &entry);
+    check_label_test_module(beam, size, entry);
+    free(beam);
+    beam = make_label_test_module(22000, &size, &entry);
+    assert(entry > UINT16_MAX);
+    check_label_test_module(beam, size, entry);
+    free(beam);
+}
+
 static void test_module_line_boundaries(void)
 {
     // line 0; move 1,x0; line 1; move 2,x0; line 0; line 2; end.
@@ -881,6 +962,7 @@ int main(int argc, char **argv)
 {
 #ifndef AVM_NO_EMU
     test_module_line_boundaries();
+    test_relative_module_labels();
 #endif
     char *name = argv[0];
     time_t seed = time(NULL);

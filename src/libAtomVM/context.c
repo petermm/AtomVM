@@ -606,7 +606,7 @@ void context_process_code_server_resume_signal(Context *ctx)
         ctx->saved_function_ptr = module_get_native_entry_point(module, label);
 #endif
     } else {
-        ctx->saved_ip = module->labels[label];
+        ctx->saved_ip = module_get_label_address(module, label);
     }
 #else
 #ifdef JIT_JUMPTABLE_IS_DATA

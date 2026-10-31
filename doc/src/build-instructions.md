@@ -157,6 +157,9 @@ atoms. The following CMake options can be selected independently:
 * `AVM_DEFAULT_ATOMS_IN_RAM=OFF` uses an immutable, generated default-atom registry
   instead of adding these entries to the dynamic table. The default is `ON`.
   Neither mode copies the immutable default-atom strings into RAM.
+* `AVM_COMPACT_LABELS=ON` stores small modules' bytecode label offsets in 16 bits,
+  with 32-bit fallback for larger Code chunks. This is the default. Set it to
+  `OFF` to use 32-bit offsets for every interpreted module.
 
 For example, configure the optional compact/flash profile with
 `-DAVM_COMPACT_ATOM_INDICES=ON -DAVM_DEFAULT_ATOMS_IN_RAM=OFF`.
