@@ -31,16 +31,18 @@ The `<sta-properties>` property list should contain the following entries:
 
 In addition, the following optional parameters can be specified to configure the network:
 
+* `{bssid, binary()}` The 6-byte BSSID (MAC address) of the access point to connect to, for
+example `<<0x42,0x13,0x37,0x55,0xaa,0x01>>`. Use it to choose one access point when several
+share the same `ssid`; `ssid` is still required, and a value that is not a 6-byte binary is
+rejected with `{error, badarg}`. On the Pico W it applies to the STA configuration passed to
+`network:start/1` or `network:wait_for_sta/1,2`; only the ESP32 supports `network:sta_connect/1`.
+On the ESP32, `network:wifi_scan/0,1` returns the same binary under `bssid`.
 * `{dhcp_hostname, string()|binary()}` The DHCP hostname as which the device should register
 (default: `<<"atomvm-<hexmac>">>`, where `<hexmac>` is the hexadecimal representation of the
 factory-assigned MAC address of the device).
 
 The following options are only supported on ESP32 platform:
 
-* `{bssid, binary()}` The 6-byte BSSID (MAC address) of the access point to connect to, in the same
-format returned by `network:wifi_scan/0,1`. Use it to choose one access point when several share
-the same `ssid`; the driver then stops scanning as soon as it finds that access point. `ssid` is
-still required.
 * `{beacon_timeout, fun(() -> term())}` A callback function which will be called when the device
 does not receive a beacon frame from the connected access point during the "inactive time" (6
 second default, currently not configurable).

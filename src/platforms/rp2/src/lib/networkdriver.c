@@ -44,6 +44,7 @@
 #define PORT_REPLY_SIZE (TUPLE_SIZE(2) + TERM_BOXED_REFERENCE_SHORT_SIZE)
 #define DEFAULT_HOSTNAME_FMT "atomvm-%02x%02x%02x%02x%02x%02x"
 #define DEFAULT_HOSTNAME_SIZE (strlen("atomvm-") + 12 + 1)
+#define BSSID_SIZE 6
 
 static const char *const ap_atom = ATOM_STR("\x2", "ap");
 static const char *const ap_authmode_atom = ATOM_STR("\xB", "ap_authmode");
@@ -51,6 +52,7 @@ static const char *const ap_channel_atom = ATOM_STR("\xA", "ap_channel");
 static const char *const ap_sta_connected_atom = ATOM_STR("\x10", "ap_sta_connected");
 static const char *const ap_sta_disconnected_atom = ATOM_STR("\x13", "ap_sta_disconnected");
 static const char *const ap_started_atom = ATOM_STR("\xA", "ap_started");
+static const char *const bssid_atom = ATOM_STR("\x5", "bssid");
 static const char *const dhcp_hostname_atom = ATOM_STR("\xD", "dhcp_hostname");
 static const char *const host_atom = ATOM_STR("\x4", "host");
 static const char *const psk_atom = ATOM_STR("\x3", "psk");
@@ -297,6 +299,7 @@ static term start_sta(term sta_config, GlobalContext *global)
     term ssid_term = interop_kv_get_value(sta_config, ssid_atom, global);
     term pass_term = interop_kv_get_value(sta_config, psk_atom, global);
     term hostname_term = interop_kv_get_value(sta_config, dhcp_hostname_atom, global);
+    term bssid_term = interop_kv_get_value(sta_config, bssid_atom, global);
 
     //
     // Check parameters
@@ -318,6 +321,18 @@ static term start_sta(term sta_config, GlobalContext *global)
         }
     }
 
+    uint8_t bssid[BSSID_SIZE] = { 0 };
+    const uint8_t *bssid_ptr = NULL;
+    if (!term_is_invalid_term(bssid_term)) {
+        if (UNLIKELY(!term_is_binary(bssid_term) || term_binary_size(bssid_term) != BSSID_SIZE)) {
+            free(ssid);
+            free(psk);
+            return BADARG_ATOM;
+        }
+        memcpy(bssid, term_binary_data(bssid_term), BSSID_SIZE);
+        bssid_ptr = bssid;
+    }
+
     enum DriverErrorCodeType ret = set_interface_dhcp_name(hostname_term, &driver_data->hostname);
     if (UNLIKELY(ret != DriverOK)) {
         free(ssid);
@@ -328,9 +343,9 @@ static term start_sta(term sta_config, GlobalContext *global)
     netif_set_hostname(&cyw43_state.netif[CYW43_ITF_STA], driver_data->hostname);
 
     uint32_t auth = (psk == NULL) ? CYW43_AUTH_OPEN : CYW43_AUTH_WPA2_MIXED_PSK;
-    int result = cyw43_arch_wifi_connect_async(ssid, psk, auth);
+    int result = cyw43_arch_wifi_connect_bssid_async(ssid, bssid_ptr, psk, auth);
     // We need to set the callback after calling connect async because it's
-    // erased by cyw43_arch_wifi_connect_async.
+    // erased by cyw43_arch_wifi_connect_bssid_async.
     // There could be a race condition here.
     netif_set_status_callback(&cyw43_state.netif[CYW43_ITF_STA], network_driver_netif_status_cb);
     network_driver_netif_status_cb(&cyw43_state.netif[CYW43_ITF_STA]);

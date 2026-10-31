@@ -65,10 +65,11 @@
 -type ssid_config() :: {ssid, ssid()}.
 -type bssid_config() :: {bssid, bssid()}.
 %% A `bssid' pins the connection to a single access point of the given `ssid', which is needed when
-%% several access points share the same `ssid'. The ESP32 driver then stops scanning as soon as it
-%% finds that access point. The `bssid' is a 6-byte binary, in the same format returned by
-%% `wifi_scan/0,1'; the `ssid' is still required, and this option is only supported on the ESP32.
-%% Passing an `ssid' to `sta_connect/1' without a `bssid' clears a previously configured `bssid'.
+%% several access points share the same `ssid'. It is a 6-byte binary; `ssid' is still required, and
+%% a value that is not a 6-byte binary is rejected. Supported on the ESP32 and on the Pico W/Pico
+%% 2 W, where it can only be set in the configuration passed to `start/1' (or `wait_for_sta/1,2').
+%% On the ESP32, `wifi_scan/0,1' returns the same binary under `bssid'. Passing an `ssid' to
+%% `sta_connect/1' without a `bssid' clears a previously configured `bssid'.
 -type psk_config() :: {psk, string() | binary()}.
 -type app_managed_config() :: managed | {managed, boolean()}.
 %% Setting `{managed, true}' or including the atom `managed' in the `sta_config()' will signal to

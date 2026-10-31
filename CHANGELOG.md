@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `CONFIG_AVM_ENABLE_ETHERNET=y`): `{eth, [...]}` in `network:start/1` brings up the EMAC
   with an RMII PHY, alone or next to STA/AP, plus `network:wait_for_eth/0,1,2` and
   `network:eth_status/0`
-- Added `{bssid, BSSID}` to the ESP32 `network` station configuration, selecting one of several
-  access points that share an `ssid`; the driver stops scanning at that access point
+- Added `{bssid, BSSID}` to the `network` station configuration on ESP32 and Pico W/Pico 2 W,
+  connecting only to the access point with that BSSID when several share an `ssid`
 
 ### Changed
 - Stopped CI testing on FreeBSD 13, which has reached end of life.
