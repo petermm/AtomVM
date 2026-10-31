@@ -136,6 +136,14 @@ add_library(libAtomVM ${SOURCE_FILES} ${HEADER_FILES})
 target_include_directories(libAtomVM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(libAtomVM PUBLIC c_std_11)
 
+include(GenDefaultAtoms)
+generate_defaultatoms(libAtomVM "${CMAKE_CURRENT_SOURCE_DIR}/defaultatoms.def"
+    "${CMAKE_CURRENT_BINARY_DIR}/defaultatoms_tables.h" generic)
+
+# Also provide the compatibility default to platforms with their own top-level CMake.
+option(AVM_DEFAULT_ATOMS_IN_RAM "Index default atoms in RAM instead of using the flash registry" ON)
+target_compile_definitions(libAtomVM PUBLIC AVM_DEFAULT_ATOMS_IN_RAM=$<BOOL:${AVM_DEFAULT_ATOMS_IN_RAM}>)
+
 option(AVM_COMPACT_ATOM_INDICES "Use 16-bit atom indices (at most 65535 atoms)" OFF)
 
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
