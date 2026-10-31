@@ -135,6 +135,9 @@ endif()
 add_library(libAtomVM ${SOURCE_FILES} ${HEADER_FILES})
 target_include_directories(libAtomVM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(libAtomVM PUBLIC c_std_11)
+
+option(AVM_COMPACT_ATOM_INDICES "Use 16-bit atom indices (at most 65535 atoms)" OFF)
+
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_compile_options(libAtomVM PUBLIC -Wall ${MAYBE_PEDANTIC_FLAG} ${MAYBE_WERROR_FLAG} -Wextra -ggdb -Werror=incompatible-pointer-types)
 elseif (CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -288,6 +291,10 @@ endif()
 
 if(AVM_CREATE_STACKTRACES)
     target_compile_definitions(libAtomVM PUBLIC AVM_CREATE_STACKTRACES)
+endif()
+
+if(AVM_COMPACT_ATOM_INDICES)
+    target_compile_definitions(libAtomVM PUBLIC AVM_COMPACT_ATOM_INDICES)
 endif()
 
 # Automatically use zlib if present to load .beam files

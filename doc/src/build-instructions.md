@@ -145,6 +145,18 @@ Upon completion, the `AtomVM` executable can be found in the `build/src` directo
 
 The AtomVM core Erlang library can be found in the generated `libs/atomvmlib.avm` AVM file.
 
+#### Module and atom memory options
+
+The compatibility default retains 32-bit atom indices.
+
+* `AVM_COMPACT_ATOM_INDICES=ON` uses 16-bit atom IDs, hash indices and module atom
+  mappings. It limits the entire VM to 65,535 atoms, including default atoms.
+  The default is `OFF`; wide indices remain subject to available RAM and the
+  platform's atom-term encoding limit.
+
+On ESP32, the option also appears under **AtomVM configuration** in
+`menuconfig`; explicit CMake values take precedence.
+
 Use the `install` target to install the `atomvm` command and associated binary files.  On most UNIX systems, these artifacts will be installed in the `/usr/local` directory tree.
 
 ```{attention}
