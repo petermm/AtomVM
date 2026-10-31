@@ -284,7 +284,7 @@ BEAM `line` instructions identify references in the encoded `Line` chunk, not li
 >:::
 ````
 
-Native code continues to use its emitted line-offset metadata to find the line reference, then resolves the same encoded source information. The interpreter trades lower persistent module heap usage for additional scanning when a source location is requested, for example while building a stacktrace. Removing a `Line` chunk still removes source diagnostics.
+Native code continues to use its emitted line-offset metadata to find the line reference, then resolves the same encoded source information. The interpreter trades lower persistent module heap usage for additional scanning when a source location is requested, for example while building a stacktrace. Removing a `Line` chunk still removes source diagnostics; an `avmL` label table does not replace it.
 
 <!-- TODO: this sub-section can be expanded at a later date.
 ### Raw Stacktraces

@@ -146,8 +146,12 @@ target_compile_definitions(libAtomVM PUBLIC AVM_DEFAULT_ATOMS_IN_RAM=$<BOOL:${AV
 
 option(AVM_COMPACT_ATOM_INDICES "Use 16-bit atom indices (at most 65535 atoms)" OFF)
 option(AVM_COMPACT_LABELS "Use 16-bit code offsets when the module fits" ON)
+option(AVM_USE_LABEL_TABLES "Use validated avmL chunks instead of scanning bytecode" ON)
 if(NOT AVM_COMPACT_LABELS)
     target_compile_definitions(libAtomVM PUBLIC AVM_NO_COMPACT_LABELS)
+endif()
+if(NOT AVM_USE_LABEL_TABLES)
+    target_compile_definitions(libAtomVM PUBLIC AVM_NO_LABEL_TABLES)
 endif()
 
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
