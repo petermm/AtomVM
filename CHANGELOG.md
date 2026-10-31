@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `no_bs_create_bin`, `no_bs_match` or `no_ssa_opt_bs_ensure` compiler options cannot be loaded
 
 ### Fixed
+- Fixed ESP32 CMake options taking effect only after a second configure
 - Fixed maps decoded by `binary_to_term/1,2` and received over distribution keeping the
   encoder's key order, which broke `==` and made `=>` updates on an existing key produce
   duplicate keys
