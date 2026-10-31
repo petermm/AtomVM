@@ -803,6 +803,39 @@ static void syntax_error(const char *name, const char *message)
     fprintf(stderr, "%s: syntax error\n%s\nTry %s -h for help\n", name, message, name);
 }
 
+#ifndef AVM_COMPACT_ATOM_INDICES
+static void test_wide_atom_module(void)
+{
+    GlobalContext *global = globalcontext_new();
+    assert(global);
+    for (unsigned int i = 0; i <= UINT16_MAX; i++) {
+        char name[32];
+        int len = snprintf(name, sizeof(name), "wide_module_atom_%u", i);
+        atom_index_t index;
+        enum AtomTableEnsureAtomResult result = atom_table_ensure_atom(global->atom_table,
+            (const uint8_t *) name, len, AtomTableCopyAtom, &index);
+        assert(result == AtomTableEnsureAtomOk);
+    }
+    MappedFile *file = mapped_file_open_beam("test_catch_return_atom.beam");
+    assert(file);
+    Module *mod = module_new_from_iff_binary(global, file->mapped, file->size);
+    assert(mod);
+    atom_index_t module_atom = mod->local_atoms_to_global_table[1];
+    assert(module_atom > UINT16_MAX);
+    assert(atom_table_is_equal_to_atom_string(global->atom_table, module_atom,
+        ATOM_STR("\x16", "test_catch_return_atom")));
+    globalcontext_insert_module(global, mod);
+    Context *ctx = context_new(global);
+    assert(ctx);
+    ctx->leader = 1;
+    context_execute_loop(ctx, mod, "start", 0);
+    assert(term_is_integer(ctx->x[0]) && term_to_int(ctx->x[0]) == 0);
+    context_destroy(ctx);
+    globalcontext_destroy(global);
+    mapped_file_close(file);
+}
+#endif
+
 #ifndef AVM_NO_EMU
 static void test_module_line_boundaries(void)
 {
@@ -932,6 +965,12 @@ int main(int argc, char **argv)
         }
     }
 #endif
+
+    if (!beam) {
+#ifndef AVM_COMPACT_ATOM_INDICES
+        test_wide_atom_module();
+#endif
+    }
 
     int result = 0;
 

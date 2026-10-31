@@ -538,6 +538,51 @@ static void test_atom_table_bulk_grow(void)
 #undef PER_BATCH
 }
 
+static void test_atom_table_index_width(void)
+{
+    struct AtomTable *table = atom_table_new();
+    assert(table != NULL);
+#ifdef AVM_COMPACT_ATOM_INDICES
+    const uint32_t limit = UINT16_MAX;
+#else
+    const uint32_t limit = 90000;
+#endif
+    for (uint32_t i = 0; i < limit - 2; i++) {
+        char name[32];
+        int len = snprintf(name, sizeof(name), "width_atom_%u", i);
+        atom_index_t index;
+        assert(atom_table_ensure_atom(table, (const uint8_t *) name, len, AtomTableCopyAtom, &index) == AtomTableEnsureAtomOk);
+        assert(index == i);
+    }
+    const uint8_t batch[] = "\x0c" "width_bulk_a" "\x0c" "width_bulk_b" "\x0c" "width_bulk_c";
+    atom_index_t translate[3];
+#ifdef AVM_COMPACT_ATOM_INDICES
+    assert(atom_table_ensure_atoms(table, batch, 3, translate, EnsureAtomsNoOpts) == AtomTableEnsureAtomAllocFail);
+    assert(atom_table_count(table) == limit - 2);
+    assert(atom_table_get_index_from_cstring(table, "width_bulk_a") == (atom_index_t) -1);
+#endif
+    assert(atom_table_ensure_atoms(table, batch, 2, translate, EnsureAtomsNoOpts) == AtomTableEnsureAtomOk);
+    assert(translate[0] == limit - 2 && translate[1] == limit - 1);
+    for (uint32_t i = 0; i < limit - 2; i++) {
+        char name[32];
+        int len = snprintf(name, sizeof(name), "width_atom_%u", i);
+        assert(atom_table_get_index_from_cstring(table, name) == i);
+        size_t stored_len;
+        const uint8_t *data = atom_table_get_atom_string(table, i, &stored_len);
+        assert(data != NULL && stored_len == (size_t) len && memcmp(data, name, len) == 0);
+    }
+    atom_index_t index;
+#ifdef AVM_COMPACT_ATOM_INDICES
+    assert(atom_table_ensure_atom(table, (const uint8_t *) "over_limit", 10, AtomTableCopyAtom, &index) == AtomTableEnsureAtomAllocFail);
+#endif
+    assert(atom_table_ensure_atom(table, (const uint8_t *) "width_atom_7", 12, AtomTableAlreadyExisting, &index) == AtomTableEnsureAtomOk);
+    assert(index == 7);
+    assert(atom_table_ensure_atoms(table, batch, 2, translate, EnsureAtomsNoOpts) == AtomTableEnsureAtomOk);
+    assert(translate[0] == limit - 2 && translate[1] == limit - 1);
+    assert(atom_table_count(table) == limit);
+    atom_table_destroy(table);
+}
+
 int main(int argc, char **argv)
 {
     UNUSED(argc);
@@ -546,6 +591,7 @@ int main(int argc, char **argv)
     test_valueshashtable();
     test_atom_table();
     test_atom_table_bulk_grow();
+    test_atom_table_index_width();
 
     return EXIT_SUCCESS;
 }
