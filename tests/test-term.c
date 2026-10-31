@@ -260,6 +260,34 @@ static void test_bigint_range_checks(void)
     globalcontext_destroy(glb);
 }
 
+static void test_atom_index_encoding(void)
+{
+    static const struct
+    {
+        atom_index_t index;
+        term encoded;
+    } cases[] = {
+        { 0, 0x0B },
+        { 1, 0x4B },
+        { 65534, 0x3FFF8B },
+#ifndef AVM_COMPACT_ATOM_INDICES
+        { 65535, 0x3FFFCB },
+        { 65536, 0x40000B },
+        { 0x03FFFFFF, 0xFFFFFFCB },
+#if TERM_BITS == 64
+        // Widen before shifting: a uint32_t intermediate loses the high bits.
+        { 0x81234567, 0x2048D159CB },
+#endif
+#endif
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        term t = term_from_atom_index(cases[i].index);
+        assert(t == cases[i].encoded);
+        assert(term_is_atom(t));
+        assert(term_to_atom_index(t) == cases[i].index);
+    }
+}
+
 int main(int argc, char **argv)
 {
     UNUSED(argc);
@@ -267,6 +295,7 @@ int main(int argc, char **argv)
 
     test_int64_range_checks();
     test_bigint_range_checks();
+    test_atom_index_encoding();
 
     return EXIT_SUCCESS;
 }
