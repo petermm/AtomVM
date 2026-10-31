@@ -123,7 +123,7 @@ struct Module
 
     const struct ExportedFunction **imported_funcs;
 
-    const uint8_t **labels;
+    void *labels;
 
     void *literals_data;
 
@@ -139,6 +139,7 @@ struct Module
 
     unsigned int free_literals_data : 1;
     unsigned int literals_is_u16 : 1;
+    unsigned int labels_is_u16 : 1;
 
 #ifndef AVM_NO_SMP
     Mutex *mutex;
@@ -149,6 +150,9 @@ struct Module
 #define TYPEDEF_MODULE
 typedef struct Module Module;
 #endif
+
+/** Return the interpreter instruction address for a module-local label. */
+const uint8_t *module_get_label_address(const Module *mod, int label);
 
 enum ModuleLoadResult
 {

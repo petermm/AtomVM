@@ -168,6 +168,7 @@ Functions
 .. doxygenfunction:: module_get_exported_functions
 .. doxygenfunction:: module_get_exported_functions_count
 .. doxygenfunction:: module_get_exported_functions_list_size
+.. doxygenfunction:: module_get_label_address
 .. doxygenfunction:: module_get_name
 .. doxygenfunction:: module_has_line_chunk
 .. doxygenfunction:: module_load_literal

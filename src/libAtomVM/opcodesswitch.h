@@ -649,13 +649,15 @@ static void destroy_extended_registers(Context *ctx, unsigned int live)
 #define IS_EXTENDED_FP_REGISTER(decode_pc) \
     (*decode_pc) == COMPACT_EXTENDED_FP_REGISTER
 
+#define GET_LABEL_ADDRESS(label) module_get_label_address(mod, (label))
+
 #define JUMP_TO_LABEL(module, label)    \
     if (module != mod) {                \
         prev_mod = mod;                 \
         mod = module;                   \
         code = mod->code->code;         \
     }                                   \
-    JUMP_TO_ADDRESS(mod->labels[label])
+    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(label))
 
 #ifndef TRACE_JUMP
     #define JUMP_TO_ADDRESS(address) \
@@ -1643,7 +1645,7 @@ int context_execute_loop(Context *ctx, Module *mod, const char *function_name, i
     ctx->saved_module = mod;
 
 #if AVM_NO_JIT
-    ctx->saved_ip = mod->labels[label];
+    ctx->saved_ip = GET_LABEL_ADDRESS(label);
 #elif AVM_NO_EMU
     assert(mod->native_code);
 #ifdef JIT_JUMPTABLE_IS_DATA
@@ -1659,7 +1661,7 @@ int context_execute_loop(Context *ctx, Module *mod, const char *function_name, i
         ctx->saved_function_ptr = module_get_native_entry_point(mod, label);
 #endif
     } else {
-        ctx->saved_ip = mod->labels[label];
+        ctx->saved_ip = GET_LABEL_ADDRESS(label);
     }
 #endif
     scheduler_init_ready(ctx);
@@ -1856,9 +1858,9 @@ schedule_in:
                 remaining_reductions--;
                 if (LIKELY(remaining_reductions)) {
                     TRACE_CALL(ctx, mod, "call", label, arity);
-                    JUMP_TO_ADDRESS(mod->labels[label]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(label));
                 } else {
-                    SCHEDULE_NEXT(mod, mod->labels[label]);
+                    SCHEDULE_NEXT(mod, GET_LABEL_ADDRESS(label));
                 }
 
                 break;
@@ -1883,9 +1885,9 @@ schedule_in:
                 remaining_reductions--;
                 if (LIKELY(remaining_reductions)) {
                     TRACE_CALL(ctx, mod, "call_last", label, arity);
-                    JUMP_TO_ADDRESS(mod->labels[label]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(label));
                 } else {
-                    SCHEDULE_NEXT(mod, mod->labels[label]);
+                    SCHEDULE_NEXT(mod, GET_LABEL_ADDRESS(label));
                 }
                 break;
             }
@@ -1902,9 +1904,9 @@ schedule_in:
                 remaining_reductions--;
                 if (LIKELY(remaining_reductions)) {
                     TRACE_CALL(ctx, mod, "call_only", label, arity);
-                    JUMP_TO_ADDRESS(mod->labels[label]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(label));
                 } else {
-                    SCHEDULE_NEXT(mod, mod->labels[label]);
+                    SCHEDULE_NEXT(mod, GET_LABEL_ADDRESS(label));
                 }
                 break;
             }
@@ -2201,7 +2203,7 @@ schedule_in:
                 term ret = func(ctx, fail_label, arg1);
                 if (UNLIKELY(term_is_invalid_term(ret))) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                         break;
                     } else {
                         HANDLE_ERROR();
@@ -2232,7 +2234,7 @@ schedule_in:
                 term ret = func(ctx, fail_label, arg1, arg2);
                 if (UNLIKELY(term_is_invalid_term(ret))) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                         break;
                     } else {
                         HANDLE_ERROR();
@@ -2418,7 +2420,7 @@ schedule_in:
 
                     WRITE_REGISTER(dreg, ret);
                 } else {
-                    JUMP_TO_ADDRESS(mod->labels[label]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(label));
                 }
                 break;
             }
@@ -2431,7 +2433,7 @@ schedule_in:
 
                 PROCESS_SIGNAL_MESSAGES();
                 mailbox_next(&ctx->mailbox);
-                pc = mod->labels[label];
+                pc = GET_LABEL_ADDRESS(label);
                 break;
             }
 
@@ -2445,7 +2447,7 @@ schedule_in:
                 // after message is enqueued. So we always schedule out
                 // when executing wait/1 and process will be scheduled in
                 // and the outer list will be processed.
-                SCHEDULE_WAIT(mod, mod->labels[label]);
+                SCHEDULE_WAIT(mod, GET_LABEL_ADDRESS(label));
                 break;
             }
 
@@ -2486,7 +2488,7 @@ schedule_in:
                     // list. If there are match clauses (loop_rec was
                     // executed), jump to loop_rec to scan them.
                     if (ctx->mailbox.receive_has_match_clauses && mailbox_has_next(&ctx->mailbox)) {
-                        JUMP_TO_ADDRESS(mod->labels[label]);
+                        JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(label));
                     }
                     ctx->waiting_with_timeout = true;
                     SCHEDULE_WAIT(mod, saved_pc);
@@ -2515,7 +2517,7 @@ schedule_in:
                         goto schedule_in;
                     } else {
                         ctx->waiting_with_timeout = false;
-                        JUMP_TO_ADDRESS(mod->labels[label]);
+                        JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(label));
                     }
                 }
                 break;
@@ -2533,7 +2535,7 @@ schedule_in:
 
                 TermCompareResult result = term_compare(arg1, arg2, TermCompareNoOpts, ctx->global);
                 if (result & (TermGreaterThan | TermEquals)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 } else if (UNLIKELY(result == TermCompareMemoryAllocFail)) {
                     RAISE_ERROR(OUT_OF_MEMORY_ATOM);
                 }
@@ -2553,7 +2555,7 @@ schedule_in:
 
                 TermCompareResult result = term_compare(arg1, arg2, TermCompareNoOpts, ctx->global);
                 if (result == TermLessThan) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 } else if (UNLIKELY(result == TermCompareMemoryAllocFail)) {
                     RAISE_ERROR(OUT_OF_MEMORY_ATOM);
                 }
@@ -2573,7 +2575,7 @@ schedule_in:
 
                 TermCompareResult result = term_compare(arg1, arg2, TermCompareNoOpts, ctx->global);
                 if (result & (TermLessThan | TermGreaterThan)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 } else if (UNLIKELY(result == TermCompareMemoryAllocFail)) {
                     RAISE_ERROR(OUT_OF_MEMORY_ATOM);
                 }
@@ -2593,7 +2595,7 @@ schedule_in:
 
                 TermCompareResult result = term_compare(arg1, arg2, TermCompareNoOpts, ctx->global);
                 if (result == TermEquals) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 } else if (UNLIKELY(result == TermCompareMemoryAllocFail)) {
                     RAISE_ERROR(OUT_OF_MEMORY_ATOM);
                 }
@@ -2613,7 +2615,7 @@ schedule_in:
 
                 TermCompareResult result = term_compare(arg1, arg2, TermCompareExact, ctx->global);
                 if (result & (TermLessThan | TermGreaterThan)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 } else if (UNLIKELY(result == TermCompareMemoryAllocFail)) {
                     RAISE_ERROR(OUT_OF_MEMORY_ATOM);
                 }
@@ -2633,7 +2635,7 @@ schedule_in:
 
                 TermCompareResult result = term_compare(arg1, arg2, TermCompareExact, ctx->global);
                 if (result == TermEquals) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 } else if (UNLIKELY(result == TermCompareMemoryAllocFail)) {
                     RAISE_ERROR(OUT_OF_MEMORY_ATOM);
                 }
@@ -2650,7 +2652,7 @@ schedule_in:
                 TRACE("is_integer/2, label=%" PRIu32 ", arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_any_integer(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2665,7 +2667,7 @@ schedule_in:
                 TRACE("is_float/2, label=%" PRIu32 ", arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_float(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2680,7 +2682,7 @@ schedule_in:
                 TRACE("is_number/2, label=%" PRIu32 ", arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_number(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2695,7 +2697,7 @@ schedule_in:
                 TRACE("is_binary/2, label=%" PRIu32 ", arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_binary(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2710,7 +2712,7 @@ schedule_in:
                 TRACE("is_list/2, label=%" PRIu32 ", arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_list(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2725,7 +2727,7 @@ schedule_in:
                 TRACE("is_nonempty_list/2, label=%" PRIu32 ", arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_nonempty_list(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2740,7 +2742,7 @@ schedule_in:
                 TRACE("is_nil/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_nil(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2755,7 +2757,7 @@ schedule_in:
                 TRACE("is_atom/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_atom(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2770,7 +2772,7 @@ schedule_in:
                 TRACE("is_pid/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_pid(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2785,7 +2787,7 @@ schedule_in:
                 TRACE("is_reference/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_reference(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2800,7 +2802,7 @@ schedule_in:
                 TRACE("is_port/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_port(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2815,7 +2817,7 @@ schedule_in:
                 TRACE("is_tuple/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_tuple(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2833,7 +2835,7 @@ schedule_in:
 
                 assert(term_is_tuple(arg1));
                 if ((uint32_t) term_get_tuple_arity(arg1) != arity) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -2862,7 +2864,7 @@ schedule_in:
                         TermCompareResult result = term_compare(
                             src_value, cmp_value, TermCompareExact, ctx->global);
                         if (result == TermEquals) {
-                            jump_to_address = mod->labels[jmp_label];
+                            jump_to_address = GET_LABEL_ADDRESS(jmp_label);
                         } else if (UNLIKELY(result == TermCompareMemoryAllocFail)) {
                             RAISE_ERROR(OUT_OF_MEMORY_ATOM);
                         }
@@ -2870,7 +2872,7 @@ schedule_in:
                 }
 
                 if (!jump_to_address) {
-                    JUMP_TO_ADDRESS(mod->labels[default_label]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(default_label));
                 } else {
                     JUMP_TO_ADDRESS(jump_to_address);
                 }
@@ -2900,12 +2902,12 @@ schedule_in:
                     DECODE_LABEL(jmp_label, pc)
 
                     if (!jump_to_address && ((uint32_t) arity == cmp_value)) {
-                        jump_to_address = mod->labels[jmp_label];
+                        jump_to_address = GET_LABEL_ADDRESS(jmp_label);
                     }
                 }
 
                 if (!jump_to_address) {
-                    JUMP_TO_ADDRESS(mod->labels[default_label]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(default_label));
                 } else {
                     JUMP_TO_ADDRESS(jump_to_address);
                 }
@@ -2920,9 +2922,9 @@ schedule_in:
 
                 remaining_reductions--;
                 if (LIKELY(remaining_reductions)) {
-                    JUMP_TO_ADDRESS(mod->labels[label]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(label));
                 } else {
-                    SCHEDULE_NEXT(mod, mod->labels[label]);
+                    SCHEDULE_NEXT(mod, GET_LABEL_ADDRESS(label));
                 }
                 break;
             }
@@ -3097,7 +3099,7 @@ schedule_in:
                 TRACE("is_function/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_function(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -3943,7 +3945,7 @@ schedule_in:
                 bool is_valid = bitstring_match_utf8(src_bin, (size_t) offset_bits, &val, &out_size);
 
                 if (!is_valid) {
-                    pc = mod->labels[fail];
+                    pc = GET_LABEL_ADDRESS(fail);
                 } else {
                     term_set_match_state_offset(src, offset_bits + (out_size * 8));
                     WRITE_REGISTER(dreg, term_from_int(val));
@@ -3974,7 +3976,7 @@ schedule_in:
                 bool is_valid = bitstring_match_utf8(src_bin, (size_t) offset_bits, &c, &out_size);
 
                 if (!is_valid) {
-                    pc = mod->labels[fail];
+                    pc = GET_LABEL_ADDRESS(fail);
                 } else {
                     term_set_match_state_offset(src, offset_bits + (out_size * 8));
                 }
@@ -4006,7 +4008,7 @@ schedule_in:
                 bool is_valid = bitstring_match_utf16(src_bin, (size_t) offset_bits, &val, &out_size, flags_value);
 
                 if (!is_valid) {
-                    pc = mod->labels[fail];
+                    pc = GET_LABEL_ADDRESS(fail);
                 } else {
                     term_set_match_state_offset(src, offset_bits + (out_size * 8));
                     WRITE_REGISTER(dreg, term_from_int(val));
@@ -4037,7 +4039,7 @@ schedule_in:
                 bool is_valid = bitstring_match_utf16(src_bin, (size_t) offset_bits, &val, &out_size, flags_value);
 
                 if (!is_valid) {
-                    pc = mod->labels[fail];
+                    pc = GET_LABEL_ADDRESS(fail);
                 } else {
                     term_set_match_state_offset(src, offset_bits + (out_size * 8));
                 }
@@ -4068,7 +4070,7 @@ schedule_in:
                 bool is_valid = bitstring_match_utf32(src_bin, (size_t) offset_bits, &val, flags_value);
 
                 if (!is_valid) {
-                    pc = mod->labels[fail];
+                    pc = GET_LABEL_ADDRESS(fail);
                 } else {
                     term_set_match_state_offset(src, offset_bits + 32);
                     WRITE_REGISTER(dreg, term_from_int(val));
@@ -4098,7 +4100,7 @@ schedule_in:
                 bool is_valid = bitstring_match_utf32(src_bin, (size_t) offset_bits, &val, flags_value);
 
                 if (!is_valid) {
-                    pc = mod->labels[fail];
+                    pc = GET_LABEL_ADDRESS(fail);
                 } else {
                     term_set_match_state_offset(src, offset_bits + 32);
                 }
@@ -4136,7 +4138,7 @@ schedule_in:
 
                 TRACE("bs_start_match3/4, fail=%i src=0x%" TERM_X_FMT " live=%u dreg=%c%i\n", fail, src, live, T_DEST_REG_GC_SAFE(dreg));
                 if (!(term_is_bitstring(src) || term_is_match_state(src))) {
-                    pc = mod->labels[fail];
+                    pc = GET_LABEL_ADDRESS(fail);
                 } else {
                     // MEMORY_CAN_SHRINK because bs_start_match is classified as gc in beam_ssa_codegen.erl
                     TRIM_LIVE_REGS(live);
@@ -4248,7 +4250,7 @@ schedule_in:
 
                 if (term_bit_size(bs_bin) - bs_offset < MINI(remaining * 8, bits)) {
                     TRACE("bs_match_string: failed to match (binary is shorter)\n");
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 } else {
                     if (bits % 8 == 0 && bs_offset % 8 == 0) {
                         avm_int_t bytes = bits / 8;
@@ -4256,7 +4258,7 @@ schedule_in:
 
                         if (memcmp(term_binary_data(bs_bin) + byte_offset, str, MINI(remaining, (unsigned int) bytes)) != 0) {
                             TRACE("bs_match_string: failed to match\n");
-                            JUMP_TO_ADDRESS(mod->labels[fail]);
+                            JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                         } else {
                             term_set_match_state_offset(src, bs_offset + bits);
                         }
@@ -4273,7 +4275,7 @@ schedule_in:
                             uint8_t bin_ch_bit = (bin_ch >> bin_bit_offset) & 1;
                             if (str_ch_bit ^ bin_ch_bit) {
                                 TRACE("bs_match_string: failed to match\n");
-                                JUMP_TO_ADDRESS(mod->labels[fail]);
+                                JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                                 break;
                             }
                             if (str_bit_offset) {
@@ -4322,7 +4324,7 @@ schedule_in:
                 if ((size_t) bs_offset > bs_capacity
                     || !bs_scaled_size_bits(size, unit, bs_capacity - bs_offset, &increment)) {
                     TRACE("bs_skip_bits2: Insufficient capacity to skip bits: %lu\n", (unsigned long) bs_offset);
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 } else {
                     term_set_match_state_offset(src, bs_offset + increment);
                 }
@@ -4347,7 +4349,7 @@ schedule_in:
                 avm_int_t bs_offset = term_get_match_state_offset(src);
                 if ((term_bit_size(bs_bin) - bs_offset) % unit != 0) {
                     TRACE("bs_test_unit: Available bits in source not evenly divisible by unit\n");
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 }
                 break;
             }
@@ -4373,7 +4375,7 @@ schedule_in:
 
                 if ((term_bit_size(bs_bin) - bs_offset) != (unsigned int) bits) {
                     TRACE("bs_test_tail2: Expected exactly %u bits remaining, but remaining=%u\n", (unsigned) bits, (unsigned) (term_bit_size(bs_bin) - bs_offset));
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 }
                 break;
             }
@@ -4406,7 +4408,7 @@ schedule_in:
                 if ((size_t) bs_offset > bs_capacity
                     || !bs_scaled_size_bits(size, unit, bs_capacity - bs_offset, &increment_bits)) {
                     TRACE("bs_get_integer2: size is negative or exceeds the remaining capacity\n");
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 }
                 // bounded by the remaining capacity, so it fits in an avm_int_t
                 avm_int_t increment = (avm_int_t) increment_bits;
@@ -4415,7 +4417,7 @@ schedule_in:
                     bool status = bitstring_extract_integer(bs_bin, bs_offset, increment, flags_value, &value);
                     if (UNLIKELY(!status)) {
                         TRACE("bs_get_integer2: error extracting integer.\n");
-                        JUMP_TO_ADDRESS(mod->labels[fail]);
+                        JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                     } else {
                         term_set_match_state_offset(src, bs_offset + increment);
 
@@ -4483,7 +4485,7 @@ schedule_in:
                 if ((size_t) bs_offset > bs_capacity
                     || !bs_scaled_size_bits(size, unit, bs_capacity - bs_offset, &increment_bits)) {
                     TRACE("bs_get_float2: size is negative or exceeds the remaining capacity\n");
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 }
                 // both bounded by the remaining capacity, so they fit in an avm_int_t
                 avm_int_t size_val = term_to_int(size);
@@ -4502,12 +4504,12 @@ schedule_in:
                     default:
                         TRACE("bs_get_float2: error extracting float.\n");
                         status = false;
-                        JUMP_TO_ADDRESS(mod->labels[fail]);
+                        JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                         break;
                 }
                 if (UNLIKELY(!status)) {
                     TRACE("bs_get_float2: error extracting float.\n");
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 } else {
                     term_set_match_state_offset(src, bs_offset + increment);
 
@@ -4554,7 +4556,7 @@ schedule_in:
                 size_t bs_capacity = term_bit_size(bs_bin);
                 if ((size_t) bs_offset > bs_capacity) {
                     TRACE("bs_get_binary2: match state offset is past the end of the bitstring\n");
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 }
                 size_t remaining_bits = bs_capacity - bs_offset;
                 size_t size_bits;
@@ -4562,12 +4564,12 @@ schedule_in:
                     // A negative or overflowing size fails the match
                     if (!bs_scaled_size_bits(size, unit, remaining_bits, &size_bits)) {
                         TRACE("bs_get_binary2: size is negative or exceeds the remaining capacity\n");
-                        JUMP_TO_ADDRESS(mod->labels[fail]);
+                        JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                     }
                 } else if (size == ALL_ATOM) {
                     if (remaining_bits % unit != 0) {
                         TRACE("bs_get_binary2: remainder is not a multiple of unit\n");
-                        JUMP_TO_ADDRESS(mod->labels[fail]);
+                        JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                     }
                     size_bits = remaining_bits;
                 } else {
@@ -4579,7 +4581,7 @@ schedule_in:
 
                 if (size_bits > remaining_bits) {
                     TRACE("bs_get_binary2: insufficient capacity -- bs_offset = %d, size_bits = %d\n", (int) bs_offset, (int) size_bits);
-                    JUMP_TO_ADDRESS(mod->labels[fail]);
+                    JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
                 } else {
                     term_set_match_state_offset(src, bs_offset + size_bits);
 
@@ -4712,7 +4714,7 @@ schedule_in:
                 TRACE("is_boolean/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if ((arg1 != TRUE_ATOM) && (arg1 != FALSE_ATOM)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -4753,10 +4755,10 @@ schedule_in:
                     }
 
                     if ((arity < 0) || (arity != (avm_int_t) fun_arity)) {
-                        pc = mod->labels[label];
+                        pc = GET_LABEL_ADDRESS(label);
                     }
                 } else {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -4780,7 +4782,7 @@ schedule_in:
                 term ret = func(ctx, fail_label, live, arg1);
                 if (UNLIKELY(term_is_invalid_term(ret))) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                         break;
                     } else {
                         HANDLE_ERROR();
@@ -4816,7 +4818,7 @@ schedule_in:
                 term ret = func(ctx, fail_label, live, arg1, arg2);
                 if (UNLIKELY(term_is_invalid_term(ret))) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                         break;
                     } else {
                         HANDLE_ERROR();
@@ -4841,7 +4843,7 @@ schedule_in:
                 TRACE("is_bitstr/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_bitstring(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -4869,7 +4871,7 @@ schedule_in:
                 term ret = func(ctx, fail_label, live, arg1, arg2, arg3);
                 if (UNLIKELY(term_is_invalid_term(ret))) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                         break;
                     } else {
                         HANDLE_ERROR();
@@ -5112,7 +5114,7 @@ schedule_in:
                 TRACE("is_map/2, label=%i, arg1=%" TERM_X_FMT "\n", label, arg1);
 
                 if (!term_is_map(arg1)) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -5135,7 +5137,7 @@ schedule_in:
 
                     int pos = term_find_map_pos(src, key, ctx->global);
                     if (pos == TERM_MAP_NOT_FOUND) {
-                        pc = mod->labels[label];
+                        pc = GET_LABEL_ADDRESS(label);
                         break;
                     } else if (pos == TERM_MAP_MEMORY_ALLOC_FAIL) {
                         RAISE_ERROR(OUT_OF_MEMORY_ATOM);
@@ -5163,7 +5165,7 @@ schedule_in:
 
                     int pos = term_find_map_pos(src, key, ctx->global);
                     if (pos == TERM_MAP_NOT_FOUND) {
-                        pc = mod->labels[label];
+                        pc = GET_LABEL_ADDRESS(label);
                         break;
                     } else if (UNLIKELY(pos == TERM_MAP_MEMORY_ALLOC_FAIL)) {
                         RAISE_ERROR(OUT_OF_MEMORY_ATOM);
@@ -5188,7 +5190,7 @@ schedule_in:
                 TRACE("is_tagged_tuple/2, label=%u, arg1=%p, arity=%u, atom_id=%p\n", (unsigned) label, (void *) arg1, (unsigned) arity, (void *) tag_atom);
 
                 if (!(term_is_tuple(arg1) && ((uint32_t) term_get_tuple_arity(arg1) == arity) && (term_get_tuple_element(arg1, 0) == tag_atom))) {
-                    pc = mod->labels[label];
+                    pc = GET_LABEL_ADDRESS(label);
                 }
 
                 break;
@@ -5256,7 +5258,7 @@ schedule_in:
                     if (fail_label) {
                         // Not sure this can happen, float operations
                         // in guards are translated to gc_bif calls
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                     } else {
                         RAISE_ERROR(BADARITH_ATOM);
                     }
@@ -5264,7 +5266,7 @@ schedule_in:
 #else
                 if (!isfinite(ctx->fr[freg3])) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                     } else {
                         RAISE_ERROR(BADARITH_ATOM);
                     }
@@ -5294,7 +5296,7 @@ schedule_in:
                     if (fail_label) {
                         // Not sure this can happen, float operations
                         // in guards are translated to gc_bif calls
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                     } else {
                         RAISE_ERROR(BADARITH_ATOM);
                     }
@@ -5302,7 +5304,7 @@ schedule_in:
 #else
                 if (!isfinite(ctx->fr[freg3])) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                     } else {
                         RAISE_ERROR(BADARITH_ATOM);
                     }
@@ -5332,7 +5334,7 @@ schedule_in:
                     if (fail_label) {
                         // Not sure this can happen, float operations
                         // in guards are translated to gc_bif calls
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                     } else {
                         RAISE_ERROR(BADARITH_ATOM);
                     }
@@ -5340,7 +5342,7 @@ schedule_in:
 #else
                 if (!isfinite(ctx->fr[freg3])) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                     } else {
                         RAISE_ERROR(BADARITH_ATOM);
                     }
@@ -5370,7 +5372,7 @@ schedule_in:
                     if (fail_label) {
                         // Not sure this can happen, float operations
                         // in guards are translated to gc_bif calls
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                     } else {
                         RAISE_ERROR(BADARITH_ATOM);
                     }
@@ -5378,7 +5380,7 @@ schedule_in:
 #else
                 if (!isfinite(ctx->fr[freg3])) {
                     if (fail_label) {
-                        pc = mod->labels[fail_label];
+                        pc = GET_LABEL_ADDRESS(fail_label);
                     } else {
                         RAISE_ERROR(BADARITH_ATOM);
                     }
@@ -5515,7 +5517,7 @@ schedule_in:
                 // no_fail: we know it's a binary or a match_state
                 // resume: we know it's a match_state
                 if (term_is_invalid_term(fail_atom) && !(term_is_bitstring(src) || term_is_match_state(src))) {
-                    pc = mod->labels[fail_label];
+                    pc = GET_LABEL_ADDRESS(fail_label);
                 } else {
                     assert(term_is_bitstring(src) || term_is_match_state(src));
 
@@ -6344,7 +6346,7 @@ schedule_in:
                 break;
 
             bs_match_jump_to_fail:
-                JUMP_TO_ADDRESS(mod->labels[fail]);
+                JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(fail));
 
 #if MAXIMUM_OTP_COMPILER_VERSION >= 29
                 case OP_BIF3: {
@@ -6369,7 +6371,7 @@ schedule_in:
                     term ret = func(ctx, fail_label, arg1, arg2, arg3);
                     if (UNLIKELY(term_is_invalid_term(ret))) {
                         if (fail_label) {
-                            pc = mod->labels[fail_label];
+                            pc = GET_LABEL_ADDRESS(fail_label);
                             break;
                         } else {
                             HANDLE_ERROR();
@@ -6446,7 +6448,7 @@ schedule_in:
         if (target_label) {
 #if AVM_NO_JIT
             code = mod->code->code;
-            JUMP_TO_ADDRESS(mod->labels[target_label]);
+            JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(target_label));
 #elif AVM_NO_EMU
             native_pc = module_get_native_entry_point(mod, target_label);
             continue;
@@ -6457,7 +6459,7 @@ schedule_in:
             } else {
                 native_pc = NULL;
                 code = mod->code->code;
-                JUMP_TO_ADDRESS(mod->labels[target_label]);
+                JUMP_TO_ADDRESS(GET_LABEL_ADDRESS(target_label));
             }
 #endif
         }
