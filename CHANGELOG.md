@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across `network:start/1` and `network:stop/0`
 
 ### Changed
+- Reduced module metadata allocations, stored literal and bytecode label offsets
+  compactly with 32-bit fallback, and resolved source locations on demand
 - Stored dynamic atoms in flat indexed entries with stepped growth and pooled
   storage for copied atom strings
 - With BSD sockets (generic_unix, ESP32), `socket:connect/2` returns the reason a connect failed,
