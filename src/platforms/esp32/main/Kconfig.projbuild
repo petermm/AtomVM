@@ -45,6 +45,14 @@ menu "AtomVM configuration"
             Store 16-bit offsets for small modules, with 32-bit fallback for
             larger Code chunks. Does not change native-code label storage.
 
+    config AVM_USE_LABEL_TABLES
+        bool "Use precomputed avmL label tables"
+        default y
+        help
+            Use compatible avmL chunks directly from the module image. Missing
+            or incompatible tables fall back to scanning bytecode. Generate
+            tables separately with PackBEAM --avm-labels; generation is opt-in.
+
     config REBOOT_ON_NOT_OK
         bool  "Reboot on not ok return value from start/0"
         default n
