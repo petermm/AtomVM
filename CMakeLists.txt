@@ -47,6 +47,7 @@ option(AVM_MINIMAL_OPCODES "Reduce VM size by excluding opcodes for optional com
 option(AVM_COMPACT_ATOM_INDICES "Use 16-bit atom indices (at most 65535 atoms)" OFF)
 option(AVM_DEFAULT_ATOMS_IN_RAM "Index default atoms in RAM instead of using the flash registry" ON)
 option(AVM_COMPACT_LABELS "Use 16-bit code offsets when the module fits" ON)
+option(AVM_USE_LABEL_TABLES "Use validated avmL chunks instead of scanning bytecode" ON)
 
 # JIT & execution of precompiled code
 if(NOT Erlang_VERSION VERSION_GREATER_EQUAL "28")

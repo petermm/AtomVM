@@ -90,6 +90,29 @@ In addition, data in the literals table (`LitT`) are uncompressed before inserti
 
 BEAM files may be padded at the end with a sequence of 1-3 null (`0x00`) characters, in order to align on 4-byte boundaries.
 
+#### Optional AtomVM label table (`avmL`)
+
+PackBEAM can optionally add an `avmL` chunk for retained bytecode with
+`--avm-labels`. It accelerates interpreter module loading; it is not required to
+execute ordinary BEAM files and does not replace native code in `avmN`.
+
+The payload starts with the bytecode offset of `int_code_end` (32 bits), flags
+(16 bits), and the number of label slots (16 bits). Flag bit 0 selects 32-bit
+offsets instead of 16-bit offsets; bit 1 selects big-endian instead of
+little-endian storage. The header and entries use the selected endianness. All
+other flag bits must be zero. The header is followed by exactly one offset per
+label slot, including slot zero. Offsets are relative to the first opcode in
+the Code chunk; a label points immediately after its definition. The current
+producer emits little-endian 32-bit tables by default and supports
+`--avm-label-width auto` for automatic width selection.
+
+The runtime uses tables only when the payload matches the host endianness and
+alignment, the Code label count, the selected runtime width policy, and the
+Code bounds and end instruction. Otherwise it scans bytecode normally. These
+checks do not prove that every entry is an instruction boundary: this is an
+accelerator for valid bytecode, not a bytecode verifier. The runtime does not
+recognize the experimental `LabT` chunk name; regenerate such archives.
+
 ```{note}
 The `module_name` field in the file header will only contain the "base" name of the BEAM file, i.e., the file name
 stripped of any path information.

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added optional compact atom indices and flash-backed default-atom lookup, while
   retaining wide atom indices and RAM default-atom indexing by default
+- Added optional `avmL` precomputed bytecode label tables, with validated runtime
+  use and scan fallback
 - Added `gen:start/5,6`, used by Elixir's `GenServer`
 - Added ML-KEM-768 (FIPS 203) key encapsulation to `crypto`, requiring libsodium >= 1.0.22
 - Added `AVM_STATIC_LIBSODIUM` CMake option to statically link libsodium

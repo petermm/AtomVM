@@ -1114,6 +1114,77 @@ static void module_add_label(Module *mod, int index, const uint8_t *ptr)
 }
 #endif
 
+#if !defined(AVM_NO_EMU) && !defined(AVM_NO_LABEL_TABLES)
+// avmL accelerates loading trusted bytecode. Check the storage contract and
+// target bounds; proving every instruction boundary would require a full scan.
+static bool module_validate_label_table(const uint8_t *beam, size_t size,
+    const unsigned long *offsets, const unsigned long *sizes, struct AvmLabelTableHeader *header)
+{
+    _Static_assert(sizeof(struct AvmLabelTableHeader) == 8, "avmL header must be eight bytes");
+    if (!offsets[CODE] || !offsets[AVML] || size < 12) {
+        return false;
+    }
+    uint32_t iff_size = READ_32_UNALIGNED(beam + 4);
+    if (iff_size < 4 || iff_size > size - 8) {
+        return false;
+    }
+    size = (size_t) iff_size + 8;
+    const size_t code_header_size = offsetof(CodeChunk, code) - IFF_SECTION_HEADER_SIZE;
+    if (offsets[CODE] > size || size - offsets[CODE] < IFF_SECTION_HEADER_SIZE
+        || sizes[CODE] <= code_header_size || sizes[CODE] > size - offsets[CODE] - IFF_SECTION_HEADER_SIZE
+        || offsets[AVML] > size || size - offsets[AVML] < IFF_SECTION_HEADER_SIZE
+        || sizes[AVML] < sizeof(*header) || sizes[AVML] > size - offsets[AVML] - IFF_SECTION_HEADER_SIZE) {
+        return false;
+    }
+
+    const CodeChunk *code = (const CodeChunk *) (beam + offsets[CODE]);
+    uint32_t num_labels = ENDIAN_SWAP_32(code->labels);
+    memcpy(header, beam + offsets[AVML] + IFF_SECTION_HEADER_SIZE, sizeof(*header));
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    const uint16_t endian_flag = AVML_FLAG_BIG_ENDIAN;
+#else
+    const uint16_t endian_flag = 0;
+#endif
+    if ((header->flags & ~(AVML_FLAG_32BIT | AVML_FLAG_BIG_ENDIAN))
+        || (header->flags & AVML_FLAG_BIG_ENDIAN) != endian_flag
+        || num_labels == 0 || header->num_labels != num_labels
+        || ENDIAN_SWAP_32(code->info_size) != 16 || ENDIAN_SWAP_32(code->version) != 0) {
+        return false;
+    }
+#ifdef AVM_NO_COMPACT_LABELS
+    if (!(header->flags & AVML_FLAG_32BIT)) {
+        return false;
+    }
+    const size_t entry_size = sizeof(uint32_t);
+#else
+    size_t entry_size = (header->flags & AVML_FLAG_32BIT) ? sizeof(uint32_t) : sizeof(uint16_t);
+#endif
+    const uint8_t *entries = beam + offsets[AVML] + IFF_SECTION_HEADER_SIZE + sizeof(*header);
+    if (sizes[AVML] != sizeof(*header) + num_labels * entry_size
+        || (uintptr_t) entries % entry_size != 0) {
+        return false;
+    }
+    size_t opcode_size = sizes[CODE] - code_header_size;
+    if (header->end_instruction_ii != opcode_size - 1
+        || code->code[header->end_instruction_ii] != OP_INT_CALL_END) {
+        return false;
+    }
+    for (uint32_t i = 0; i < num_labels; i++) {
+#ifdef AVM_NO_COMPACT_LABELS
+        uint32_t offset = ((const uint32_t *) entries)[i];
+#else
+        uint32_t offset = entry_size == sizeof(uint16_t)
+            ? ((const uint16_t *) entries)[i]
+            : ((const uint32_t *) entries)[i];
+#endif
+        if ((i == 0 && offset != 0) || offset > header->end_instruction_ii) {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
+
 Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary, unsigned long size)
 {
     uint8_t *beam_file = (void *) iff_binary;
@@ -1128,7 +1199,7 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     }
     uint32_t functions_count = READ_32_UNALIGNED(beam_file + offsets[IMPT] + 8);
 
-    // Keep the pointer table aligned after the (wide) atom indices. Labels remain
+    // Keep the pointer table aligned after the atom indices. Labels remain
     // separately allocated below, only when interpreter code is selected.
     size_t atoms_table_size = size_align_up_pow2(((size_t) atoms_count + 1) * sizeof(atom_index_t), sizeof(void *));
     size_t imported_funcs_size = (size_t) functions_count * sizeof(struct ExportedFunction *);
@@ -1234,17 +1305,29 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     if (mod->native_code == NULL) {
 #endif
 #ifndef AVM_NO_EMU
-        uint32_t num_labels = ENDIAN_SWAP_32(mod->code->labels);
-#ifndef AVM_NO_COMPACT_LABELS
-        mod->labels_is_u16 = ENDIAN_SWAP_32(mod->code->size) <= UINT16_MAX;
+#ifndef AVM_NO_LABEL_TABLES
+        struct AvmLabelTableHeader header;
+        if (module_validate_label_table(beam_file, size, offsets, sizes, &header)) {
+            mod->labels = beam_file + offsets[AVML] + IFF_SECTION_HEADER_SIZE + sizeof(header);
+            mod->labels_is_u16 = !(header.flags & AVML_FLAG_32BIT);
+            mod->labels_in_binary = 1;
+            mod->end_instruction_ii = header.end_instruction_ii;
+        } else {
 #endif
-        size_t label_size = mod->labels_is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
-        mod->labels = calloc(num_labels, label_size);
-        if (IS_NULL_PTR(mod->labels)) {
-            fprintf(stderr, "Error: Null module labels: %s:%i.\n", __FILE__, __LINE__);
-            module_destroy(mod);
-            return NULL;
+            uint32_t num_labels = ENDIAN_SWAP_32(mod->code->labels);
+#ifndef AVM_NO_COMPACT_LABELS
+            mod->labels_is_u16 = ENDIAN_SWAP_32(mod->code->size) <= UINT16_MAX;
+#endif
+            size_t label_size = mod->labels_is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
+            mod->labels = calloc(num_labels, label_size);
+            if (IS_NULL_PTR(mod->labels)) {
+                fprintf(stderr, "Error: Null module labels: %s:%i.\n", __FILE__, __LINE__);
+                module_destroy(mod);
+                return NULL;
+            }
+#ifndef AVM_NO_LABEL_TABLES
         }
+#endif
 #endif
 #if !defined(AVM_NO_JIT) && !defined(AVM_NO_EMU)
     }
@@ -1304,7 +1387,9 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     if (mod->native_code == NULL) {
 #endif
 #ifndef AVM_NO_EMU
-        mod->end_instruction_ii = parse_core_chunk(mod);
+        if (!mod->labels_in_binary) {
+            mod->end_instruction_ii = parse_core_chunk(mod);
+        }
 #endif
 #ifndef AVM_NO_JIT
     }
@@ -1320,7 +1405,9 @@ COLD_FUNC void module_destroy(Module *module)
     jit_debug_unregister_code(NULL, module);
 #endif
 
-    free(module->labels);
+    if (!module->labels_in_binary) {
+        free(module->labels);
+    }
     free(module->literals_table);
     if (module->free_literals_data) {
         free(module->literals_data);

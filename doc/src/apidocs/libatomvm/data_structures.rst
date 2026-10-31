@@ -19,6 +19,8 @@ Data Structures
    :allow-dot-graphs:
 .. doxygenstruct:: AtomTable
    :allow-dot-graphs:
+.. doxygenstruct:: AvmLabelTableHeader
+   :allow-dot-graphs:
 .. doxygenstruct:: AVMPackData
    :allow-dot-graphs:
 .. doxygenstruct:: CharDataToBytesAcc
@@ -98,8 +100,6 @@ Data Structures
 .. doxygenstruct:: Message
    :allow-dot-graphs:
 .. doxygenstruct:: Module
-   :allow-dot-graphs:
-.. doxygenstruct:: ModuleFilename
    :allow-dot-graphs:
 .. doxygenstruct:: ModuleFunction
    :allow-dot-graphs:

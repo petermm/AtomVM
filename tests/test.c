@@ -803,6 +803,45 @@ static void syntax_error(const char *name, const char *message)
     fprintf(stderr, "%s: syntax error\n%s\nTry %s -h for help\n", name, message, name);
 }
 
+#ifndef AVM_NO_JIT
+static void test_native_retained_code_labels(void)
+{
+    MappedFile *file = mapped_file_open_beam("test_catch_return_atom.beam");
+    assert(file);
+    unsigned long offsets[MAX_OFFS];
+    unsigned long sizes[MAX_SIZES];
+    scan_iff(file->mapped, file->size, offsets, sizes);
+    if (!offsets[AVMN]) {
+        mapped_file_close(file);
+        return;
+    }
+    // Retain a valid, unused Code chunk alongside native code. The final Code
+    // chunk wins scan_iff's lookup and must not cause interpreter-label RAM.
+    size_t original_size = (size_t) READ_32_UNALIGNED((const uint8_t *) file->mapped + 4) + 8;
+    size_t size = original_size + 32;
+    uint8_t *beam = calloc(1, size);
+    assert(beam);
+    memcpy(beam, file->mapped, original_size);
+    uint8_t *chunk = beam + original_size;
+    memcpy(chunk, "Code", 4);
+    WRITE_32_UNALIGNED(chunk + 4, 21);
+    WRITE_32_UNALIGNED(chunk + 8, 16);
+    WRITE_32_UNALIGNED(chunk + 16, 3);
+    WRITE_32_UNALIGNED(chunk + 20, 1);
+    chunk[28] = 3; // int_code_end, no functions
+    WRITE_32_UNALIGNED(beam + 4, (uint32_t) size - 8);
+    GlobalContext *global = globalcontext_new();
+    assert(global);
+    Module *mod = module_new_from_iff_binary(global, beam, size);
+    assert(mod && mod->code && mod->native_code);
+    assert(mod->labels == NULL && !mod->labels_in_binary);
+    module_destroy(mod);
+    globalcontext_destroy(global);
+    free(beam);
+    mapped_file_close(file);
+}
+#endif
+
 #ifndef AVM_COMPACT_ATOM_INDICES
 static void test_wide_atom_module(void)
 {
@@ -887,7 +926,7 @@ static uint8_t *make_label_test_module(size_t padding, size_t *size, uint32_t *e
     return beam;
 }
 
-static void check_label_test_module(uint8_t *beam, size_t size, uint32_t entry)
+static void check_label_test_module(uint8_t *beam, size_t size, uint32_t entry, bool uses_table)
 {
     GlobalContext *global = globalcontext_new();
     assert(global);
@@ -895,9 +934,19 @@ static void check_label_test_module(uint8_t *beam, size_t size, uint32_t entry)
     assert(mod);
     assert(module_get_label_address(mod, 2) == mod->code->code + entry);
     assert(module_label_code_offset(mod, 2) == entry);
+    assert(mod->labels_in_binary == uses_table);
+    assert(mod->end_instruction_ii == entry + 5);
     globalcontext_insert_module(global, mod);
     Context *ctx = context_new(global);
     assert(ctx);
+#ifndef AVM_NO_JIT
+    ctx->saved_module = mod;
+    ctx->saved_function_ptr = (NativeContinuation) (uintptr_t) 2;
+    ctx->cp = module_address(mod->module_index, 0);
+    context_process_code_server_resume_signal(ctx);
+    assert(ctx->saved_ip == mod->code->code + entry);
+    assert(ctx->cp == module_address(mod->module_index, entry + 5));
+#endif
     ctx->leader = 1;
     context_execute_loop(ctx, mod, "start", 0);
     assert(term_is_integer(ctx->x[0]) && term_to_int(ctx->x[0]) == 42);
@@ -910,12 +959,98 @@ static void test_relative_module_labels(void)
     size_t size;
     uint32_t entry;
     uint8_t *beam = make_label_test_module(0, &size, &entry);
-    check_label_test_module(beam, size, entry);
+    check_label_test_module(beam, size, entry, false);
     free(beam);
     beam = make_label_test_module(22000, &size, &entry);
     assert(entry > UINT16_MAX);
-    check_label_test_module(beam, size, entry);
+    check_label_test_module(beam, size, entry, false);
     free(beam);
+}
+
+static void test_avm_label_tables(void)
+{
+    // Test both entry widths, with a genuinely wide second label in pass 2.
+    for (int pass = 0; pass < 3; pass++) {
+        bool wide = pass != 0;
+        for (int variant = 0; variant < 11; variant++) {
+            size_t size;
+            uint32_t entry;
+            uint8_t *beam = make_label_test_module(pass == 2 ? 22000 : 0, &size, &entry);
+            size_t original_size = size;
+            struct AvmLabelTableHeader header = {
+                .end_instruction_ii = entry + 5,
+                .flags = wide ? AVML_FLAG_32BIT : 0,
+                .num_labels = 3
+            };
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+            header.flags |= AVML_FLAG_BIG_ENDIAN;
+#endif
+            uint32_t entries[] = { 0, 2, entry };
+            const char *tag = "avmL";
+            size_t payload_size = sizeof(header) + 3 * (wide ? sizeof(uint32_t) : sizeof(uint16_t));
+            switch (variant) {
+                case 1:
+                    header.flags |= 4;
+                    break; // Unknown format flags.
+                case 2:
+                    header.flags ^= AVML_FLAG_BIG_ENDIAN;
+                    break;
+                case 3:
+                    header.num_labels = 2;
+                    break;
+                case 4:
+                    header.end_instruction_ii = entry + 6;
+                    break; // Out of Code.
+                case 5:
+                    header.end_instruction_ii = entry + 3;
+                    break; // x0 operand is byte 3.
+                case 6:
+                    entries[2] = entry + 6;
+                    break;
+                case 7:
+                    entries[0] = 1;
+                    break;
+                case 8:
+                    payload_size--;
+                    break;
+                case 9:
+                    payload_size = 6;
+                    break; // Truncated header.
+                case 10:
+                    tag = "LabT";
+                    break; // Never accept the old namespace.
+            }
+            uint8_t payload[sizeof(header) + sizeof(entries)];
+            memcpy(payload, &header, sizeof(header));
+            for (size_t i = 0; i < 3; i++) {
+                if (wide) {
+                    memcpy(payload + sizeof(header) + i * sizeof(uint32_t), &entries[i], sizeof(uint32_t));
+                } else {
+                    uint16_t offset = (uint16_t) entries[i];
+                    memcpy(payload + sizeof(header) + i * sizeof(uint16_t), &offset, sizeof(uint16_t));
+                }
+            }
+            size = append_module_test_chunk(beam, size, tag, payload, payload_size);
+            WRITE_32_UNALIGNED(beam + 4, (uint32_t) size - 8);
+            bool uses_table = variant == 0;
+#ifdef AVM_NO_LABEL_TABLES
+            uses_table = false;
+#endif
+#ifdef AVM_NO_COMPACT_LABELS
+            if (!wide) {
+                uses_table = false;
+            }
+#endif
+            check_label_test_module(beam, size, entry, uses_table);
+            // Repeated load/use/destruction must neither free mapped entries
+            // nor retain pointers into the prior Module allocation.
+            if (variant == 0) {
+                check_label_test_module(beam, size, entry, uses_table);
+            }
+            assert(size > original_size);
+            free(beam);
+        }
+    }
 }
 
 static void test_module_line_boundaries(void)
@@ -963,6 +1098,7 @@ int main(int argc, char **argv)
 #ifndef AVM_NO_EMU
     test_module_line_boundaries();
     test_relative_module_labels();
+    test_avm_label_tables();
 #endif
     char *name = argv[0];
     time_t seed = time(NULL);
@@ -1049,6 +1185,9 @@ int main(int argc, char **argv)
 #endif
 
     if (!beam) {
+#ifndef AVM_NO_JIT
+        test_native_retained_code_labels();
+#endif
 #ifndef AVM_COMPACT_ATOM_INDICES
         test_wide_atom_module();
 #endif

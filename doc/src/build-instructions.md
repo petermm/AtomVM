@@ -160,6 +160,10 @@ atoms. The following CMake options can be selected independently:
 * `AVM_COMPACT_LABELS=ON` stores small modules' bytecode label offsets in 16 bits,
   with 32-bit fallback for larger Code chunks. This is the default. Set it to
   `OFF` to use 32-bit offsets for every interpreted module.
+* `AVM_USE_LABEL_TABLES=ON` accepts compatible `avmL` chunks without allocating
+  an interpreter label table or scanning bytecode at load time. This is the
+  default. Missing or incompatible tables fall back to ordinary scanning.
+  Set it to `OFF` to always scan retained bytecode.
 
 For example, configure the optional compact/flash profile with
 `-DAVM_COMPACT_ATOM_INDICES=ON -DAVM_DEFAULT_ATOMS_IN_RAM=OFF`.

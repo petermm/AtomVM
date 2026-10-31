@@ -15,5 +15,8 @@ MACROS
    :maxdepth: 3
 
 .. doxygendefine:: ATOM_STR
+.. doxygendefine:: AVML
+.. doxygendefine:: AVML_FLAG_32BIT
+.. doxygendefine:: AVML_FLAG_BIG_ENDIAN
 .. doxygendefine:: GET_LIST_ENTRY
 .. doxygendefine:: SELECT_INT_DEFAULT
