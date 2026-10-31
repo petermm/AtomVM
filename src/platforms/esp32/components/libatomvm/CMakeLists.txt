@@ -59,6 +59,16 @@ foreach(_option AVM_COMPACT_ATOM_INDICES)
     endif()
 endforeach()
 
+# An explicit CMake option overrides menuconfig. Projects without this Kconfig
+# symbol (such as the test firmware) retain the core's RAM default.
+if(NOT DEFINED AVM_DEFAULT_ATOMS_IN_RAM AND "CONFIG_AVM_DEFAULT_ATOMS_IN_RAM" IN_LIST CONFIGS_LIST)
+    if(CONFIG_AVM_DEFAULT_ATOMS_IN_RAM)
+        set(AVM_DEFAULT_ATOMS_IN_RAM ON)
+    else()
+        set(AVM_DEFAULT_ATOMS_IN_RAM OFF)
+    endif()
+endif()
+
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../libAtomVM" "libAtomVM")
 
 # Add directory with platform_atomic.h if we mean to use it

@@ -56,6 +56,12 @@ idf_component_register(
 target_compile_features(${COMPONENT_LIB} INTERFACE c_std_11)
 target_compile_definitions(${COMPONENT_LIB} PUBLIC ATOMVM_HAS_MBEDTLS)
 
+# Consume the core's public placement definition as well as its include paths.
+target_link_libraries(${COMPONENT_LIB} PRIVATE libAtomVM)
+include(GenDefaultAtoms)
+generate_defaultatoms(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/include/platform_defaultatoms.def"
+    "${CMAKE_CURRENT_BINARY_DIR}/platform_defaultatoms_tables.h" platform)
+
 idf_component_get_property(soc_dir soc COMPONENT_DIR)
 idf_component_get_property(soc_include_dirs soc INCLUDE_DIRS)
 idf_build_get_property(idf_target IDF_TARGET)

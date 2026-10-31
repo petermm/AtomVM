@@ -20,6 +20,7 @@ Functions
 .. doxygenfunction:: atom_string_data
 .. doxygenfunction:: atom_string_len
 .. doxygenfunction:: atom_string_to_c
+.. doxygenfunction:: atom_table_set_default_atoms
 .. doxygenfunction:: atom_write_mfa
 .. doxygenfunction:: avmpack_compute_size
 .. doxygenfunction:: avmpack_find_section_by_flag
@@ -61,6 +62,8 @@ Functions
 .. doxygenfunction:: context_stack_base
 .. doxygenfunction:: context_stack_size
 .. doxygenfunction:: context_update_flags
+.. doxygenfunction:: defaultatoms_get_atom_string
+.. doxygenfunction:: defaultatoms_lookup
 .. doxygenfunction:: debug_dump_context
 .. doxygenfunction:: debug_dump_heap
 .. doxygenfunction:: debug_dump_memory
@@ -172,6 +175,9 @@ Functions
 .. doxygenfunction:: module_resolve_function
 .. doxygenfunction:: module_search_exported_function
 .. doxygenfunction:: otp_socket_lwip_enqueue
+.. doxygenfunction:: platform_defaultatoms_count
+.. doxygenfunction:: platform_defaultatoms_get_atom_string
+.. doxygenfunction:: platform_defaultatoms_lookup
 .. doxygenfunction:: platform_nifs_get_nif
 .. doxygenfunction:: posix_errno_to_term
 .. doxygenfunction:: process_listener_handler

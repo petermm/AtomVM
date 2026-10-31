@@ -19,6 +19,7 @@
  */
 
 #include "atom_table.h"
+#include "defaultatoms.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -73,6 +74,7 @@ struct AtomTable
     size_t capacity;
     size_t count;
     size_t entries_capacity;
+    atom_index_t base_index;
 #ifndef AVM_NO_SMP
     RWLock *lock;
 #endif
@@ -102,6 +104,7 @@ struct AtomTable *atom_table_new(void)
     }
 
     htable->count = 0;
+    htable->base_index = 0;
     htable->capacity = DEFAULT_SIZE;
     htable->entries_capacity = DEFAULT_SIZE;
     htable->string_chunks = NULL;
@@ -111,6 +114,14 @@ struct AtomTable *atom_table_new(void)
 #endif
 
     return htable;
+}
+
+void atom_table_set_default_atoms(struct AtomTable *table, atom_index_t default_atoms_count)
+{
+    SMP_WRLOCK(table);
+    table->base_index = default_atoms_count;
+    table->count = default_atoms_count;
+    SMP_UNLOCK(table);
 }
 
 void atom_table_destroy(struct AtomTable *table)
@@ -190,6 +201,9 @@ static inline atom_index_t get_dynamic_index(
 
 const uint8_t *atom_table_get_atom_string(struct AtomTable *table, atom_index_t index, size_t *out_size)
 {
+    if (table->base_index > 0 && index < table->base_index) {
+        return defaultatoms_get_atom_string(index, out_size);
+    }
     SMP_RDLOCK(table);
 
     if (UNLIKELY(index >= table->count)) {
@@ -197,7 +211,7 @@ const uint8_t *atom_table_get_atom_string(struct AtomTable *table, atom_index_t 
         return NULL;
     }
 
-    const struct AtomEntry *entry = &table->entries[index];
+    const struct AtomEntry *entry = &table->entries[index - table->base_index];
     const uint8_t *result = entry->data;
     *out_size = entry->len;
 
@@ -255,10 +269,13 @@ atom_index_t atom_table_get_index(struct AtomTable *table, AtomString string)
     size_t len = atom_string_len(string);
     const uint8_t *data = atom_string_data(string);
     atom_index_t result = ATOM_TABLE_NOT_FOUND_MARKER;
+    if (table->base_index > 0 && defaultatoms_lookup(data, len, &result)) {
+        return result;
+    }
     SMP_RDLOCK(table);
     atom_index_t found = get_dynamic_index(table, data, len);
     if (found != ATOM_TABLE_NOT_FOUND_MARKER) {
-        result = found;
+        result = found + table->base_index;
     }
     SMP_UNLOCK(table);
     return result;
@@ -269,10 +286,13 @@ atom_index_t atom_table_get_index_from_cstring(struct AtomTable *table, const ch
     size_t len = strlen(name);
     const uint8_t *data = (const uint8_t *) name;
     atom_index_t result = ATOM_TABLE_NOT_FOUND_MARKER;
+    if (table->base_index > 0 && defaultatoms_lookup(data, len, &result)) {
+        return result;
+    }
     SMP_RDLOCK(table);
     atom_index_t found = get_dynamic_index(table, data, len);
     if (found != ATOM_TABLE_NOT_FOUND_MARKER) {
-        result = found;
+        result = found + table->base_index;
     }
     SMP_UNLOCK(table);
     return result;
@@ -281,8 +301,8 @@ atom_index_t atom_table_get_index_from_cstring(struct AtomTable *table, const ch
 // Doubling while small, then in steps: on a heap without PSRAM, a module
 // loaded late into a table of 2048 entries would need one block of 4096
 // entries (32 KB with compact indices on a 32-bit chip, 48 KB without) to
-// double it, more than a fragmented heap may have, and the load fails. A step
-// of 256 entries asks for the new size only.
+// double it, more than a fragmented heap may have, and the load fails. Steps
+// of 256 reduce that request, but realloc still needs contiguous storage.
 #define ATOM_TABLE_ENTRIES_STEP 256
 
 static bool ensure_entries_capacity(struct AtomTable *table, size_t needed)
@@ -322,7 +342,7 @@ static bool do_rehash(struct AtomTable *table, size_t new_capacity)
     table->buckets = new_buckets;
     table->capacity = new_capacity;
 
-    size_t dyn_count = table->count;
+    size_t dyn_count = table->count - table->base_index;
     for (size_t i = 0; i < dyn_count; i++) {
         unsigned long hash = sdbm_hash(table->entries[i].data, table->entries[i].len);
         unsigned long bucket_index = bucket_index_from_hash(table, hash);
@@ -336,7 +356,7 @@ static bool do_rehash(struct AtomTable *table, size_t new_capacity)
 
 static inline bool maybe_rehash(struct AtomTable *table, size_t new_entries)
 {
-    size_t new_count = table->count + new_entries;
+    size_t new_count = table->count - table->base_index + new_entries;
     size_t threshold = ATOM_TABLE_THRESHOLD(table->capacity);
     if (new_count <= threshold) {
         return false;
@@ -352,7 +372,7 @@ static inline bool maybe_rehash(struct AtomTable *table, size_t new_entries)
 static inline atom_index_t insert_entry(
     struct AtomTable *table, unsigned long bucket_index, const uint8_t *atom_data, size_t atom_len)
 {
-    size_t dyn_index = table->count;
+    size_t dyn_index = table->count - table->base_index;
     atom_index_t global_index = (atom_index_t) table->count;
     table->count++;
 
@@ -396,6 +416,12 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atom(
         return AtomTableEnsureAtomInvalidLen;
     }
 
+    atom_index_t default_idx;
+    if (table->base_index > 0 && defaultatoms_lookup(atom_data, atom_len, &default_idx)) {
+        *result = default_idx;
+        return AtomTableEnsureAtomOk;
+    }
+
     unsigned long hash = sdbm_hash(atom_data, atom_len);
     SMP_WRLOCK(table);
     unsigned long bucket_index = bucket_index_from_hash(table, hash);
@@ -403,7 +429,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atom(
     atom_index_t found_idx = get_dynamic_index_from_bucket(table, bucket_index, atom_data, atom_len);
     if (found_idx != ATOM_TABLE_NOT_FOUND_MARKER) {
         SMP_UNLOCK(table);
-        *result = found_idx;
+        *result = found_idx + table->base_index;
         return AtomTableEnsureAtomOk;
     }
     if (opts & AtomTableAlreadyExisting) {
@@ -416,7 +442,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atom(
         return AtomTableEnsureAtomAllocFail;
     }
 
-    if (!ensure_entries_capacity(table, table->count + 1)) {
+    if (!ensure_entries_capacity(table, table->count - table->base_index + 1)) {
         SMP_UNLOCK(table);
         return AtomTableEnsureAtomAllocFail;
     }
@@ -481,12 +507,17 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atoms(struct AtomTable *table, 
             atom_len = current_atom[0];
             current_atom++;
         }
-        atom_index_t found_idx = get_dynamic_index(table, current_atom, atom_len);
-        if (found_idx != ATOM_TABLE_NOT_FOUND_MARKER) {
-            translate_table[i] = found_idx;
+        atom_index_t default_idx;
+        if (table->base_index > 0 && defaultatoms_lookup(current_atom, atom_len, &default_idx)) {
+            translate_table[i] = default_idx;
         } else {
-            new_atoms_count++;
-            translate_table[i] = ATOM_TABLE_NOT_FOUND_MARKER;
+            atom_index_t found_idx = get_dynamic_index(table, current_atom, atom_len);
+            if (found_idx != ATOM_TABLE_NOT_FOUND_MARKER) {
+                translate_table[i] = found_idx + table->base_index;
+            } else {
+                new_atoms_count++;
+                translate_table[i] = ATOM_TABLE_NOT_FOUND_MARKER;
+            }
         }
         current_atom += atom_len;
     }
@@ -497,7 +528,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atoms(struct AtomTable *table, 
             return AtomTableEnsureAtomAllocFail;
         }
 
-        if (!ensure_entries_capacity(table, table->count + new_atoms_count)) {
+        if (!ensure_entries_capacity(table, table->count - table->base_index + new_atoms_count)) {
             SMP_UNLOCK(table);
             return AtomTableEnsureAtomAllocFail;
         }
@@ -522,7 +553,7 @@ enum AtomTableEnsureAtomResult atom_table_ensure_atoms(struct AtomTable *table, 
 
                 atom_index_t found_idx = get_dynamic_index_from_bucket(table, bucket_index, current_atom, atom_len);
                 if (found_idx != ATOM_TABLE_NOT_FOUND_MARKER) {
-                    translate_table[i] = found_idx;
+                    translate_table[i] = found_idx + table->base_index;
                 } else {
                     translate_table[i] = insert_entry(table, bucket_index, current_atom, atom_len);
                 }
