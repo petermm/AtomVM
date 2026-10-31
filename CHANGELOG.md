@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `r22` or `r23` compiler options
 
 ### Fixed
+- Fixed ESP32 CMake options taking effect only after a second configure
 - Fixed `socket:connect/2` (and so `ssl:connect` and `gen_tcp:connect` with
   `{inet_backend, socket}`) blocking the scheduler
   with BSD sockets (ESP32, generic_unix) while the peer did not answer: the connect is now
