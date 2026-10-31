@@ -246,7 +246,7 @@ _Static_assert(TERM_BOXED_REFERENCE_RESOURCE_SIZE <= TERM_BOXED_REFERENCE_MAX_SI
 
 #define TERM_DEBUG_ASSERT(...)
 
-#define TERM_FROM_ATOM_INDEX(atom_index) ((atom_index << TERM_IMMED2_TAG_SIZE) | TERM_IMMED2_ATOM)
+#define TERM_FROM_ATOM_INDEX(atom_index) (((term) (atom_index) << TERM_IMMED2_TAG_SIZE) | TERM_IMMED2_ATOM)
 
 // Local ref is at most 30 bytes:
 // 2^32-1 = 4294967295 (10 chars)
