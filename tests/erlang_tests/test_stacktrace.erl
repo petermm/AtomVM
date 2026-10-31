@@ -19,7 +19,7 @@
 %
 -module(test_stacktrace).
 
--export([start/0, maybe_crash/1]).
+-export([start/0, maybe_crash/1, metadata_fault/4]).
 -export([
     throw_with_file_and_line/0,
     throw_with_other_file_and_line/0,
@@ -42,7 +42,32 @@ start() ->
     ok = maybe_test_filelineno(),
     ok = maybe_test_filelineno_other_file(),
     ok = maybe_test_filelineno_large(),
+    ok = test_metadata_location(),
     0.
+
+% Unlike maybe_test_filelineno, missing source information must fail this test.
+% The fixed file/line below is independent of where this test is compiled.
+test_metadata_location() ->
+    try ?MODULE:metadata_fault(2.5, <<3, 4, 5>>, #{key => value}, key) of
+        _ -> fail
+    catch
+        error:{metadata_fault, 3.5, <<3, 4, 5>>, #{key := value, added := value}}:Stack ->
+            ok = expect_metadata_location(Stack),
+            try erlang:raise(error, reraised_metadata, Stack) of
+                _ -> fail
+            catch
+                error:reraised_metadata:Reraised ->
+                    ok = expect_metadata_location(Reraised)
+            end
+    end.
+
+expect_metadata_location([{?MODULE, metadata_fault, 4, Info} | _]) ->
+    "module_metadata.erl" = normalize_filename(get_value(file, Info)),
+    1007 = get_value(line, Info),
+    ok.
+
+normalize_filename(File) when is_binary(File) -> binary_to_list(File);
+normalize_filename(File) when is_list(File) -> File.
 
 test_local_throw() ->
     ok =
@@ -343,3 +368,12 @@ find(H, [H | T]) ->
     T;
 find(H, [_ | T]) ->
     find(H, T).
+
+-file("module_metadata.erl", 1000).
+metadata_fault(Float, Bin, Map, Key) ->
+    Sum = Float + 1.0,
+    <<Size:8, Rest/binary>> = Bin,
+    #{Key := Value} = Map,
+    Updated = Map#{added => Value},
+    Built = <<Size:8, Rest/binary>>,
+    erlang:error({metadata_fault, Sum, Built, Updated}).

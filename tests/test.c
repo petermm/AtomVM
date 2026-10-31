@@ -803,8 +803,52 @@ static void syntax_error(const char *name, const char *message)
     fprintf(stderr, "%s: syntax error\n%s\nTry %s -h for help\n", name, message, name);
 }
 
+#ifndef AVM_NO_EMU
+static void test_module_line_boundaries(void)
+{
+    // line 0; move 1,x0; line 1; move 2,x0; line 0; line 2; end.
+    // OP_LINE offsets are the operand byte, not the opcode byte.
+    static const uint8_t instructions[] = {
+        153, 0, 64, 0x11, 3, 153, 0x10, 64, 0x21, 3, 153, 0, 153, 0x20, 3
+    };
+    static const uint8_t refs[] = { 0x09, 44, 0x09, 55 };
+    CodeChunk *code = malloc(sizeof(CodeChunk) + sizeof(instructions));
+    assert(code);
+    memcpy(code->code, instructions, sizeof(instructions));
+    Module mod = {
+        .code = code,
+        .line_refs_count = 2,
+        .line_refs_table = refs
+    };
+    uint32_t line = 0;
+    size_t filename_len = 0;
+    const uint8_t *filename = NULL;
+    assert(!module_find_line(&mod, 0, &line, &filename_len, &filename));
+    assert(!module_find_line(&mod, 1, &line, &filename_len, &filename));
+    assert(!module_find_line(&mod, 5, &line, &filename_len, &filename));
+    assert(module_find_line(&mod, 6, &line, &filename_len, &filename));
+    assert(line == 44 && filename_len == 0 && filename == NULL);
+    assert(module_find_line(&mod, 7, &line, &filename_len, NULL));
+    assert(line == 44);
+    assert(module_find_line(&mod, 11, &line, &filename_len, NULL));
+    assert(line == 44); // A zero reference must not erase the preceding location.
+    assert(module_find_line(&mod, 12, &line, &filename_len, NULL));
+    assert(line == 44);
+    assert(module_find_line(&mod, 13, &line, &filename_len, NULL));
+    assert(line == 55);
+    assert(module_find_line(&mod, sizeof(instructions), &line, &filename_len, NULL));
+    assert(line == 55);
+    mod.line_refs_table = NULL;
+    assert(!module_find_line(&mod, 13, &line, &filename_len, NULL));
+    free(code);
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#ifndef AVM_NO_EMU
+    test_module_line_boundaries();
+#endif
     char *name = argv[0];
     time_t seed = time(NULL);
     fprintf(stderr, "Seed is %li\n", (long int) seed);

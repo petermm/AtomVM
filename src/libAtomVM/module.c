@@ -31,7 +31,6 @@
 #include "globalcontext.h"
 #include "iff.h"
 #include "jit.h"
-#include "list.h"
 #include "nifs.h"
 #include "smp.h"
 #include "sys.h"
@@ -104,12 +103,6 @@ static void module_add_label(Module *mod, int index, const uint8_t *ptr);
 #endif
 static enum ModuleLoadResult module_build_imported_functions_table(Module *this_module, uint8_t *table_data, GlobalContext *glb);
 static void module_parse_line_table(Module *mod, const uint8_t *data, size_t len);
-
-struct LineRefOffset
-{
-    struct ListHead head;
-    unsigned int offset;
-};
 
 #ifdef ENABLE_TRACE
 typedef struct
@@ -481,6 +474,21 @@ static size_t decode_nbits_integer(Context *ctx, const uint8_t *encoded, term *o
 }
 
 // About X macro: https://en.wikipedia.org/wiki/X_macro
+#define X_OPCODE(op_name, num, lower_name, signature) op_name = num,
+#define X_OPCODE_HANDLER(op_name, num, lower_name, signature) op_name = num,
+#define X_OPCODE_REMOVED(op_name, num, lower_name) op_name = num,
+#define X_OPCODE_SKIP(...)
+
+enum beam_opcodes
+{
+#include "opcodes.def"
+};
+
+#undef X_OPCODE
+#undef X_OPCODE_HANDLER
+#undef X_OPCODE_REMOVED
+#undef X_OPCODE_SKIP
+
 #define X_OPCODE(op_name, num, lower_name, signature) \
     signature,
 
@@ -531,14 +539,13 @@ static const char *const opcode_names[] = {
 
 #endif /* ENABLE_TRACE */
 
-typedef void (*label_opcode_handler_t)(Module *mod, struct ListHead *line_refs,
+typedef void (*label_opcode_handler_t)(Module *mod,
     const uint8_t **current_pc, int arg_index, uint32_t u32_arg);
 
-static void handle_fmove_opcode(Module *mod, struct ListHead *line_refs, const uint8_t **current_pc,
+static void handle_fmove_opcode(Module *mod, const uint8_t **current_pc,
     int arg_index, uint32_t u32_arg)
 {
     UNUSED(mod);
-    UNUSED(line_refs);
     UNUSED(arg_index);
     UNUSED(u32_arg);
 
@@ -561,11 +568,10 @@ static void handle_fmove_opcode(Module *mod, struct ListHead *line_refs, const u
     *current_pc = pc;
 }
 
-static void handle_bs_match_opcode(Module *mod, struct ListHead *line_refs,
+static void handle_bs_match_opcode(Module *mod,
     const uint8_t **current_pc, int arg_index, uint32_t u32_arg)
 {
     UNUSED(mod);
-    UNUSED(line_refs);
     UNUSED(u32_arg);
 
     if (arg_index != 2) {
@@ -651,28 +657,26 @@ static void handle_bs_match_opcode(Module *mod, struct ListHead *line_refs,
     *current_pc = pc;
 }
 
-static void handle_label_opcode(Module *mod, struct ListHead *line_refs, const uint8_t **current_pc,
+static void handle_label_opcode(Module *mod, const uint8_t **current_pc,
     int arg_index, uint32_t u32_arg)
 {
-    UNUSED(line_refs);
     UNUSED(arg_index);
 
     module_add_label(mod, u32_arg, *current_pc);
 }
 
-static void handle_line_opcode(Module *mod, struct ListHead *line_refs, const uint8_t **current_pc,
+static void handle_line_opcode(Module *mod, const uint8_t **current_pc,
     int arg_index, uint32_t u32_arg)
 {
+    UNUSED(mod);
     UNUSED(arg_index);
     UNUSED(u32_arg);
 
     const uint8_t *pc = *current_pc;
-    unsigned int offset = pc - mod->code->code;
     uint32_t line_ref;
     DECODE_LITERAL(line_ref, pc);
+    UNUSED(line_ref);
     *current_pc = pc;
-
-    module_insert_line_ref_offset(mod, line_refs, line_ref, offset);
 }
 
 #define X_OPCODE(op_name, num, lower_name, signature) \
@@ -697,7 +701,7 @@ static label_opcode_handler_t const opcode_handlers[] = {
 #undef X_OPCODE_REMOVED
 #undef X_OPCODE_SKIP
 
-static int parse_core_chunk(Module *mod, struct ListHead *line_refs)
+static int parse_core_chunk(Module *mod)
 {
     TRACE("-- Loading code\n");
     SMP_MODULE_LOCK(mod);
@@ -864,7 +868,7 @@ static int parse_core_chunk(Module *mod, struct ListHead *line_refs)
 
             label_opcode_handler_t opcode_handler = opcode_handlers[opcode];
             if (opcode_handler) {
-                opcode_handler(mod, line_refs, &pc, arg_index, u32_arg);
+                opcode_handler(mod, &pc, arg_index, u32_arg);
             }
 
             arg_index++;
@@ -1278,43 +1282,7 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     if (mod->native_code == NULL) {
 #endif
 #ifndef AVM_NO_EMU
-        struct ListHead line_refs;
-        list_init(&line_refs);
-        mod->end_instruction_ii = parse_core_chunk(mod, &line_refs);
-
-        // Create the list of offsets if the module has line informations.
-        if (mod->line_refs_table != NULL) {
-            // Compute the size of the list
-            size_t num_offsets = 0;
-            struct ListHead *item = line_refs.next;
-            while (item != &line_refs) {
-                num_offsets++;
-                item = item->next;
-            }
-            if (num_offsets > 0) {
-                mod->line_refs_offsets = malloc(num_offsets * sizeof(unsigned int));
-                if (IS_NULL_PTR(mod->line_refs_offsets)) {
-                    fprintf(stderr, "Warning: Unable to allocate space for line refs offset, module has %zu offsets.  Line information in stacktraces may be missing\n", num_offsets);
-                } else {
-                    size_t index = 0;
-                    item = line_refs.next;
-                    while (item != &line_refs) {
-                        struct LineRefOffset *offset = CONTAINER_OF(item, struct LineRefOffset, head);
-                        mod->line_refs_offsets[index] = offset->offset;
-                        index++;
-                        item = item->next;
-                    }
-                    mod->line_refs_offsets_count = num_offsets;
-                }
-            }
-        }
-        // Empty the list
-        while (!list_is_empty(&line_refs)) {
-            struct ListHead *item = line_refs.next;
-            list_remove(item);
-            struct LineRefOffset *previous_ref_offset = GET_LIST_ENTRY(item, struct LineRefOffset, head);
-            free(previous_ref_offset);
-        }
+        mod->end_instruction_ii = parse_core_chunk(mod);
 #endif
 #ifndef AVM_NO_JIT
     }
@@ -1332,7 +1300,6 @@ COLD_FUNC void module_destroy(Module *module)
 
     free(module->labels);
     free(module->literals_table);
-    free(module->line_refs_offsets);
     if (module->free_literals_data) {
         free(module->literals_data);
     }
@@ -2001,31 +1968,6 @@ static void module_parse_line_table(Module *mod, const uint8_t *data, size_t len
     }
 }
 
-void module_insert_line_ref_offset(Module *mod, struct ListHead *line_refs, uint32_t line_ref, int offset)
-{
-    if (IS_NULL_PTR(mod->line_refs_table) || line_ref == 0) {
-        return;
-    }
-    struct LineRefOffset *ref_offset = malloc(sizeof(struct LineRefOffset));
-    if (IS_NULL_PTR(ref_offset)) {
-        size_t num_refs = 0;
-        // Empty the list
-        while (!list_is_empty(line_refs)) {
-            struct ListHead *item = line_refs->next;
-            list_remove(item);
-            struct LineRefOffset *previous_ref_offset = GET_LIST_ENTRY(item, struct LineRefOffset, head);
-            free(previous_ref_offset);
-            num_refs++;
-        }
-        fprintf(stderr, "Warning: Unable to allocate space for an additional line ref offset (we had %zu).  Line information in stacktraces may be missing\n", num_refs);
-        // Give up having line numbers for this module.
-        mod->line_refs_table = NULL;
-        return;
-    }
-    ref_offset->offset = offset;
-    list_append(line_refs, &ref_offset->head);
-}
-
 static bool module_find_line_ref(Module *mod, uint16_t line_ref, uint32_t *line, size_t *filename_len, const uint8_t **filename)
 {
     uint16_t location_ix;
@@ -2035,11 +1977,179 @@ static bool module_find_line_ref(Module *mod, uint16_t line_ref, uint32_t *line,
     return module_get_location(mod, location_ix, filename_len, filename);
 }
 
+#ifndef AVM_NO_EMU
+// Walk the same operand signatures as the loader, without populating labels or
+// allocating line metadata. Offsets refer to the operand following OP_LINE.
+COLD_FUNC static bool module_find_line_ref_by_scan(Module *mod, size_t target_offset, uint32_t *out_line_ref)
+{
+    if (IS_NULL_PTR(mod->line_refs_table) || mod->line_refs_count == 0) {
+        return false;
+    }
+
+    const uint8_t *code = mod->code->code;
+    const uint8_t *pc = code;
+    uint32_t last_line_ref = 0;
+    bool has_line_ref = false;
+
+    while (1) {
+        uint8_t opcode = *pc++;
+        if (UNLIKELY(opcode >= OPCODE_SIGNATURES_LEN || opcode_signatures[opcode] == NULL)) {
+            return false;
+        }
+        const char *signature = opcode_signatures[opcode];
+
+        if (opcode == OP_LINE) {
+            size_t ref_offset = pc - code;
+            if (target_offset < ref_offset) {
+                break;
+            }
+            uint32_t line_ref;
+            DECODE_LITERAL(line_ref, pc);
+            // Match the loader's treatment of undefined line references: these
+            // do not replace a preceding source location.
+            if (line_ref != 0) {
+                last_line_ref = line_ref;
+                has_line_ref = true;
+            }
+            if (target_offset == ref_offset) {
+                break;
+            }
+            continue;
+        }
+
+        int arg_index = 0;
+        int list_remaining = 0;
+        int loop_start = 0;
+        while (signature[arg_index]) {
+            switch (signature[arg_index]) {
+                case '[': {
+                    DECODE_EXTENDED_LIST_TAG(pc);
+                    DECODE_LITERAL(list_remaining, pc);
+                    arg_index++;
+                    loop_start = arg_index;
+                    int body_len = 0;
+                    while (signature[arg_index + body_len] != ']') {
+                        body_len++;
+                    }
+                    if (list_remaining == 0) {
+                        arg_index += body_len + 1;
+                    }
+                    continue;
+                }
+                case ']': {
+                    if (list_remaining > 0) {
+                        arg_index = loop_start;
+                    } else {
+                        arg_index++;
+                    }
+                    continue;
+                }
+                case 's':
+                case 'c': {
+                    term t;
+                    DECODE_COMPACT_TERM(t, pc);
+                    UNUSED(t);
+                    break;
+                }
+                case 'd':
+                case 'S': {
+                    DEST_REGISTER(dreg);
+                    DECODE_DEST_REGISTER(dreg, pc);
+                    break;
+                }
+                case 'x': {
+                    uint32_t reg;
+                    DECODE_XREG(reg, pc);
+                    UNUSED(reg);
+                    break;
+                }
+                case 'y': {
+                    uint32_t reg;
+                    DECODE_YREG(reg, pc);
+                    UNUSED(reg);
+                    break;
+                }
+                case 'a': {
+                    term atom;
+                    DECODE_ATOM(atom, pc);
+                    UNUSED(atom);
+                    break;
+                }
+                case 'j':
+                case 'f': {
+                    uint32_t label;
+                    DECODE_LABEL(label, pc);
+                    UNUSED(label);
+                    break;
+                }
+                case 'm': {
+                    term atom;
+                    uint32_t label = 0;
+                    DECODE_ATOM_OR_LABEL(atom, label, pc);
+                    UNUSED(atom);
+                    UNUSED(label);
+                    break;
+                }
+                case 't':
+                case 'I':
+                case 'A':
+                case 'P':
+                case 'Q':
+                case 'e':
+                case 'b':
+                case 'F': {
+                    uint32_t arg;
+                    DECODE_LITERAL(arg, pc);
+                    UNUSED(arg);
+                    break;
+                }
+                case 'l': {
+                    uint32_t reg;
+                    DECODE_FP_REGISTER(reg, pc);
+                    UNUSED(reg);
+                    break;
+                }
+                case 'z': {
+                    uint32_t need;
+                    DECODE_ALLOCATOR_LIST(need, pc);
+                    UNUSED(need);
+                    break;
+                }
+                case '$': {
+                    if (has_line_ref) {
+                        *out_line_ref = last_line_ref;
+                    }
+                    return has_line_ref;
+                }
+                case '-': {
+                    if (opcode == OP_FMOVE) {
+                        handle_fmove_opcode(mod, &pc, arg_index, 0);
+                    }
+                    break;
+                }
+                default:
+                    return false;
+            }
+            list_remaining--;
+            if (opcode == OP_BS_MATCH) {
+                handle_bs_match_opcode(mod, &pc, arg_index, 0);
+            }
+            arg_index++;
+        }
+    }
+
+    if (has_line_ref) {
+        *out_line_ref = last_line_ref;
+    }
+    return has_line_ref;
+}
+#endif
+
 bool module_find_line(Module *mod, size_t offset, uint32_t *line, size_t *filename_len, const uint8_t **filename)
 {
-    size_t i;
 #ifndef AVM_NO_JIT
     if (mod->native_code) {
+        size_t i;
 #ifdef JIT_JUMPTABLE_IS_DATA
         // WASM: lines data is stored in the JITWasmHeader metadata.
         // Both line offsets and query offsets use label * JTE_SIZE format.
@@ -2109,30 +2219,10 @@ bool module_find_line(Module *mod, size_t offset, uint32_t *line, size_t *filena
 #endif
 #ifndef AVM_NO_EMU
         uint32_t line_ref;
-        unsigned int ref_offset;
-        const uint8_t *ref_pc;
-        if (IS_NULL_PTR(mod->line_refs_offsets) || UNLIKELY(mod->line_refs_offsets_count == 0)) {
+        if (!module_find_line_ref_by_scan(mod, offset, &line_ref)) {
             return false;
         }
-        for (i = 0; i < mod->line_refs_offsets_count; i++) {
-            ref_offset = mod->line_refs_offsets[i];
-            if (offset == ref_offset) {
-                ref_pc = &mod->code->code[ref_offset];
-                DECODE_LITERAL(line_ref, ref_pc);
-                return module_find_line_ref(mod, line_ref, line, filename_len, filename);
-            } else if (i == 0 && offset < ref_offset) {
-                return false;
-            } else if (offset < ref_offset) {
-                ref_offset = mod->line_refs_offsets[i - 1];
-                ref_pc = &mod->code->code[ref_offset];
-                DECODE_LITERAL(line_ref, ref_pc);
-                return module_find_line_ref(mod, line_ref, line, filename_len, filename);
-            }
-        }
-        ref_offset = mod->line_refs_offsets[i - 1];
-        ref_pc = &mod->code->code[ref_offset];
-        DECODE_LITERAL(line_ref, ref_pc);
-        return module_find_line_ref(mod, line_ref, line, filename_len, filename);
+        return module_find_line_ref(mod, (uint16_t) line_ref, line, filename_len, filename);
 #endif
 #ifndef AVM_NO_JIT
     }

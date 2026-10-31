@@ -121,9 +121,6 @@ struct Module
     ModuleNativeEntryPoint native_code;
 #endif
 
-    unsigned int *line_refs_offsets;
-    size_t line_refs_offsets_count;
-
     const struct ExportedFunction **imported_funcs;
 
     const uint8_t **labels;
@@ -421,28 +418,11 @@ bool module_get_function_from_label(Module *this_module, int label, atom_index_t
 ModuleNativeEntryPoint module_get_native_entry_point(Module *module, int exported_label);
 
 /*
- * @brief Insert the instruction offset for a given module at a line reference instruction.
- *
- * @details This function is used when loading a module.  When a line instruction is
- * scanned, this function is used to record the instruction offset at which the line
- * instruction occurred.
- *
- * Note that if the module (BEAM file) does not contain a Line chunk, then this function
- * is a no-op.
- *
- * @param mod the module
- * @param line_refs the list of line references to append to
- * @param line_ref the line reference (index)
- * @param offset the instruction offset at which the line instruction occurred.
- */
-void module_insert_line_ref_offset(Module *mod, struct ListHead *line_refs, uint32_t line_ref, int offset);
-
-/*
  * @brief Find the latest line reference (index) before or at which the instruction offset
  * occurs.
  *
- * @details This function searches for the most recent line instruction scanned during
- * code loading at or before the specified instruction offset.  This function is used to
+ * @details This function scans bytecode on demand for the most recent line instruction
+ * at or before the specified instruction offset. This function is used to
  * locate the line number from a continuation pointer in a stack trace.
  *
  * @param mod the module
