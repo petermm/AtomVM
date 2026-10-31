@@ -145,6 +145,10 @@ option(AVM_DEFAULT_ATOMS_IN_RAM "Index default atoms in RAM instead of using the
 target_compile_definitions(libAtomVM PUBLIC AVM_DEFAULT_ATOMS_IN_RAM=$<BOOL:${AVM_DEFAULT_ATOMS_IN_RAM}>)
 
 option(AVM_COMPACT_ATOM_INDICES "Use 16-bit atom indices (at most 65535 atoms)" OFF)
+option(AVM_COMPACT_LABELS "Use 16-bit code offsets when the module fits" ON)
+if(NOT AVM_COMPACT_LABELS)
+    target_compile_definitions(libAtomVM PUBLIC AVM_NO_COMPACT_LABELS)
+endif()
 
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_compile_options(libAtomVM PUBLIC -Wall ${MAYBE_PEDANTIC_FLAG} ${MAYBE_WERROR_FLAG} -Wextra -ggdb -Werror=incompatible-pointer-types)

@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `network:eth_status/0`
 
 ### Changed
+- Reduced module metadata allocations, stored literal and bytecode label offsets
+  compactly with 32-bit fallback, and resolved source locations on demand
 - Stored dynamic atoms in flat indexed entries with stepped growth and pooled
   storage for copied atom strings
 - Stopped CI testing on FreeBSD 13, which has reached end of life.
