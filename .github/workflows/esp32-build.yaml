@@ -52,8 +52,14 @@ jobs:
          - 'v5.4.4'
          - 'v5.5.5'
         jit: [false]
+        compact-atoms: [false]
 
         include:
+        # Keep the default ESP32 build and add compact/flash atom coverage.
+        - esp-idf-target: "esp32"
+          idf-version: 'v5.5.5'
+          jit: false
+          compact-atoms: true
         - esp-idf-target: "esp32p4"
           idf-version: 'v5.4.4'
           jit: false
@@ -90,9 +96,27 @@ jobs:
           idf-version: 'v5.5.5'
           jit: true
 
+    env:
+      ATOM_CMAKE_OPTS: ${{ matrix.compact-atoms && format('-DAVM_COMPACT_ATOM_INDICES=ON -DAVM_DEFAULT_ATOMS_IN_RAM=OFF -DAVM_USE_LABEL_TABLES=ON -DAVM_GENERATE_LABEL_TABLES=ON -DPACKBEAM_PATH={0}/packbeam', github.workspace) || '' }}
+
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
+
+    - name: Checkout avmL-capable PackBEAM
+      if: matrix.compact-atoms
+      uses: actions/checkout@v4
+      with:
+        repository: petermm/atomvm_packbeam
+        ref: avml
+        path: packbeam
+        persist-credentials: false
+
+    - name: Configure compact atoms and flash-backed defaults
+      if: matrix.compact-atoms
+      working-directory: ./src/platforms/esp32/
+      run: |
+        printf '%s\n' 'CONFIG_AVM_COMPACT_ATOM_INDICES=y' 'CONFIG_AVM_DEFAULT_ATOMS_IN_RAM=n' >> sdkconfig.defaults.in
 
     - name: "Git config safe.directory for codeql"
       run: git config --global --add safe.directory /__w/AtomVM/AtomVM
@@ -262,8 +286,19 @@ jobs:
         fi
         . $IDF_PATH/export.sh
         export IDF_TARGET=${{matrix.esp-idf-target}}
-        idf.py set-target ${{matrix.esp-idf-target}}
-        idf.py build
+        idf.py ${ATOM_CMAKE_OPTS} set-target ${{matrix.esp-idf-target}}
+        idf.py ${ATOM_CMAKE_OPTS} build
+
+    - name: Check generated test archive contains avmL
+      if: matrix.compact-atoms
+      working-directory: ./src/platforms/esp32/test/build/esp-idf/main/test_erl_sources/
+      run: |
+        mkdir label-check
+        ./HostAtomVM-prefix/src/HostAtomVM-build/tools/packbeam/packbeam extract -o label-check esp32_test_modules.avm test_crypto.beam
+        erl -noshell -eval '
+          {ok, _, Chunks} = beam_lib:all_chunks("label-check/test_crypto.beam"),
+          true = lists:keymember("avmL", 1, Chunks),
+          halt().'
 
     - name: Run ESP32 tests using qemu with memory checks build
       # TODO: remove the following exclusion when ESP32P4 support is added to espressif/qemu
@@ -283,7 +318,7 @@ jobs:
       if: failure() && matrix.esp-idf-target != 'esp32p4'
       uses: actions/upload-artifact@v4
       with:
-        name: atomvm-esp32-test-${{ matrix.esp-idf-target }}-${{ matrix.idf-version }}${{ matrix.jit && '-jit' || '' }}-memcheck.elf
+        name: atomvm-esp32-test-${{ matrix.esp-idf-target }}-${{ matrix.idf-version }}${{ matrix.jit && '-jit' || '' }}${{ matrix.compact-atoms && '-compact-atoms' || '' }}-memcheck.elf
         path: ./src/platforms/esp32/test/build/atomvm-esp32-test.elf
         if-no-files-found: error
 
@@ -300,8 +335,8 @@ jobs:
         if [ "${{ matrix.jit }}" = "true" ]; then
           echo "CONFIG_JIT_ENABLED=y" >> sdkconfig.defaults
         fi
-        idf.py set-target ${{matrix.esp-idf-target}}
-        idf.py build
+        idf.py ${ATOM_CMAKE_OPTS} set-target ${{matrix.esp-idf-target}}
+        idf.py ${ATOM_CMAKE_OPTS} build
 
     - name: Run ESP32 tests using qemu
       # TODO: remove the following exclusion when ESP32P4 support is added to espressif/qemu
@@ -320,6 +355,6 @@ jobs:
       if: failure() && matrix.esp-idf-target != 'esp32p4'
       uses: actions/upload-artifact@v4
       with:
-        name: atomvm-esp32-test-${{ matrix.esp-idf-target }}-${{ matrix.idf-version }}${{ matrix.jit && '-jit' || '' }}.elf
+        name: atomvm-esp32-test-${{ matrix.esp-idf-target }}-${{ matrix.idf-version }}${{ matrix.jit && '-jit' || '' }}${{ matrix.compact-atoms && '-compact-atoms' || '' }}.elf
         path: ./src/platforms/esp32/test/build/atomvm-esp32-test.elf
         if-no-files-found: error

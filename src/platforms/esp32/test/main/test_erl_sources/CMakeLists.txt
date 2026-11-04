@@ -52,9 +52,16 @@ endif()
 ExternalProject_Add(HostAtomVM
     SOURCE_DIR ../../../../../../../../
     CMAKE_ARGS ${host_atomvm_cmake_args}
+        -DAVM_GENERATE_LABEL_TABLES:BOOL=${AVM_GENERATE_LABEL_TABLES}
+        "-DPACKBEAM_PATH:PATH=${PACKBEAM_PATH}"
     INSTALL_COMMAND cmake -E echo "Skipping install step."
     BUILD_COMMAND cmake --build . --target=atomvmlib-esp32 ${host_atomvm_extra_targets} --target=PackBEAM
 )
+
+set(AVM_PACKBEAM_LABEL_ARGS "")
+if(AVM_GENERATE_LABEL_TABLES)
+    set(AVM_PACKBEAM_LABEL_ARGS --avm-labels)
+endif()
 
 macro(jit_precompile module_name)
     if(NOT AVM_DISABLE_JIT)
@@ -183,7 +190,7 @@ endif()
 
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/esp32_test_modules.avm"
-    COMMAND HostAtomVM-prefix/src/HostAtomVM-build/tools/packbeam/packbeam create esp32_test_modules.avm
+    COMMAND HostAtomVM-prefix/src/HostAtomVM-build/tools/packbeam/packbeam create ${AVM_PACKBEAM_LABEL_ARGS} esp32_test_modules.avm
         ${atomvmlib_avm}
         ${erlang_test_beams_to_package}
     DEPENDS
