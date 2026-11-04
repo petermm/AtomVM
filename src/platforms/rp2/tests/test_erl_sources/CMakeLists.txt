@@ -30,8 +30,15 @@ ExternalProject_Add(HostAtomVM
     SOURCE_DIR ../../../../../../
     INSTALL_COMMAND cmake -E echo "Skipping install step."
     CMAKE_ARGS -DAVM_DISABLE_JIT=${AVM_DISABLE_JIT}
+        -DAVM_GENERATE_LABEL_TABLES:BOOL=${AVM_GENERATE_LABEL_TABLES}
+        "-DPACKBEAM_PATH:PATH=${PACKBEAM_PATH}"
     BUILD_COMMAND cmake --build . --target=atomvmlib-rp2 ${host_atomvm_jit_target} --target=PackBEAM --target=UF2Tool
 )
+
+set(AVM_PACKBEAM_LABEL_ARGS "")
+if(AVM_GENERATE_LABEL_TABLES)
+    set(AVM_PACKBEAM_LABEL_ARGS --avm-labels)
+endif()
 
 macro(jit_precompile module_name)
     if(NOT AVM_DISABLE_JIT)
@@ -75,7 +82,7 @@ endif()
 
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rp2_test_modules.avm"
-    COMMAND HostAtomVM-prefix/src/HostAtomVM-build/tools/packbeam/packbeam create rp2_test_modules.avm
+    COMMAND HostAtomVM-prefix/src/HostAtomVM-build/tools/packbeam/packbeam create ${AVM_PACKBEAM_LABEL_ARGS} rp2_test_modules.avm
         HostAtomVM-prefix/src/HostAtomVM-build/libs/${atomvlib_name}
         ${erlang_test_beams}
     DEPENDS
