@@ -190,6 +190,22 @@ jobs:
           cxx: "c++"
           cmake_opts_other: "-DAVM_MINIMAL_OPCODES=ON -DAVM_WARNINGS_ARE_ERRORS=ON"
 
+        # Compact/flash atoms with generated avmL tables enabled
+        - cc: "cc"
+          cxx: "c++"
+          cmake_opts_other: "-DAVM_COMPACT_ATOM_INDICES=ON -DAVM_DEFAULT_ATOMS_IN_RAM=OFF -DAVM_GENERATE_LABEL_TABLES=ON -DAVM_USE_LABEL_TABLES=ON -DPACKBEAM_PATH=${GITHUB_WORKSPACE}/packbeam"
+
+        # Generated avmL tables ignored in favor of wide-label bytecode scanning
+        - cc: "cc"
+          cxx: "c++"
+          cmake_opts_other: "-DAVM_COMPACT_LABELS=OFF -DAVM_GENERATE_LABEL_TABLES=ON -DAVM_USE_LABEL_TABLES=OFF -DPACKBEAM_PATH=${GITHUB_WORKSPACE}/packbeam"
+
+        # Compact atoms and flash-backed defaults with JIT
+        - cc: "cc"
+          cxx: "c++"
+          cmake_opts_other: "-DAVM_COMPACT_ATOM_INDICES=ON -DAVM_DEFAULT_ATOMS_IN_RAM=OFF -DAVM_DISABLE_JIT=OFF"
+          jit_target_arch: "x86_64"
+
         # JIT build
         - cc: "cc"
           cxx: "c++"
@@ -718,6 +734,16 @@ jobs:
       with:
         submodules: 'recursive'
 
+    # Follow the avml branch until a supporting upstream release is available.
+    - name: "Checkout avmL-capable PackBEAM"
+      if: contains(matrix.cmake_opts_other, '-DAVM_GENERATE_LABEL_TABLES=ON')
+      uses: actions/checkout@v4
+      with:
+        repository: petermm/atomvm_packbeam
+        ref: avml
+        path: packbeam
+        persist-credentials: false
+
     # There is no working arm64 binary for gleam
     # https://github.com/erlef/setup-beam/issues/398
     - uses: erlef/setup-beam@v1
@@ -792,6 +818,17 @@ jobs:
     - name: "Build: run make"
       working-directory: build
       run: make -j3
+
+    - name: "Test: generated archive contains avmL"
+      if: contains(matrix.cmake_opts_other, '-DAVM_GENERATE_LABEL_TABLES=ON')
+      working-directory: build
+      run: |
+        mkdir label-check
+        ./tools/packbeam/packbeam extract -o label-check ./tests/libs/etest/test_etest.avm test_eunit.beam
+        erl -noshell -eval '
+          {ok, _, Chunks} = beam_lib:all_chunks("label-check/test_eunit.beam"),
+          true = lists:keymember("avmL", 1, Chunks),
+          halt().'
 
     - name: "Build: run dialyzer"
       working-directory: build

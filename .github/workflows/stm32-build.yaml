@@ -55,7 +55,15 @@ jobs:
           - stm32f207zgt6
           - stm32u375rgt6
           - stm32g0b1ret6
+        compact-atoms: [false]
         include:
+          # Also run the F407 Renode suite with compact/flash atom storage.
+          - device: stm32f407vgt6
+            compact-atoms: true
+            max_size: 524288
+            renode_platform: stm32f4.repl
+            avm_address: "0x08080000"
+            tests: "boot gpio spi crypto uart"
           - device: stm32f407vgt6
             max_size: 524288
             renode_platform: stm32f4.repl
@@ -151,6 +159,15 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
 
+    - name: Checkout avmL-capable PackBEAM
+      if: matrix.compact-atoms
+      uses: actions/checkout@v4
+      with:
+        repository: petermm/atomvm_packbeam
+        ref: avml
+        path: packbeam
+        persist-credentials: false
+
     - name: "Git config safe.directory for codeql"
       run: git config --global --add safe.directory /__w/AtomVM/AtomVM
 
@@ -169,7 +186,7 @@ jobs:
         set -euo pipefail
         mkdir build
         cd build
-        cmake .. -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/arm-toolchain.cmake -DDEVICE=${{ matrix.device }} ${{ matrix.usb-cdc == 'ON' && '-DAVM_USB_CDC_PORT_DRIVER_ENABLED=ON' || '' }} ${{ matrix.disable-crypto == 'ON' && '-DAVM_DISABLE_MBEDTLS=ON' || '' }}
+        cmake .. -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/arm-toolchain.cmake -DDEVICE=${{ matrix.device }} ${{ matrix.usb-cdc == 'ON' && '-DAVM_USB_CDC_PORT_DRIVER_ENABLED=ON' || '' }} ${{ matrix.disable-crypto == 'ON' && '-DAVM_DISABLE_MBEDTLS=ON' || '' }} ${{ matrix.compact-atoms && '-DAVM_COMPACT_ATOM_INDICES=ON -DAVM_DEFAULT_ATOMS_IN_RAM=OFF -DAVM_USE_LABEL_TABLES=ON' || '' }}
         cmake --build .
 
     - name: "Perform CodeQL Analysis"
@@ -201,8 +218,19 @@ jobs:
         set -euo pipefail
         mkdir build-host
         cd build-host
-        cmake .. -G Ninja
+        cmake .. -G Ninja ${{ matrix.compact-atoms && '-DAVM_GENERATE_LABEL_TABLES=ON -DPACKBEAM_PATH=${GITHUB_WORKSPACE}/packbeam' || '' }}
         cmake --build . -t stm32_boot_test stm32_gpio_test stm32_i2c_test stm32_spi_test stm32_crypto_test stm32_uart_test
+
+    - name: Check generated test archive contains avmL
+      if: matrix.compact-atoms
+      working-directory: build-host
+      run: |
+        mkdir label-check
+        ./tools/packbeam/packbeam extract -o label-check ./src/platforms/stm32/tests/test_erl_sources/stm32_boot_test.avm test_boot.beam
+        erl -noshell -eval '
+          {ok, _, Chunks} = beam_lib:all_chunks("label-check/test_boot.beam"),
+          true = lists:keymember("avmL", 1, Chunks),
+          halt().'
 
     - name: Install Renode
       if: matrix.renode_platform
