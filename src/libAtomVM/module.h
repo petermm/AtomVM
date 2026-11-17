@@ -115,7 +115,11 @@ struct Module
     ModuleNativeEntryPoint native_code;
 #endif
 
+#if defined(AVM_NO_JIT) && !defined(AVM_NO_SMP) && defined(HAVE_ATOMIC)
+    const struct ExportedFunction * ATOMIC * imported_funcs;
+#else
     const struct ExportedFunction **imported_funcs;
+#endif
 
     void *labels;
 
@@ -308,6 +312,19 @@ static inline term module_get_name(const Module *mod)
  */
 static inline const struct ExportedFunction *module_resolve_function(Module *mod, int import_table_index, GlobalContext *glb)
 {
+#if defined(AVM_NO_JIT) && (defined(AVM_NO_SMP) || (defined(HAVE_ATOMIC) && !defined(__cplusplus)))
+    // Interpreted code never mutates a resolved entry after publishing it, so
+    // the common path can read it without taking the module lock.
+#ifdef AVM_NO_SMP
+    const struct ExportedFunction *resolved = mod->imported_funcs[import_table_index];
+#else
+    const struct ExportedFunction *resolved
+        = atomic_load_explicit(&mod->imported_funcs[import_table_index], memory_order_acquire);
+#endif
+    if (LIKELY(resolved != NULL)) {
+        return resolved;
+    }
+#endif
     SMP_MODULE_LOCK(mod);
     const struct ExportedFunction *func = mod->imported_funcs[import_table_index];
     if (func == NULL) {

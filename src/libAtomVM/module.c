@@ -1220,7 +1220,7 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     mod->local_atoms_to_global_table = (atom_index_t *) extra;
     extra += atoms_table_size;
     if (functions_count > 0) {
-        mod->imported_funcs = (const struct ExportedFunction **) extra;
+        mod->imported_funcs = (void *) extra;
     }
 
     mod->module_index = -1;
@@ -1810,7 +1810,11 @@ const struct ExportedFunction *module_resolve_function0(Module *mod, int import_
         if (IS_NULL_PTR(exported_function)) {
             return NULL;
         }
+#if defined(AVM_NO_JIT) && !defined(AVM_NO_SMP) && defined(HAVE_ATOMIC)
+        atomic_store_explicit(&mod->imported_funcs[import_table_index], exported_function, memory_order_release);
+#else
         mod->imported_funcs[import_table_index] = exported_function;
+#endif
         return exported_function;
     } else {
         size_t atom_string_len;
