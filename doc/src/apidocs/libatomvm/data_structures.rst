@@ -138,8 +138,6 @@ Data Structures
    :allow-dot-graphs:
 .. doxygenstruct:: TimerListItem
    :allow-dot-graphs:
-.. doxygenstruct:: UnresolvedFunctionCall
-   :allow-dot-graphs:
 .. doxygenstruct:: ValuesHashTable
    :allow-dot-graphs:
 

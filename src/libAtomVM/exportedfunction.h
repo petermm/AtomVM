@@ -62,7 +62,6 @@ enum FunctionType
 {
     InvalidFunctionType = 0,
     NIFFunctionType = 2,
-    UnresolvedFunctionCall = 3,
     ModuleFunction = 4,
     BIFFunctionType = 5,
     GCBIFFunctionType = 6,
@@ -105,14 +104,6 @@ struct Nif
     NifImpl nif_ptr;
 };
 
-struct UnresolvedFunctionCall
-{
-    struct ExportedFunction base;
-    atom_index_t module_atom_index;
-    atom_index_t function_atom_index;
-    int arity;
-};
-
 struct ModuleFunction
 {
     struct ExportedFunction base;
@@ -132,9 +123,6 @@ struct ModuleFunction
 
 #define EXPORTED_FUNCTION_TO_NIF(func) \
     ((const struct Nif *) (((char *) (func)) - ((unsigned long) &((const struct Nif *) 0)->base)))
-
-#define EXPORTED_FUNCTION_TO_UNRESOLVED_FUNCTION_CALL(func) \
-    ((struct UnresolvedFunctionCall *) (((char *) (func)) - ((unsigned long) &((struct UnresolvedFunctionCall *) 0)->base)))
 
 #define EXPORTED_FUNCTION_TO_MODULE_FUNCTION(func) \
     ((const struct ModuleFunction *) (((char *) (func)) - ((unsigned long) &((const struct ModuleFunction *) 0)->base)))

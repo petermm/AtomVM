@@ -279,7 +279,7 @@ static inline term module_get_atom_term_by_id(const Module *mod, int local_atom_
     return term_from_atom_index(global_id);
 }
 
-const struct ExportedFunction *module_resolve_function0(Module *mod, int import_table_index, struct UnresolvedFunctionCall *unresolved, GlobalContext *glb);
+const struct ExportedFunction *module_resolve_function0(Module *mod, int import_table_index, GlobalContext *glb);
 
 /**
  * @brief Get the module name, as an atom term.
@@ -297,8 +297,11 @@ static inline term module_get_name(const Module *mod)
 /**
  * @brief Resolves an unresolved function reference
  *
- * @details Resolves an unresolved function reference and it replaces the unresolved reference with a ModuleFunction struct,
- * also it loads the referenced module if it hasn't been loaded yet.
+ * @details Resolves an unresolved function reference and replaces it with a
+ * ModuleFunction struct, also loading the referenced module if it hasn't been
+ * loaded yet. A NULL imported_funcs slot means unresolved; it is retried on
+ * the next call, so modules loaded later (for example with code:load_binary/3)
+ * can still be resolved.
  * @param mod the module containing the function to resolve.
  * @param import_table_index the unresolved function index.
  * @param glb the global context
@@ -306,18 +309,12 @@ static inline term module_get_name(const Module *mod)
 static inline const struct ExportedFunction *module_resolve_function(Module *mod, int import_table_index, GlobalContext *glb)
 {
     SMP_MODULE_LOCK(mod);
-    // We cannot optimistically read the unresolved function call.
-    // While reads of imported_funcs can happen outside the lock, read of the func
-    // pointer itself cannot, as UnresolvedFunctionCall pointers are freed.
     const struct ExportedFunction *func = mod->imported_funcs[import_table_index];
-    if (func->type != UnresolvedFunctionCall) {
-        SMP_MODULE_UNLOCK(mod);
-        return func;
+    if (func == NULL) {
+        func = module_resolve_function0(mod, import_table_index, glb);
     }
-    struct UnresolvedFunctionCall *unresolved = EXPORTED_FUNCTION_TO_UNRESOLVED_FUNCTION_CALL(func);
-    const struct ExportedFunction *result = module_resolve_function0(mod, import_table_index, unresolved, glb);
     SMP_MODULE_UNLOCK(mod);
-    return result;
+    return func;
 }
 
 /*
