@@ -135,8 +135,15 @@ if (NOT ("${BOOT_LIBS}" STREQUAL "NONE"))
         message(WARNING "A generic_unix build must be done first in the top level AtomVM/build directory! \n\
         Consult https://doc.atomvm.org/main/build-instructions.html for build instructions.")
     else()
-        partition_table_get_partition_info(lib_offset "--partition-name boot.avm" "offset")
-        esptool_py_flash_target_image(flash boot.avm "${lib_offset}" "${BOOT_LIB_PATH}")
+        add_custom_target(check_boot_avm_size
+            COMMAND "${CMAKE_COMMAND}" "-DBOOT_LIB_PATH=${BOOT_LIB_PATH}" "-DAVM_LIB_SIZE=${AVM_LIB_SIZE}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/CheckBootAVMSize.cmake"
+            VERBATIM)
+        add_dependencies(flash check_boot_avm_size)
+        if(CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT)
+            add_dependencies(encrypted-flash check_boot_avm_size)
+        endif()
+        esptool_py_flash_target_image(flash boot.avm "${AVM_LIB_OFFSET}" "${BOOT_LIB_PATH}")
     endif()
 endif()
 
