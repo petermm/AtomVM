@@ -330,18 +330,21 @@ macro(pack_runnable avm_name main)
     set(multiValueArgs DIALYZE_AGAINST TARGETS JIT_ARCHIVES)
     cmake_parse_arguments(PACK_RUNNABLE "" "" "${multiValueArgs}" ${ARGN})
 
-    add_custom_command(
-        OUTPUT ${main}.beam
-        COMMAND erlc +debug_info -I ${CMAKE_SOURCE_DIR}/libs/include ${CMAKE_CURRENT_SOURCE_DIR}/${main}.erl
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${main}.erl
-        COMMENT "Compiling ${main}.erl"
-        VERBATIM
-    )
-
-    add_custom_target(
-        ${avm_name}_main
-        DEPENDS ${main}.beam
-    )
+    # Runnables in this directory may share a main module. Give the BEAM file
+    # one target so parallel Make builds do not run competing recipes for it.
+    get_property(_main_target DIRECTORY PROPERTY "PACK_RUNNABLE_MAIN_${main}")
+    if(NOT _main_target)
+        set(_main_target ${avm_name}_main)
+        set_property(DIRECTORY PROPERTY "PACK_RUNNABLE_MAIN_${main}" ${_main_target})
+        add_custom_command(
+            OUTPUT ${main}.beam
+            COMMAND erlc +debug_info -I ${CMAKE_SOURCE_DIR}/libs/include ${CMAKE_CURRENT_SOURCE_DIR}/${main}.erl
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${main}.erl
+            COMMENT "Compiling ${main}.erl"
+            VERBATIM
+        )
+        add_custom_target(${_main_target} DEPENDS ${main}.beam)
+    endif()
 
     # Select the right PLT based on platform-specific dependencies
     set(pack_runnable_${avm_name}_plt_name "atomvmlib")
@@ -390,7 +393,7 @@ macro(pack_runnable avm_name main)
         foreach(plt_name IN LISTS pack_runnable_${avm_name}_plt_names)
             add_custom_target(
                 ${avm_name}_${plt_name}_dialyzer
-                DEPENDS ${avm_name}_main
+                DEPENDS ${_main_target}
                 COMMAND dialyzer --plt ${CMAKE_BINARY_DIR}/libs/${plt_name}.plt -c ${main}.beam ${${avm_name}_dialyzer_beams_opt}
             )
             add_dependencies(${avm_name}_${plt_name}_dialyzer ${plt_name}_plt ${pack_runnable_${avm_name}_archive_targets})
@@ -410,7 +413,7 @@ macro(pack_runnable avm_name main)
 
     add_custom_command(
         OUTPUT ${avm_name}.avm
-        DEPENDS ${avm_name}_main ${main}.beam ${pack_runnable_${avm_name}_archives} ${pack_runnable_${avm_name}_archive_targets} PackBEAM
+        DEPENDS ${_main_target} ${main}.beam ${pack_runnable_${avm_name}_archives} ${pack_runnable_${avm_name}_archive_targets} PackBEAM
         COMMAND ${CMAKE_BINARY_DIR}/tools/packbeam/packbeam create ${PACKBEAM_PRUNE_ARGS} -s ${main} ${INCLUDE_LINES} ${avm_name}.avm ${main}.beam ${pack_runnable_${avm_name}_archives}
         COMMENT "Packing runnable ${avm_name}.avm"
         VERBATIM
@@ -447,16 +450,21 @@ macro(pack_runnable avm_name main)
                 )
             endif()
 
-            add_custom_command(
-                OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${jit_target_arch_variant}/${main}.beam
-                COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/${jit_target_arch_variant}/
-                    && erl -pa ${CMAKE_BINARY_DIR}/libs/jit/src/beams/ -noshell -s jit_precompile -s init stop
-                        -- ${jit_target_arch_variant} ${CMAKE_CURRENT_BINARY_DIR}/${jit_target_arch_variant}/ ${jit_precompile_dwarf_flag}
-                        ${CMAKE_CURRENT_BINARY_DIR}/${main}.beam
-                DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${main}.beam ${jit_compiler_modules} jit
-                COMMENT "Compiling ${main}.beam to ${jit_target_arch_variant}"
-                VERBATIM
-            )
+            set(_jit_main_target ${_main_target}_${jit_target_arch_variant})
+            set(_jit_main_beam ${CMAKE_CURRENT_BINARY_DIR}/${jit_target_arch_variant}/${main}.beam)
+            if(NOT TARGET ${_jit_main_target})
+                add_custom_command(
+                    OUTPUT ${_jit_main_beam}
+                    COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/${jit_target_arch_variant}/
+                        && erl -pa ${CMAKE_BINARY_DIR}/libs/jit/src/beams/ -noshell -s jit_precompile -s init stop
+                            -- ${jit_target_arch_variant} ${CMAKE_CURRENT_BINARY_DIR}/${jit_target_arch_variant}/ ${jit_precompile_dwarf_flag}
+                            ${CMAKE_CURRENT_BINARY_DIR}/${main}.beam
+                    DEPENDS ${_main_target} ${CMAKE_CURRENT_BINARY_DIR}/${main}.beam ${jit_compiler_modules} jit
+                    COMMENT "Compiling ${main}.beam to ${jit_target_arch_variant}"
+                    VERBATIM
+                )
+                add_custom_target(${_jit_main_target} DEPENDS ${_jit_main_beam})
+            endif()
 
             # Build esp32boot with fully AOT archives (native code, no bytecode, no JIT compiler).
             # JIT_ARCHIVES limits which libraries are included in the JIT boot AVM;
@@ -482,13 +490,13 @@ macro(pack_runnable avm_name main)
             add_custom_command(
                 OUTPUT ${avm_name}-${jit_target_arch_variant}.avm
                 DEPENDS
-                    ${CMAKE_CURRENT_BINARY_DIR}/${jit_target_arch_variant}/${main}.beam
+                    ${_jit_main_target} ${_jit_main_beam}
                     ${pack_runnable_${avm_name}_jit_archives_${jit_target_arch_variant}}
                     ${pack_runnable_${avm_name}_jit_archive_targets_${jit_target_arch_variant}}
                     PackBEAM
                 COMMAND ${CMAKE_BINARY_DIR}/tools/packbeam/packbeam create ${PACKBEAM_PRUNE_ARGS} -s ${main} ${INCLUDE_LINES}
                     ${avm_name}-${jit_target_arch_variant}.avm
-                    ${CMAKE_CURRENT_BINARY_DIR}/${jit_target_arch_variant}/${main}.beam
+                    ${_jit_main_beam}
                     ${pack_runnable_${avm_name}_jit_archives_${jit_target_arch_variant}}
                 COMMENT "Packing JIT runnable ${avm_name}-${jit_target_arch_variant}.avm"
                 VERBATIM
