@@ -59,8 +59,8 @@ set(AVM_SELECT_IN_TASK ON)
 ## Configure partition table based on boot flavor and JIT
 # Detect JIT from existing sdkconfig before project() where CONFIG_* is not yet available.
 set(_jit_partition NO)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig")
-    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig" _sdkconfig_lines)
+if(EXISTS "${sdkconfig}")
+    file(STRINGS "${sdkconfig}" _sdkconfig_lines)
     if("CONFIG_JIT_ENABLED=y" IN_LIST _sdkconfig_lines)
         set(_jit_partition YES)
     endif()
@@ -75,13 +75,14 @@ else()
     set(AVM_PARTITION_TABLE_FILENAME "partitions.csv")
 endif()
 
-# Sync partition table in sdkconfig so that IDF uses the correct partition layout.
+# Sync AtomVM's built-in partition tables in sdkconfig, leaving custom tables alone.
 # sdkconfig treats its settings as user values that override defaults, so writing
 # sdkconfig.defaults alone is not enough, we must patch sdkconfig directly.
 # Only write when the value actually differs to avoid spurious timestamp changes.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig")
-    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig" _sdkconfig_content)
-    if(NOT _sdkconfig_content MATCHES "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"${AVM_PARTITION_TABLE_FILENAME}\"")
+if(EXISTS "${sdkconfig}")
+    file(READ "${sdkconfig}" _sdkconfig_content)
+    if(_sdkconfig_content MATCHES "(^|\n)CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"(partitions(-elixir|-jit)?\\.csv)\""
+            AND NOT CMAKE_MATCH_2 STREQUAL AVM_PARTITION_TABLE_FILENAME)
         string(REGEX REPLACE
             "(CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=)[^\n]*"
             "\\1\"${AVM_PARTITION_TABLE_FILENAME}\""
@@ -90,7 +91,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig")
             "(CONFIG_PARTITION_TABLE_FILENAME=)[^\n]*"
             "\\1\"${AVM_PARTITION_TABLE_FILENAME}\""
             _sdkconfig_content "${_sdkconfig_content}")
-        file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig" "${_sdkconfig_content}")
+        file(WRITE "${sdkconfig}" "${_sdkconfig_content}")
         message(STATUS "Updated sdkconfig partition table to ${AVM_PARTITION_TABLE_FILENAME}")
     endif()
 endif()
