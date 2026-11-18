@@ -116,6 +116,12 @@ mkimage(OutputFile, Segments) ->
 
     case file:open(OutputFile, [write, binary]) of
         {ok, Fout} ->
+            OrderedSegments = lists:sort(
+                fun(A, B) ->
+                    from_hex(maps:get(offset, A)) =< from_hex(maps:get(offset, B))
+                end,
+                Segments
+            ),
             lists:foldl(
                 fun(Segment, PrevOffset) ->
                     SegmentOffset = from_hex(maps:get(offset, Segment)),
@@ -123,7 +129,7 @@ mkimage(OutputFile, Segments) ->
                         undefined ->
                             no_padding;
                         _ ->
-                            case SegmentOffset > PrevOffset of
+                            case SegmentOffset >= PrevOffset of
                                 true ->
                                     Padding = [
                                         16#FF
@@ -161,7 +167,7 @@ mkimage(OutputFile, Segments) ->
                     end
                 end,
                 undefined,
-                Segments
+                OrderedSegments
             );
         {error, Reason} ->
             throw(io_lib:format("Failed to open ~s for writing.  Reason: ~p", [OutputFile, Reason]))

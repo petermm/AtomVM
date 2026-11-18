@@ -23,6 +23,8 @@ project (ReleaseEsp32)
 include(../../../../version.cmake)
 include(../../../../CMakeModules/GetVersion.cmake)
 include(../GetBootAVM.cmake)
+# Use the same firmware partition as ESP-IDF's app-flash target.
+partition_table_get_partition_info(FIRMWARE_OFFSET "--partition-boot-default" "offset")
 
 ## Build image tools for target chip
 
@@ -62,6 +64,7 @@ endif()
 set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
 
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../nvs_partition.csv")
+    partition_table_get_partition_info(NVS_OFFSET "--partition-name nvs" "offset")
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/mkimage_nvs.config.in ${CMAKE_BINARY_DIR}/mkimage.config)
 else()
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/mkimage.config.in ${CMAKE_BINARY_DIR}/mkimage.config)
