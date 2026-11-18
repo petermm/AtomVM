@@ -202,6 +202,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Elixir settings rather than the offset of `main.avm`
 - Fixed parallel ESP32 builds compiling the shared `esp32init` module twice when building the
   Erlang and Elixir boot archives
+- Fixed ESP32 `mkimage` using hard-coded offsets for the firmware, NVS and partition table. It
+  now uses ESP-IDF's offsets and accepts adjacent segments without padding
 
 ## [0.7.0-beta.0] - 2026-09-28
 

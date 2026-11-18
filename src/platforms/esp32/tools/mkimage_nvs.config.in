@@ -28,17 +28,17 @@
         },
         #{
             name => "partition-table",
-            offset => "0x8000",
+            offset => "@CONFIG_PARTITION_TABLE_OFFSET@",
             path => ["@CMAKE_BINARY_DIR@/partition_table/partition-table.bin"]
         },
         #{
             name => "nvs",
-            offset => "0x9000",
+            offset => "@NVS_OFFSET@",
             path => ["@CMAKE_BINARY_DIR@/nvs.bin"]
         },
         #{
             name => "AtomVM Virtual Machine",
-            offset => "0x10000",
+            offset => "@FIRMWARE_OFFSET@",
             path => ["@CMAKE_BINARY_DIR@/atomvm-esp32.bin"]
         },
         #{

@@ -123,7 +123,7 @@ mkimage(OutputFile, Segments) ->
                         undefined ->
                             no_padding;
                         _ ->
-                            case SegmentOffset > PrevOffset of
+                            case SegmentOffset >= PrevOffset of
                                 true ->
                                     Padding = [
                                         16#FF
