@@ -213,6 +213,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Erlang and Elixir boot archives
 - Fixed ESP32 `mkimage` using hard-coded offsets for the firmware, NVS and partition table. It
   now uses ESP-IDF's offsets and accepts adjacent segments without padding
+- Fixed ESP32 builds replacing custom partition tables. JIT and stock layout selection now
+  honor the sdkconfig path set with `-DSDKCONFIG`
 
 ## [0.7.0-beta.0] - 2026-09-28
 
