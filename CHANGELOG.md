@@ -200,6 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with MbedTLS 3.6.1 or later and TLS 1.3 support enabled
 - Fixed ESP32 boot library selection for custom partition layouts: the build uses its JIT and
   Elixir settings rather than the offset of `main.avm`
+- Fixed parallel ESP32 builds compiling the shared `esp32init` module twice when building the
+  Erlang and Elixir boot archives
 
 ## [0.7.0-beta.0] - 2026-09-28
 
