@@ -206,6 +206,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now uses ESP-IDF's offsets and accepts adjacent segments without padding
 - Fixed ESP32 builds replacing custom partition tables. JIT and stock layout selection now
   honor the sdkconfig path set with `-DSDKCONFIG`
+- Fixed ESP32 `mkimage` and `idf.py flash` accepting boot archives that exceed the active
+  `boot.avm` partition. Stock partition sizes are unchanged; use a larger custom partition
+  if the archive does not fit
 
 ## [0.7.0-beta.0] - 2026-09-28
 

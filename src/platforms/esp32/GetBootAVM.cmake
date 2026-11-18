@@ -22,6 +22,7 @@ partition_table_get_partition_info(app_offset "--partition-name main.avm" "offse
 set(AVM_APP_OFFSET "${app_offset}")
 partition_table_get_partition_info(lib_offset "--partition-name boot.avm" "offset")
 set(AVM_LIB_OFFSET "${lib_offset}")
+partition_table_get_partition_info(AVM_LIB_SIZE "--partition-name boot.avm" "size")
 # The boot library flavor comes from the build, not from partition offsets.
 # A custom table may place main.avm anywhere, but both named partitions are
 # required to create a bootable image.

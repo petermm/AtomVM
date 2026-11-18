@@ -103,7 +103,8 @@ load_config(ConfigFile) ->
 %% @private
 mkimage(OutputFile, Segments) ->
     io:format("Writing output to ~s~n", [OutputFile]),
-    [BootLib] = maps:get(path, lists:last(Segments)),
+    BootSegment = lists:last(Segments),
+    [BootLib] = maps:get(path, BootSegment),
     io:format("boot file is ~s~n", [BootLib]),
     io:format("=============================================~n"),
     case filename:basename(filename:absname(BootLib)) of
@@ -111,6 +112,24 @@ mkimage(OutputFile, Segments) ->
             print_help("No esp32boot library configured, an image cannot be created."),
             exit(254);
         _ ->
+            ok
+    end,
+    case maps:find(max_size, BootSegment) of
+        {ok, MaxSizeHex} ->
+            MaxSize = from_hex(MaxSizeHex),
+            Size = filelib:file_size(BootLib),
+            if
+                Size > MaxSize ->
+                    throw(
+                        io_lib:format(
+                            "Boot library ~s is ~p bytes but boot.avm holds only ~p bytes.",
+                            [BootLib, Size, MaxSize]
+                        )
+                    );
+                true ->
+                    ok
+            end;
+        error ->
             ok
     end,
 
