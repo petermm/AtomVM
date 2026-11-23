@@ -53,6 +53,9 @@ option(AVM_GENERATE_LABEL_TABLES "Generate avmL chunks when packing archives" OF
 set(AVM_PACKBEAM_LABEL_ARGS "")
 if(AVM_GENERATE_LABEL_TABLES)
     set(AVM_PACKBEAM_LABEL_ARGS --avm-labels)
+    if(AVM_COMPACT_LABELS)
+        list(APPEND AVM_PACKBEAM_LABEL_ARGS --avm-label-width auto)
+    endif()
 endif()
 
 # JIT & execution of precompiled code
