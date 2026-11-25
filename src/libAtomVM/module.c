@@ -97,7 +97,8 @@ static bool module_are_literals_compressed(const uint8_t *litT);
 #ifdef WITH_ZLIB
 static void *module_uncompress_literals(const uint8_t *litT, int size);
 #endif
-static void *module_build_literals_table(const void *literalsBuf, bool *is_u16);
+static bool module_literals_fit_u16(const uint8_t *data, uint32_t count);
+static void module_fill_literals_table(Module *mod, uint32_t count);
 #ifndef AVM_NO_EMU
 static void module_add_label(Module *mod, int index, const uint8_t *ptr);
 #endif
@@ -1209,9 +1210,39 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     size_t imported_funcs_size = (size_t) functions_count * sizeof(struct ExportedFunction *);
     size_t total_size = sizeof(Module) + atoms_table_size + imported_funcs_size;
 
-    Module *mod = malloc(total_size);
+    void *literals_data = NULL;
+    void *uncompressed_literals = NULL;
+    if (offsets[LITT]) {
+        if (!module_are_literals_compressed(beam_file + offsets[LITT])) {
+            literals_data = beam_file + offsets[LITT] + LITT_HEADER_SIZE;
+        } else {
+#ifdef WITH_ZLIB
+            uncompressed_literals = module_uncompress_literals(beam_file + offsets[LITT], sizes[LITT]);
+            if (IS_NULL_PTR(uncompressed_literals)) {
+                return NULL;
+            }
+            literals_data = uncompressed_literals;
+#else
+            fprintf(stderr, "Error: zlib required to uncompress literals.\n");
+            return NULL;
+#endif
+        }
+    } else if (offsets[LITU]) {
+        literals_data = beam_file + offsets[LITU] + IFF_SECTION_HEADER_SIZE;
+    }
+
+    uint32_t literals_count = literals_data ? READ_32_UNALIGNED(literals_data) : 0;
+    bool literals_is_u16 = literals_count > 0 && module_literals_fit_u16(literals_data, literals_count);
+    size_t literal_offset_size = literals_is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
+    if (literals_count > (SIZE_MAX - total_size) / literal_offset_size) {
+        free(uncompressed_literals);
+        return NULL;
+    }
+
+    Module *mod = malloc(total_size + literals_count * literal_offset_size);
     if (IS_NULL_PTR(mod)) {
         fprintf(stderr, "Error: Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
+        free(uncompressed_literals);
         return NULL;
     }
     memset(mod, 0, total_size);
@@ -1221,6 +1252,14 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
     extra += atoms_table_size;
     if (functions_count > 0) {
         mod->imported_funcs = (void *) extra;
+    }
+    mod->literals_data = literals_data;
+    mod->free_literals_data = uncompressed_literals != NULL;
+    if (literals_count > 0) {
+        // The pointer array leaves its end aligned for either offset width.
+        mod->literals_table = extra + imported_funcs_size;
+        mod->literals_is_u16 = literals_is_u16;
+        module_fill_literals_table(mod, literals_count);
     }
 
     mod->module_index = -1;
@@ -1339,48 +1378,6 @@ Module *module_new_from_iff_binary(GlobalContext *global, const void *iff_binary
 
     module_parse_line_table(mod, beam_file + offsets[LINT] + 8, sizes[LINT]);
 
-    if (offsets[LITT]) {
-        if (!module_are_literals_compressed(beam_file + offsets[LITT])) {
-            mod->literals_data = beam_file + offsets[LITT] + LITT_HEADER_SIZE;
-            mod->free_literals_data = 0;
-
-        } else {
-#ifdef WITH_ZLIB
-            mod->literals_data = module_uncompress_literals(beam_file + offsets[LITT], sizes[LITT]);
-            if (IS_NULL_PTR(mod->literals_data)) {
-                module_destroy(mod);
-                return NULL;
-            }
-            mod->free_literals_data = 1;
-#else
-            fprintf(stderr, "Error: zlib required to uncompress literals.\n");
-            module_destroy(mod);
-            return NULL;
-#endif
-        }
-
-        bool is_u16;
-        mod->literals_table = module_build_literals_table(mod->literals_data, &is_u16);
-        mod->literals_is_u16 = is_u16;
-
-    } else if (offsets[LITU]) {
-        mod->literals_data = beam_file + offsets[LITU] + IFF_SECTION_HEADER_SIZE;
-        bool is_u16;
-        mod->literals_table = module_build_literals_table(mod->literals_data, &is_u16);
-        mod->literals_is_u16 = is_u16;
-        mod->free_literals_data = 0;
-
-    } else {
-        mod->literals_data = NULL;
-        mod->literals_table = NULL;
-        mod->free_literals_data = 0;
-    }
-
-    if (mod->literals_data && READ_32_UNALIGNED(mod->literals_data) != 0 && !mod->literals_table) {
-        module_destroy(mod);
-        return NULL;
-    }
-
     if (offsets[TYPE]) {
         mod->types_data = beam_file + offsets[TYPE] + IFF_SECTION_HEADER_SIZE;
     } else {
@@ -1412,7 +1409,6 @@ COLD_FUNC void module_destroy(Module *module)
     if (!module->labels_in_binary) {
         free(module->labels);
     }
-    free(module->literals_table);
     if (module->free_literals_data) {
         free(module->literals_data);
     }
@@ -1469,42 +1465,30 @@ static void *module_uncompress_literals(const uint8_t *litT, int size)
 }
 #endif
 
-static void *module_build_literals_table(const void *literalsBuf, bool *is_u16)
+static bool module_literals_fit_u16(const uint8_t *data, uint32_t count)
 {
-    uint32_t terms_count = READ_32_UNALIGNED(literalsBuf);
-    *is_u16 = true;
-    if (terms_count == 0) {
-        return NULL;
-    }
-
-    const uint8_t *base = literalsBuf;
-    const uint8_t *pos = base + sizeof(uint32_t);
-    for (uint32_t i = 0; i < terms_count; i++) {
+    const uint8_t *pos = data + sizeof(uint32_t);
+    for (uint32_t i = 0; i < count; i++) {
         uint32_t term_size = READ_32_UNALIGNED(pos);
         pos += (size_t) term_size + sizeof(uint32_t);
     }
-    *is_u16 = (size_t) (pos - base) <= UINT16_MAX;
+    return (size_t) (pos - data) <= UINT16_MAX;
+}
 
-    size_t entry_size = *is_u16 ? sizeof(uint16_t) : sizeof(uint32_t);
-    void *literals_table = malloc((size_t) terms_count * entry_size);
-    if (IS_NULL_PTR(literals_table)) {
-        fprintf(stderr, "Failed to allocate memory: %s:%i.\n", __FILE__, __LINE__);
-        return NULL;
-    }
-
-    pos = base + sizeof(uint32_t);
-    for (uint32_t i = 0; i < terms_count; i++) {
+static void module_fill_literals_table(Module *mod, uint32_t count)
+{
+    const uint8_t *base = mod->literals_data;
+    const uint8_t *pos = base + sizeof(uint32_t);
+    for (uint32_t i = 0; i < count; i++) {
         size_t offset = pos - base;
-        if (*is_u16) {
-            ((uint16_t *) literals_table)[i] = (uint16_t) offset;
+        if (mod->literals_is_u16) {
+            ((uint16_t *) mod->literals_table)[i] = (uint16_t) offset;
         } else {
-            ((uint32_t *) literals_table)[i] = (uint32_t) offset;
+            ((uint32_t *) mod->literals_table)[i] = (uint32_t) offset;
         }
         uint32_t term_size = READ_32_UNALIGNED(pos);
         pos += (size_t) term_size + sizeof(uint32_t);
     }
-
-    return literals_table;
 }
 
 term module_load_literal(Module *mod, int index, Context *ctx)
